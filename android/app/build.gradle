@@ -72,6 +72,9 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def localProps = new Properties()
+file("../local.properties").with { f -> if (f.exists()) localProps.load(f.newInputStream()) }
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -84,6 +87,10 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [
+            googleMapsApiKey: localProps.getProperty("GOOGLE_MAPS_API_KEY", ""),
+            usesCleartextTraffic: "true"
+        ]
     }
     signingConfigs {
         debug {
