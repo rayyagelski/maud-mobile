@@ -4,8 +4,9 @@ import {
   TextInput, Dimensions,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import type { MainStackNavigationProp } from '../../types/navigation.types';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   ArrowUpIcon, MicIcon, MountainIcon, HourglassIcon,
@@ -14,6 +15,7 @@ import {
 
 const TEAL = '#3ABFBF';
 const NAV_BG = '#1C3829';
+const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAP_HEIGHT = SCREEN_HEIGHT * 0.52;
 
@@ -84,9 +86,10 @@ function StatCard({ icon, label, value, half }: {
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function RoutePlannerScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<MainStackNavigationProp>();
   const insets = useSafeAreaInsets();
   const [showAiPopup, setShowAiPopup] = useState(false);
+  const [tripStarted, setTripStarted] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setShowAiPopup(true), 3000);
@@ -94,7 +97,7 @@ export default function RoutePlannerScreen() {
   }, []);
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView edges={['bottom']} style={styles.root}>
       {/* ── Map section ── */}
       <View style={[styles.mapContainer, { height: MAP_HEIGHT }]}>
         <MapView
@@ -126,6 +129,13 @@ export default function RoutePlannerScreen() {
             </View>
           </Marker>
         </MapView>
+
+        {/* Floating back button */}
+        <SafeAreaView edges={['top']} style={styles.mapBackOverlay} pointerEvents="box-none">
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.mapBackBtn} hitSlop={HIT} activeOpacity={0.8}>
+            <BackArrowIcon size={22} color="#1A1A1A" />
+          </TouchableOpacity>
+        </SafeAreaView>
 
         {/* Navigation header */}
         <View style={[styles.navHeader, { paddingTop: insets.top + 6 }]}>
@@ -281,12 +291,22 @@ export default function RoutePlannerScreen() {
           </View>
         </View>
 
-        {/* Start Trip */}
-        <TouchableOpacity style={styles.startBtn} activeOpacity={0.88}>
-          <Text style={styles.startBtnText}>Start Trip</Text>
+        {/* Start / End Trip */}
+        <TouchableOpacity
+          style={[styles.startBtn, tripStarted && styles.endTripBtn]}
+          activeOpacity={0.88}
+          onPress={() => {
+            if (tripStarted) {
+              navigation.navigate('TripSummary');
+            } else {
+              setTripStarted(true);
+            }
+          }}
+        >
+          <Text style={styles.startBtnText}>{tripStarted ? 'End Trip' : 'Start Trip'}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -297,6 +317,15 @@ const styles = StyleSheet.create({
 
   // Map
   mapContainer: { width: '100%', overflow: 'hidden' },
+  mapBackOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 },
+  mapBackBtn: {
+    marginLeft: 16, marginTop: 8,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15, shadowRadius: 4, elevation: 4,
+  },
 
   destMarker: {
     width: 28, height: 28, borderRadius: 14,
@@ -475,4 +504,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35, shadowRadius: 10, elevation: 6,
   },
   startBtnText: { fontSize: 17, fontWeight: '700', color: 'white' },
+
+  endTripBtn: {
+    backgroundColor: '#E53935',
+    shadowColor: '#E53935',
+  },
 });

@@ -16,20 +16,21 @@ export default function ComplianceScreen() {
   const [alertsEnabled, setAlertsEnabled] = useState(true);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.safe}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.navigate('Home')}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <BackArrowIcon size={22} color="#1A1A1A" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Compliance</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <SafeAreaView edges={['top']} style={styles.safeHeader}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Home')}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <BackArrowIcon size={22} color="#1A1A1A" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Compliance</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </SafeAreaView>
       <View style={styles.headerSeparator} />
 
       <ScrollView
@@ -79,21 +80,20 @@ export default function ComplianceScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F5F5F5' },
+  safeHeader: { backgroundColor: 'white' },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  backBtn: { width: 32 },
   headerTitle: {
     flex: 1,
     textAlign: 'center',

@@ -117,16 +117,16 @@ export default function HomeScreen() {
   const features: FeatureItem[] = [
     { label: 'Rewards', iconBg: '#F5A623', icon: <MedalIcon />, onPress: () => navigation.navigate('Rewards') },
     { label: 'Route Planner', iconBg: TEAL, icon: <PinIcon />, onPress: () => navigation.navigate('RoutePlanner') },
-    { label: 'Driver Score', iconBg: TEAL, icon: <GaugeIcon />, onPress: () => {} },
-    { label: 'Eco Score', iconBg: '#27AE60', icon: <LeafIcon />, onPress: () => {} },
-    { label: 'Trip Details', iconBg: TEAL, icon: <RouteIcon />, onPress: () => {} },
-    { label: 'Expenses', iconBg: '#F57C00', icon: <DollarIcon />, onPress: () => {} },
-    { label: 'Service History', iconBg: '#8B5CF6', icon: <GearIcon />, onPress: () => {} },
+    { label: 'Driver Score', iconBg: TEAL, icon: <GaugeIcon />, onPress: () => navigation.navigate('DriverScore') },
+    { label: 'Eco Score', iconBg: '#27AE60', icon: <LeafIcon />, onPress: () => navigation.navigate('EcoScore') },
+    { label: 'Trip Details', iconBg: TEAL, icon: <RouteIcon />, onPress: () => navigation.navigate('TripHistory') },
+    { label: 'Expenses', iconBg: '#F57C00', icon: <DollarIcon />, onPress: () => navigation.navigate('Expenses') },
+    { label: 'Service History', iconBg: '#8B5CF6', icon: <GearIcon />, onPress: () => navigation.navigate('ServiceHistory') },
     {
       label: 'Odometer',
       iconBg: '#64748B',
       icon: <SpeedometerIcon />,
-      onPress: () => navigation.navigate('VehicleList'),
+      onPress: () => navigation.navigate('Odometer'),
     },
   ];
 

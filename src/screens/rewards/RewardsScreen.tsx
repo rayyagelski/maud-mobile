@@ -203,22 +203,23 @@ export default function RewardsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView edges={['bottom']} style={styles.safe}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <BackArrowIcon size={22} color="#1A1A1A" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Rewards</Text>
-        <TouchableOpacity onPress={handleShare} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <ShareIcon color="#1A1A1A" size={22} />
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView edges={['top']} style={styles.safeHeader}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <BackArrowIcon size={22} color="#1A1A1A" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Rewards</Text>
+          <TouchableOpacity onPress={handleShare} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <ShareIcon color="#1A1A1A" size={22} />
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
       <View style={styles.headerSeparator} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -338,15 +339,14 @@ export default function RewardsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F5F5F5' },
+  safeHeader: { backgroundColor: 'white' },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  backBtn: { width: 32 },
   headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
   headerSeparator: { height: 1, backgroundColor: '#EBEBEB' },
 

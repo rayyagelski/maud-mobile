@@ -31,7 +31,16 @@ export type MainStackParamList = {
   Drivers: undefined;
   AddDriver: undefined;
   Rewards: undefined;
+  Expenses: undefined;
+  ServiceHistory: undefined;
+  Invoice: { serviceId?: string };
+  Odometer: undefined;
   RoutePlanner: undefined;
+  TripSummary: undefined;
+  TripHistory: undefined;
+  MyTrip: { tripId?: string };
+  DriverScore: undefined;
+  EcoScore: undefined;
 };
 
 export type RootStackParamList = {
