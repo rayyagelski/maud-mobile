@@ -27,6 +27,10 @@ end
 target 'MAUDConnect' do
   config = use_native_modules!
 
+  # Explicit Google Maps pod — use_native_modules picks up react-native-maps
+  # (Apple Maps), but the Google Maps variant is a separate podspec
+  pod 'react-native-google-maps', :path => '../node_modules/react-native-maps'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.
