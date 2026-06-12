@@ -18,11 +18,8 @@ setup_permissions([
   'Motion',
 ])
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Static frameworks allow Swift to import React Native modules (React_RCTAppDelegate etc.)
+use_frameworks! :linkage => :static
 
 target 'MAUDConnect' do
   config = use_native_modules!
@@ -42,7 +39,13 @@ target 'MAUDConnect' do
       installer,
       config[:reactNativePath],
       :mac_catalyst_enabled => false,
-      # :ccache_enabled => true
     )
+
+    # Fix for static frameworks: ensure all targets have correct build settings
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.4'
+      end
+    end
   end
 end
