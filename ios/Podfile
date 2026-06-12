@@ -41,10 +41,13 @@ target 'MAUDConnect' do
       :mac_catalyst_enabled => false,
     )
 
-    # Fix for static frameworks: ensure all targets have correct build settings
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
+        # Static frameworks require a consistent deployment target across all pods
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.4'
+        # Xcode 16+ sandboxes user script phases by default, which breaks
+        # CocoaPods embed/copy scripts that use rsync across framework boundaries.
+        config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
       end
     end
   end
