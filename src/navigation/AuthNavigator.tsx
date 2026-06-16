@@ -1,6 +1,8 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import WelcomeScreen from '../screens/auth/WelcomeScreen';
+import RegistrationScreen from '../screens/auth/RegistrationScreen';
+import WebViewScreen from '../screens/auth/WebViewScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
@@ -15,6 +17,8 @@ export default function AuthNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
+      <Stack.Screen name="Registration" component={RegistrationScreen} />
+      <Stack.Screen name="WebView" component={WebViewScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />

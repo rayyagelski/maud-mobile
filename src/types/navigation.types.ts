@@ -4,6 +4,8 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 
 export type AuthStackParamList = {
   Welcome: undefined;
+  Registration: undefined;
+  WebView: { url: string; title?: string };
   Login: undefined;
   Signup: undefined;
   ForgotPassword: undefined;
