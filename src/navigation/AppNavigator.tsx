@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { NavigationContainer, type NavigationContainerRef } from '@react-navigation/native';
+import React, { useEffect } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { check, PERMISSIONS, RESULTS, type PermissionStatus } from 'react-native-permissions';
 import { Platform } from 'react-native';
@@ -7,17 +7,25 @@ import AuthNavigator from './AuthNavigator';
 import MainStackNavigator from './MainStackNavigator';
 import { useAppSelector } from '../hooks/useAppSelector';
 import { useAppDispatch } from '../hooks/useAppDispatch';
+import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
 import { configureClient } from '../api/client';
 import { refreshToken } from '../store/slices/authSlice';
+import { navigationRef } from './navigationRef';
 import type { RootStackParamList } from '../types/navigation.types';
 
 const Root = createStackNavigator<RootStackParamList>();
 
+// Null-render component so the hook can call useAppSelector / useAppDispatch
+// while living inside the Redux Provider and NavigationContainer.
+function TripDetectionRunner() {
+  useTripAutoDetection();
+  return null;
+}
+
 export default function AppNavigator() {
   const dispatch = useAppDispatch();
   const { isAuthenticated, token } = useAppSelector(s => s.auth);
-  const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
-  const prevAuth = useRef(false);
+  const prevAuth = React.useRef(false);
 
   useEffect(() => {
     configureClient(
@@ -43,7 +51,7 @@ export default function AppNavigator() {
       check(permission).then((status: PermissionStatus) => {
         if (status === RESULTS.GRANTED) {
           // Permission already granted — skip the permission screen
-          navRef.current?.navigate('Main' as never);
+          if (navigationRef.isReady()) navigationRef.navigate('Main' as never);
         }
       });
     }
@@ -51,7 +59,8 @@ export default function AppNavigator() {
   }, [isAuthenticated]);
 
   return (
-    <NavigationContainer ref={navRef}>
+    <NavigationContainer ref={navigationRef}>
+      <TripDetectionRunner />
       <Root.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <Root.Screen name="Main" component={MainStackNavigator} />

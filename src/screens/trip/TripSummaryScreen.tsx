@@ -109,7 +109,7 @@ export default function TripSummaryScreen() {
             <View style={styles.savingsCol}>
               <Text style={styles.savingsLabel}>You saved</Text>
               <View style={styles.savingsRow}>
-                <Text style={styles.savingsAmount}>$2.18</Text>
+                <Text style={styles.savingsAmountLarge}>$2.18</Text>
                 <View style={[styles.badge, { backgroundColor: '#F5A623' }]}>
                   <DollarIcon color="white" size={20} />
                 </View>
@@ -253,6 +253,7 @@ const styles = StyleSheet.create({
   savingsCol: { flex: 1, paddingLeft: 18 },
   savingsLabel: { fontSize: 12, color: '#888888', marginBottom: 4 },
   savingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  savingsAmountLarge: { fontSize: 36, fontWeight: '900', color: '#1A1A1A' },
   savingsAmount: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
   badge: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
 

@@ -5,79 +5,61 @@ import {
   StyleSheet,
   TouchableOpacity,
   Text,
-  ScrollView,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 
-const { width } = Dimensions.get('window');
-// Original image ratio: 1125 x 2556
-const IMAGE_HEIGHT = width * (2556 / 1125);
+const { width, height } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-      >
-        <Image
-          source={require('../../assets/images/splash_bg.png')}
-          style={{ width, height: IMAGE_HEIGHT }}
-          resizeMode="cover"
-        />
-      </ScrollView>
+      <Image
+        source={require('../../assets/images/splash_bg.png')}
+        style={styles.bg}
+        resizeMode="cover"
+      />
 
-      {/* Floating CTA at bottom */}
-      <SafeAreaView edges={['bottom']} style={styles.cta}>
-        <TouchableOpacity
-          style={styles.btn}
-          onPress={() => navigation.navigate('Login')}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.btnText}>Get Started</Text>
-          <Text style={styles.btnArrow}>→</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Login')} style={styles.signInLink}>
-          <Text style={styles.signInText}>Already have an account? <Text style={styles.signInBold}>Sign in</Text></Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      {/* Circular arrow button — matches design position */}
+      <TouchableOpacity
+        style={styles.arrowBtn}
+        onPress={() => navigation.navigate('Registration')}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.arrowText}>→</Text>
+      </TouchableOpacity>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E1A' },
-  scroll: { flexGrow: 1 },
-  cta: {
+  bg: {
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     left: 0,
-    right: 0,
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 8,
-    backgroundColor: 'rgba(11,14,26,0.92)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,212,200,0.15)',
+    width,
+    height,
   },
-  btn: {
+  arrowBtn: {
+    position: 'absolute',
+    right: 28,
+    top: height * 0.35,
+    width: 50,
+    height: 50,
+    borderRadius: 8,
     backgroundColor: '#00D4C8',
-    borderRadius: 14,
-    height: 54,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    shadowColor: '#00D4C8',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 10,
   },
-  btnText: { color: '#0B0E1A', fontSize: 17, fontWeight: '700', letterSpacing: 0.3 },
-  btnArrow: { color: '#0B0E1A', fontSize: 20, fontWeight: '700' },
-  signInLink: { alignItems: 'center', paddingVertical: 14 },
-  signInText: { color: 'rgba(255,255,255,0.6)', fontSize: 14 },
-  signInBold: { color: '#00D4C8', fontWeight: '600' },
+  arrowText: { color: '#ffffff', fontSize: 24, fontWeight: '800', marginLeft: 2, marginBottom: 6 },
 });
