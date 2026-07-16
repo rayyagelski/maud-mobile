@@ -8,8 +8,12 @@ import MainStackNavigator from './MainStackNavigator';
 import { useAppSelector } from '../hooks/useAppSelector';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
+import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
+import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
+import { useSyncEngine } from '../services/syncEngine';
 import { configureClient } from '../api/client';
-import { refreshToken } from '../store/slices/authSlice';
+import { refreshToken, setToken } from '../store/slices/authSlice';
+import { loadToken } from '../services/secureTokenStorage';
 import { navigationRef } from './navigationRef';
 import type { RootStackParamList } from '../types/navigation.types';
 
@@ -19,6 +23,9 @@ const Root = createStackNavigator<RootStackParamList>();
 // while living inside the Redux Provider and NavigationContainer.
 function TripDetectionRunner() {
   useTripAutoDetection();
+  useHarshEventTracker();
+  useComplianceMonitor();
+  useSyncEngine();
   return null;
 }
 
@@ -26,6 +33,16 @@ export default function AppNavigator() {
   const dispatch = useAppDispatch();
   const { isAuthenticated, token } = useAppSelector(s => s.auth);
   const prevAuth = React.useRef(false);
+
+  // The auth token now lives in encrypted storage (not redux-persist) — restore
+  // it on cold start. Restored unconditionally, even if expired: the existing
+  // request interceptor in api/client.ts already refreshes expired tokens
+  // transparently on the next API call, same as before this change.
+  useEffect(() => {
+    loadToken().then(saved => {
+      if (saved) dispatch(setToken(saved));
+    });
+  }, [dispatch]);
 
   useEffect(() => {
     configureClient(
