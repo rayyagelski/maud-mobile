@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,52 +8,57 @@ import {
   FlatList,
   TextInput,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
+import { countriesApi, type ActiveCountry } from '../../api';
 
-const COUNTRIES = [
-  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina',
-  'Armenia', 'Australia', 'Austria', 'Azerbaijan', 'Bahrain', 'Bangladesh',
-  'Belarus', 'Belgium', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana',
-  'Brazil', 'Bulgaria', 'Cambodia', 'Cameroon', 'Canada', 'Chile', 'China',
-  'Colombia', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic',
-  'Denmark', 'Dominican Republic', 'Ecuador', 'Egypt', 'El Salvador',
-  'Estonia', 'Ethiopia', 'Finland', 'France', 'Georgia', 'Germany', 'Ghana',
-  'Greece', 'Guatemala', 'Honduras', 'Hungary', 'Iceland', 'India',
-  'Indonesia', 'Iran', 'Iraq', 'Ireland', 'Israel', 'Italy', 'Jamaica',
-  'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kuwait', 'Latvia', 'Lebanon',
-  'Libya', 'Lithuania', 'Luxembourg', 'Malaysia', 'Malta', 'Mexico',
-  'Moldova', 'Morocco', 'Mozambique', 'Myanmar', 'Nepal', 'Netherlands',
-  'New Zealand', 'Nigeria', 'North Macedonia', 'Norway', 'Oman', 'Pakistan',
-  'Panama', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal',
-  'Qatar', 'Romania', 'Russia', 'Saudi Arabia', 'Senegal', 'Serbia',
-  'Singapore', 'Slovakia', 'Slovenia', 'South Africa', 'South Korea',
-  'Spain', 'Sri Lanka', 'Sudan', 'Sweden', 'Switzerland', 'Syria',
-  'Taiwan', 'Tanzania', 'Thailand', 'Tunisia', 'Turkey', 'Uganda',
-  'Ukraine', 'United Arab Emirates', 'United Kingdom', 'United States',
-  'Uruguay', 'Uzbekistan', 'Venezuela', 'Vietnam', 'Yemen', 'Zimbabwe',
-];
+// EU member-state ISO codes — anything else (including the US) gets the
+// English registration page. Not sourced from the backend: no EU-membership
+// flag exists there today (verified — Country entity/API has no such field).
+const EU_COUNTRY_CODES = new Set([
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+  'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+  'SI', 'ES', 'SE',
+]);
+
+function resolveRegistrationUrl(countryCode: string, vehicleUse: 'private' | 'business'): string {
+  const host = vehicleUse === 'business' ? 'market.myautodata.com' : 'app.myautodata.com';
+  const suffix = EU_COUNTRY_CODES.has(countryCode) ? 'de/register' : 'en/register';
+  return `https://${host}/${suffix}`;
+}
 
 export default function RegistrationScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
-  const [country, setCountry] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState<ActiveCountry | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [search, setSearch] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [vehicleUse, setVehicleUse] = useState<'private' | 'business'>('private');
+  const [countries, setCountries] = useState<ActiveCountry[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(true);
+
+  useEffect(() => {
+    countriesApi.listActive()
+      .then(res => setCountries(res.data.countries))
+      .catch(() => {})
+      .finally(() => setLoadingCountries(false));
+  }, []);
 
   const filtered = search
-    ? COUNTRIES.filter(c => c.toLowerCase().includes(search.toLowerCase()))
-    : COUNTRIES;
+    ? countries.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+    : countries;
 
-  const canContinue = country.length > 0 && agreed;
+  const canContinue = selectedCountry !== null && agreed;
 
   function handleContinue() {
+    if (!selectedCountry) return;
+    console.log(resolveRegistrationUrl(selectedCountry.code, vehicleUse));
     navigation.navigate('WebView', {
-      url: 'https://myautodata.com/',
+      url: resolveRegistrationUrl(selectedCountry.code, vehicleUse),
       title: 'Registration',
     });
   }
@@ -88,13 +93,15 @@ export default function RegistrationScreen() {
         <Text style={styles.label}>Country of Residence</Text>
         <TouchableOpacity
           style={styles.field}
-          onPress={() => setShowPicker(true)}
+          onPress={() => !loadingCountries && setShowPicker(true)}
           activeOpacity={0.8}
         >
-          <Text style={country ? styles.fieldValue : styles.fieldPlaceholder}>
-            {country || 'Select your country'}
+          <Text style={selectedCountry ? styles.fieldValue : styles.fieldPlaceholder}>
+            {loadingCountries ? 'Loading…' : selectedCountry?.name ?? 'Select your country'}
           </Text>
-          <Text style={styles.fieldChevron}>›</Text>
+          {loadingCountries
+            ? <ActivityIndicator size="small" color="#00D4C8" />
+            : <Text style={styles.fieldChevron}>›</Text>}
         </TouchableOpacity>
 
         <Text style={styles.label}>Vehicle Use</Text>
@@ -181,16 +188,16 @@ export default function RegistrationScreen() {
           </SafeAreaView>
           <FlatList
             data={filtered}
-            keyExtractor={item => item}
+            keyExtractor={item => item.code}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.countryItem}
-                onPress={() => { setCountry(item); closePicker(); }}
+                onPress={() => { setSelectedCountry(item); closePicker(); }}
                 activeOpacity={0.7}
               >
-                <Text style={styles.countryText}>{item}</Text>
-                {item === country && <Text style={styles.countryCheck}>✓</Text>}
+                <Text style={styles.countryText}>{item.name}</Text>
+                {item.code === selectedCountry?.code && <Text style={styles.countryCheck}>✓</Text>}
               </TouchableOpacity>
             )}
             ItemSeparatorComponent={() => <View style={styles.separator} />}

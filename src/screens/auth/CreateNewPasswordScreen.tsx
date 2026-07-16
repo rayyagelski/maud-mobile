@@ -8,19 +8,24 @@ import {
   Platform,
   ScrollView,
   TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import LockIcon from '../../components/common/LockIcon';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import EyeIcon from '../../components/common/EyeIcon';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { changePasswordWithCode } from '../../store/slices/authSlice';
 import type { AuthNavigationProp, AuthStackParamList } from '../../types/navigation.types';
 
 type RouteProps = RouteProp<AuthStackParamList, 'CreateNewPassword'>;
 
 export default function CreateNewPasswordScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
+  const dispatch = useAppDispatch();
   const route = useRoute<RouteProps>();
+  const { email, code } = route.params;
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,9 +48,17 @@ export default function CreateNewPasswordScreen() {
     if (!validate()) return;
     setIsLoading(true);
     try {
-      // TODO: wire up backend reset password endpoint with email + code + newPassword
-      await new Promise(r => setTimeout(r, 800));
-      navigation.navigate('PasswordResetSuccess');
+      const result = await dispatch(changePasswordWithCode({ email, code, newPassword }));
+      if (changePasswordWithCode.fulfilled.match(result)) {
+        navigation.navigate('PasswordResetSuccess');
+      } else if (result.payload === 'invalid_code') {
+        Alert.alert(
+          'Code expired or incorrect',
+          'Please go back and request a new code.',
+        );
+      } else {
+        Alert.alert('Something went wrong', 'Please check your connection and try again.');
+      }
     } finally {
       setIsLoading(false);
     }

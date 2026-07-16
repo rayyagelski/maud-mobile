@@ -13,10 +13,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import MailIcon from '../../components/common/MailIcon';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { requestPasswordReset } from '../../store/slices/authSlice';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 
 export default function ForgotPasswordScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
+  const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,9 +35,14 @@ export default function ForgotPasswordScreen() {
     if (!validate()) return;
     setIsLoading(true);
     try {
-      // TODO: wire up backend reset password endpoint
-      await new Promise(r => setTimeout(r, 800));
-      navigation.navigate('VerifyEmail', { email: email.trim(), mode: 'reset' });
+      const result = await dispatch(requestPasswordReset(email.trim()));
+      if (requestPasswordReset.fulfilled.match(result)) {
+        // The backend always returns success here regardless of whether the
+        // email matched an account — never reveal account existence.
+        navigation.navigate('VerifyEmail', { email: email.trim(), mode: 'reset' });
+      } else {
+        Alert.alert('Something went wrong', 'Please check your connection and try again.');
+      }
     } finally {
       setIsLoading(false);
     }

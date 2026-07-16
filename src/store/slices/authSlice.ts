@@ -52,6 +52,32 @@ export const refreshToken = createAsyncThunk(
   },
 );
 
+export const requestPasswordReset = createAsyncThunk(
+  'auth/requestPasswordReset',
+  async (email: string, { rejectWithValue }) => {
+    try {
+      await authApi.requestPasswordResetCode(email);
+      return true;
+    } catch (err: unknown) {
+      const e = err as { errStatus?: string };
+      return rejectWithValue(e.errStatus ?? 'Could not send reset code');
+    }
+  },
+);
+
+export const changePasswordWithCode = createAsyncThunk(
+  'auth/changePasswordWithCode',
+  async (params: { email: string; code: string; newPassword: string }, { rejectWithValue }) => {
+    try {
+      await authApi.changePasswordWithCode(params.email, params.code, params.newPassword);
+      return true;
+    } catch (err: unknown) {
+      const e = err as { errStatus?: string };
+      return rejectWithValue(e.errStatus ?? 'invalid_code');
+    }
+  },
+);
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
@@ -100,7 +126,13 @@ const authSlice = createSlice({
         state.token = null;
         state.claims = null;
         state.isAuthenticated = false;
-      });
+      })
+      .addCase(requestPasswordReset.pending, handlePending)
+      .addCase(requestPasswordReset.fulfilled, (state) => { state.isLoading = false; })
+      .addCase(requestPasswordReset.rejected, handleRejected)
+      .addCase(changePasswordWithCode.pending, handlePending)
+      .addCase(changePasswordWithCode.fulfilled, (state) => { state.isLoading = false; })
+      .addCase(changePasswordWithCode.rejected, handleRejected);
   },
 });
 

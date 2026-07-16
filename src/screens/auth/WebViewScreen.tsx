@@ -9,10 +9,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import type { AuthStackParamList } from '../../types/navigation.types';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 
-type WebViewRouteProp = RouteProp<AuthStackParamList, 'WebView'>;
+// Registered under both AuthStackParamList and MainStackParamList with the
+// same param shape, so this is typed against that shared shape rather than
+// either specific stack.
+type WebViewRouteProp = RouteProp<{ WebView: { url: string; title?: string } }, 'WebView'>;
 
 export default function WebViewScreen() {
   const navigation = useNavigation();
@@ -84,7 +86,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 22 },
   webview: { flex: 1 },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: BG,

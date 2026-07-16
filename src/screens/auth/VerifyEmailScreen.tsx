@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import ShieldCheckIcon from '../../components/common/ShieldCheckIcon';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import OTPInput from '../../components/common/OTPInput';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { requestPasswordReset } from '../../store/slices/authSlice';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 import type { RouteProp } from '@react-navigation/native';
 import type { AuthStackParamList } from '../../types/navigation.types';
@@ -23,11 +25,12 @@ const RESEND_COOLDOWN = 60;
 
 export default function VerifyEmailScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
+  const dispatch = useAppDispatch();
   const route = useRoute<VerifyRoute>();
   const { email } = route.params;
 
   const [code, setCode] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -36,30 +39,35 @@ export default function VerifyEmailScreen() {
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  async function handleVerify() {
+  function handleVerify() {
     if (code.length < 6) {
       Alert.alert('Incomplete Code', 'Please enter all 6 digits.');
       return;
     }
-    setIsLoading(true);
-    try {
-      // TODO: wire up backend verification endpoint
-      await new Promise(r => setTimeout(r, 800));
-      if (route.params.mode === 'reset') {
-        navigation.navigate('CreateNewPassword', { email, code });
-      } else {
-        navigation.navigate('Login');
-      }
-    } finally {
-      setIsLoading(false);
+    // The code itself is only actually validated server-side at the final
+    // "set new password" step (see CreateNewPasswordScreen) — this screen is
+    // just a length gate, avoiding a redundant verify round-trip.
+    if (route.params.mode === 'reset') {
+      navigation.navigate('CreateNewPassword', { email, code });
+    } else {
+      navigation.navigate('Login');
     }
   }
 
   async function handleResend() {
-    if (cooldown > 0) return;
-    setCooldown(RESEND_COOLDOWN);
-    // TODO: call resend API
-    Alert.alert('Code Sent', `A new code has been sent to ${email}.`);
+    if (cooldown > 0 || isResending) return;
+    setIsResending(true);
+    try {
+      const result = await dispatch(requestPasswordReset(email));
+      if (requestPasswordReset.fulfilled.match(result)) {
+        setCooldown(RESEND_COOLDOWN);
+        Alert.alert('Code Sent', `A new code has been sent to ${email}.`);
+      } else {
+        Alert.alert('Something went wrong', 'Please check your connection and try again.');
+      }
+    } finally {
+      setIsResending(false);
+    }
   }
 
   return (
@@ -92,20 +100,20 @@ export default function VerifyEmailScreen() {
 
           {/* Verify button */}
           <TouchableOpacity
-            style={[styles.verifyBtn, (isLoading || code.length < 6) && styles.verifyBtnDisabled]}
+            style={[styles.verifyBtn, code.length < 6 && styles.verifyBtnDisabled]}
             onPress={handleVerify}
-            disabled={isLoading || code.length < 6}
+            disabled={code.length < 6}
             activeOpacity={0.85}
           >
-            <Text style={styles.verifyBtnText}>{isLoading ? 'Verifying…' : 'Verify'}</Text>
+            <Text style={styles.verifyBtnText}>Verify</Text>
           </TouchableOpacity>
 
           {/* Resend */}
           <View style={styles.resendRow}>
             <Text style={styles.resendText}>Didn't receive the code? </Text>
-            <TouchableOpacity onPress={handleResend} disabled={cooldown > 0}>
-              <Text style={[styles.resendLink, cooldown > 0 && styles.resendLinkDisabled]}>
-                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+            <TouchableOpacity onPress={handleResend} disabled={cooldown > 0 || isResending}>
+              <Text style={[styles.resendLink, (cooldown > 0 || isResending) && styles.resendLinkDisabled]}>
+                {isResending ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
               </Text>
             </TouchableOpacity>
           </View>
