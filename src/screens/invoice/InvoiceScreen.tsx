@@ -1,67 +1,65 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import Svg, { Path } from 'react-native-svg';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
-import { PinIcon, PhoneIcon, ShareIcon, DropletIcon, RefreshIcon } from '../../components/icons';
-import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { PinIcon, PhoneIcon, ShareIcon, RefreshIcon } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { fetchServiceRecord } from '../../store/slices/serviceRecordSlice';
+import type { MainStackNavigationProp, InvoiceRouteProp } from '../../types/navigation.types';
+import type { ServiceRecord } from '../../types/serviceRecord.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const TEAL = '#3ABFBF';
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
-// ── Data ───────────────────────────────────────────────────────────────────
+function currencySymbol(code: string): string {
+  return { EUR: '€', USD: '$', GBP: '£' }[code] ?? code;
+}
 
-type DetailLine = { label: string; value: string | null; bold?: boolean };
-type ServiceItem = {
-  iconType: 'droplet' | 'refresh';
-  name: string;
-  cost: string;
-  details: DetailLine[];
-};
-
-const SERVICES: ServiceItem[] = [
-  {
-    iconType: 'droplet',
-    name: 'Oil Change',
-    cost: '€70.00',
-    details: [
-      { label: 'Cost of Labor 1.0 hr @ €70/hr', value: null },
-      { label: 'Cost of Parts', value: '€45.00' },
-      { label: 'Subtotal:', value: '€115.00', bold: true },
-    ],
-  },
-  {
-    iconType: 'refresh',
-    name: 'Tire Rotation',
-    cost: '€49.00',
-    details: [
-      { label: 'Subtotal:', value: '€49.00', bold: true },
-    ],
-  },
-];
-
-// ── Local icon ─────────────────────────────────────────────────────────────
-
-function DownloadIcon({ color = 'white', size = 20 }: { color?: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"
-        stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-      />
-    </Svg>
-  );
+function buildShareText(record: ServiceRecord): string {
+  const lines = [
+    `Invoice — ${record.shop.name}`,
+    record.date ? `Date: ${new Date(record.date).toLocaleDateString()}` : null,
+    record.invoiceNumber ? `Invoice #: ${record.invoiceNumber}` : null,
+    '',
+    ...record.completedWorks.map(work => {
+      const subtotal = (work.costOfLabour ?? 0) + (work.costOfParts ?? 0);
+      return `${work.description ?? 'Service'} — €${subtotal.toFixed(2)}`;
+    }),
+    '',
+    `Total: €${record.totalCost.toFixed(2)}`,
+  ];
+  return lines.filter((l): l is string => l !== null).join('\n');
 }
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function InvoiceScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const route = useRoute<InvoiceRouteProp>();
+  const dispatch = useAppDispatch();
+  const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
+  const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+  const record = useAppSelector(s => s.serviceRecords.selectedRecord);
+
+  useEffect(() => {
+    if (!vehicleId || !route.params.serviceId) return;
+    dispatch(fetchServiceRecord({ vehicleId, id: route.params.serviceId }));
+  }, [vehicleId, route.params.serviceId, dispatch]);
+
+  async function handleShare() {
+    if (!record) return;
+    try {
+      await Share.share({ message: buildShareText(record) });
+    } catch {
+      // user cancelled or share sheet failed — nothing to recover
+    }
+  }
 
   return (
     <View style={styles.root}>
@@ -78,91 +76,104 @@ export default function InvoiceScreen() {
       </SafeAreaView>
       <View style={styles.divider} />
 
-      {/* Scrollable content */}
+      {!record ? (
+        <View style={styles.shopCard}>
+          <Text style={styles.emptyText}>Loading invoice…</Text>
+        </View>
+      ) : (
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Shop info card */}
         <View style={styles.shopCard}>
           <View style={styles.shopTop}>
             <View style={styles.shopAvatar}>
-              <Text style={styles.shopAvatarText}>G</Text>
+              <Text style={styles.shopAvatarText}>{record.shop.name.charAt(0).toUpperCase()}</Text>
             </View>
             <View style={styles.shopInfo}>
-              <Text style={styles.shopName}>Greenway Auto Repair</Text>
-              <View style={styles.shopDetailRow}>
-                <PinIcon color="#888" size={14} />
-                <Text style={styles.shopDetailText}>
-                  {'  '}123 Maple Street, Springfield,{'\n  '}IL 62701
-                </Text>
-              </View>
-              <View style={styles.shopDetailRow}>
-                <PhoneIcon color="#888" size={14} />
-                <Text style={styles.shopDetailText}>{'  '}(555) 123-4567</Text>
-              </View>
+              <Text style={styles.shopName}>{record.shop.name}</Text>
+              {record.shop.address && (
+                <View style={styles.shopDetailRow}>
+                  <PinIcon color="#888" size={14} />
+                  <Text style={styles.shopDetailText}>{'  '}{record.shop.address}</Text>
+                </View>
+              )}
+              {record.shop.phone && (
+                <View style={styles.shopDetailRow}>
+                  <PhoneIcon color="#888" size={14} />
+                  <Text style={styles.shopDetailText}>{'  '}{record.shop.phone}</Text>
+                </View>
+              )}
             </View>
           </View>
-          <View style={styles.shopDivider} />
-          <View style={styles.invoiceNums}>
-            <Text style={styles.invoiceNumText}>
-              Invoice #:<Text style={styles.invoiceNumBold}>02549</Text>
-            </Text>
-            <Text style={styles.invoiceNumText}>
-              Customer #:<Text style={styles.invoiceNumBold}>14786</Text>
-            </Text>
-          </View>
+          {(record.invoiceNumber || record.customerId) && (
+            <>
+              <View style={styles.shopDivider} />
+              <View style={styles.invoiceNums}>
+                {record.invoiceNumber && (
+                  <Text style={styles.invoiceNumText}>
+                    Invoice #: <Text style={styles.invoiceNumBold}>{record.invoiceNumber}</Text>
+                  </Text>
+                )}
+                {record.customerId && (
+                  <Text style={styles.invoiceNumText}>
+                    Customer #: <Text style={styles.invoiceNumBold}>{record.customerId}</Text>
+                  </Text>
+                )}
+              </View>
+            </>
+          )}
         </View>
 
         {/* Services performed */}
         <Text style={styles.sectionTitle}>SERVICES PERFORMED</Text>
         <View style={styles.servicesCard}>
-          {SERVICES.map((svc, i) => (
-            <View key={svc.name}>
-              {/* Service header */}
-              <View style={styles.svcHeader}>
-                <View style={styles.svcIconBox}>
-                  {svc.iconType === 'droplet'
-                    ? <DropletIcon color="#888" size={20} />
-                    : <RefreshIcon color="#888" size={20} />}
+          {record.completedWorks.length === 0 && (
+            <Text style={styles.emptyText}>No itemized line items recorded for this visit.</Text>
+          )}
+          {record.completedWorks.map((work, i) => {
+            const subtotal = (work.costOfLabour ?? 0) + (work.costOfParts ?? 0);
+            return (
+              <View key={i}>
+                <View style={styles.svcHeader}>
+                  <View style={styles.svcIconBox}>
+                    <RefreshIcon color="#888" size={20} />
+                  </View>
+                  <Text style={styles.svcName}>{work.description ?? 'Service item'}</Text>
+                  <Text style={styles.svcCost}>{currencySymbol('EUR')}{subtotal.toFixed(2)}</Text>
                 </View>
-                <Text style={styles.svcName}>{svc.name}</Text>
-                <Text style={styles.svcCost}>{svc.cost}</Text>
+                {work.costOfLabour != null && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Cost of Labor</Text>
+                    <Text style={styles.detailValue}>{currencySymbol('EUR')}{work.costOfLabour.toFixed(2)}</Text>
+                  </View>
+                )}
+                {work.costOfParts != null && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Cost of Parts</Text>
+                    <Text style={styles.detailValue}>{currencySymbol('EUR')}{work.costOfParts.toFixed(2)}</Text>
+                  </View>
+                )}
+                {i < record.completedWorks.length - 1 && <View style={styles.svcDivider} />}
               </View>
-              {/* Detail lines */}
-              {svc.details.map((line, j) => (
-                <View key={j} style={styles.detailRow}>
-                  <Text style={[styles.detailLabel, line.bold && styles.detailBold]}>
-                    {line.label}
-                  </Text>
-                  {line.value != null && (
-                    <Text style={[styles.detailValue, line.bold && styles.detailBold]}>
-                      {line.value}
-                    </Text>
-                  )}
-                </View>
-              ))}
-              {i < SERVICES.length - 1 && <View style={styles.svcDivider} />}
-            </View>
-          ))}
+            );
+          })}
 
           {/* Total */}
           <View style={styles.totalDivider} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total Cost:</Text>
-            <Text style={styles.totalAmount}>€295.00</Text>
+            <Text style={styles.totalAmount}>{currencySymbol('EUR')}{record.totalCost.toFixed(2)}</Text>
           </View>
         </View>
 
       </ScrollView>
+      )}
 
       {/* Fixed bottom action bar */}
       <SafeAreaView edges={['bottom']} style={styles.bottomBar}>
-        <TouchableOpacity style={styles.shareBtn} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.shareBtn} activeOpacity={0.8} onPress={handleShare} disabled={!record}>
           <ShareIcon color="#1A1A1A" size={20} />
-          <Text style={styles.shareBtnText}>Share</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.downloadBtn} activeOpacity={0.85}>
-          <DownloadIcon color="white" size={20} />
-          <Text style={styles.downloadBtnText}>Download PDF</Text>
+          <Text style={styles.shareBtnText}>Share Invoice</Text>
         </TouchableOpacity>
       </SafeAreaView>
 
@@ -200,7 +211,7 @@ const styles = StyleSheet.create({
   shopDetailRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 5 },
   shopDetailText: { fontSize: 13, color: '#555', lineHeight: 19, flex: 1 },
   shopDivider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 14 },
-  invoiceNums: { flexDirection: 'row', justifyContent: 'space-between' },
+  invoiceNums: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 4 },
   invoiceNumText: { fontSize: 13, color: '#888' },
   invoiceNumBold: { fontWeight: '700', color: '#1A1A1A' },
 
@@ -223,12 +234,12 @@ const styles = StyleSheet.create({
   },
   detailLabel: { flex: 1, fontSize: 13, color: '#888' },
   detailValue: { fontSize: 13, color: '#888' },
-  detailBold: { fontWeight: '700', color: '#1A1A1A', fontSize: 14 },
   svcDivider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 14 },
   totalDivider: { height: 1, backgroundColor: '#DDDDDD', marginVertical: 14 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
   totalAmount: { fontSize: 26, fontWeight: '800', color: '#1A1A1A' },
+  emptyText: { fontSize: 14, color: '#999', textAlign: 'center', padding: 24 },
 
   // Bottom action bar
   bottomBar: {
@@ -238,13 +249,7 @@ const styles = StyleSheet.create({
   },
   shareBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'white', borderWidth: 1.5, borderColor: '#E0E0E0',
-    borderRadius: 14, paddingVertical: 14, columnGap: 8,
-  },
-  shareBtnText: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  downloadBtn: {
-    flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: TEAL, borderRadius: 14, paddingVertical: 14, columnGap: 8,
   },
-  downloadBtnText: { fontSize: 15, fontWeight: '700', color: 'white' },
+  shareBtnText: { fontSize: 15, fontWeight: '700', color: 'white' },
 });

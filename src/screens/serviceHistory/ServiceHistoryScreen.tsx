@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -7,6 +7,10 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { CalendarIcon, ChevronIcon } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { fetchServiceRecords } from '../../store/slices/serviceRecordSlice';
+import { vehiclesApi } from '../../api';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -15,24 +19,23 @@ const TEAL = '#3ABFBF';
 const GREEN = '#27AE60';
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
+// Kept as static placeholders per the confirmed decision — no per-component
+// wear-tracking data source exists anywhere (no OBD, no telemetry).
 const CONDITION_ITEMS = [
-  { label: 'Brakes',    status: 'Good' },
-  { label: 'Tires',     status: 'Good' },
-  { label: 'Battery',   status: 'Good' },
+  { label: 'Brakes', status: 'Good' },
+  { label: 'Tires', status: 'Good' },
+  { label: 'Battery', status: 'Good' },
   { label: 'Alignment', status: 'Good' },
 ];
 
 const ALERTS = [
-  { title: 'Brake Pads',    sub: '~1,200 km · ~18 days', action: 'Book',  primary: true  },
-  { title: 'Tire Pressure', sub: 'Check within 7 days',   action: 'Check', primary: false },
+  { title: 'Brake Pads', sub: '~1,200 km · ~18 days', action: 'Book', primary: true },
+  { title: 'Tire Pressure', sub: 'Check within 7 days', action: 'Check', primary: false },
 ];
 
-const PAST_SERVICES = [
-  { date: 'March 12, 2024',   shop: 'Greenway Auto Repair',    cost: '€295' },
-  { date: 'November 2, 2023', shop: 'Drivetek Service Center', cost: '€350' },
-  { date: 'July 18, 2023',    shop: 'Greenway Auto Repair',    cost: '€210' },
-  { date: 'March 3, 2023',    shop: 'Auto Services',           cost: '€575' },
-];
+function currencySymbol(code: string): string {
+  return { EUR: '€', USD: '$', GBP: '£' }[code] ?? code;
+}
 
 // ── Local icons ────────────────────────────────────────────────────────────
 
@@ -41,14 +44,6 @@ function SearchIcon({ color = '#1A1A1A', size = 22 }: { color?: string; size?: n
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx="11" cy="11" r="8" stroke={color} strokeWidth={1.8} />
       <Path d="M21 21l-4.35-4.35" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-function PlusIcon({ color = '#1A1A1A', size = 22 }: { color?: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={2} strokeLinecap="round" />
     </Svg>
   );
 }
@@ -81,9 +76,29 @@ function SectionHeader({
 
 export default function ServiceHistoryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const dispatch = useAppDispatch();
+  const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
+  const { records } = useAppSelector(s => s.serviceRecords);
+  const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+
   const [conditionOpen, setConditionOpen] = useState(true);
   const [alertsOpen, setAlertsOpen] = useState(true);
   const [pastOpen, setPastOpen] = useState(true);
+  const [odometer, setOdometer] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    dispatch(fetchServiceRecords(vehicleId));
+    vehiclesApi.getOdometer(vehicleId)
+      .then(res => setOdometer(res.data.odometer))
+      .catch(() => setOdometer(null));
+  }, [vehicleId, dispatch]);
+
+  const sortedRecords = [...records].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  const mostRecentWithDueDate = sortedRecords.find(r => r.nextDueDate);
+  const daysUntilDue = mostRecentWithDueDate?.nextDueDate
+    ? Math.round((new Date(mostRecentWithDueDate.nextDueDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    : null;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -96,9 +111,6 @@ export default function ServiceHistoryScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity hitSlop={HIT}>
               <SearchIcon />
-            </TouchableOpacity>
-            <TouchableOpacity hitSlop={HIT} style={styles.plusBtn}>
-              <PlusIcon />
             </TouchableOpacity>
           </View>
         </View>
@@ -116,22 +128,24 @@ export default function ServiceHistoryScreen() {
             <Text style={styles.nextCardTitle}>Next Service Due</Text>
           </View>
           <View style={styles.nextCardBody}>
-            <View style={styles.infoRow}>
-              <WrenchIcon color={TEAL} size={15} />
-              <Text style={styles.infoText}>
-                {'  '}At <Text style={styles.infoTeal}>85,000 km</Text>
+            {mostRecentWithDueDate?.nextDueDate ? (
+              <View style={styles.infoRow}>
+                <CalendarIcon color="#555" size={15} />
+                <Text style={styles.infoText}>
+                  {'  '}Due {new Date(mostRecentWithDueDate.nextDueDate).toLocaleDateString()}
+                  {daysUntilDue !== null && (
+                    <Text style={styles.infoGray}> (~{daysUntilDue} days)</Text>
+                  )}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.infoText}>No upcoming service scheduled.</Text>
+            )}
+            {odometer !== null && (
+              <Text style={styles.currentKm}>
+                Currently at <Text style={styles.currentKmBold}>{Math.round(odometer).toLocaleString()} km</Text>
               </Text>
-            </View>
-            <View style={styles.infoRow}>
-              <CalendarIcon color="#555" size={15} />
-              <Text style={styles.infoText}>
-                {'  '}In ~90 days{' '}
-                <Text style={styles.infoGray}>(~Aug 21, 2024)</Text>
-              </Text>
-            </View>
-            <Text style={styles.currentKm}>
-              Currently at <Text style={styles.currentKmBold}>73,200 km</Text>{' '}(~Today)
-            </Text>
+            )}
           </View>
         </View>
 
@@ -195,21 +209,26 @@ export default function ServiceHistoryScreen() {
         />
         {pastOpen && (
           <View style={styles.card}>
-            {PAST_SERVICES.map((svc, i) => (
+            {sortedRecords.map((record, i) => (
               <TouchableOpacity
-                key={i}
-                style={[styles.pastRow, i < PAST_SERVICES.length - 1 && styles.rowBorder]}
-                onPress={() => navigation.navigate('Invoice', { serviceId: `svc-${i}` })}
+                key={record.id}
+                style={[styles.pastRow, i < sortedRecords.length - 1 && styles.rowBorder]}
+                onPress={() => navigation.navigate('Invoice', { serviceId: String(record.id) })}
                 activeOpacity={0.7}
               >
                 <View style={styles.pastInfo}>
-                  <Text style={styles.pastDate}>{svc.date}</Text>
-                  <Text style={styles.pastShop}>{svc.shop}</Text>
+                  <Text style={styles.pastDate}>
+                    {record.date ? new Date(record.date).toLocaleDateString() : '—'}
+                  </Text>
+                  <Text style={styles.pastShop}>{record.shop.name}</Text>
                 </View>
-                <Text style={styles.pastCost}>{svc.cost}</Text>
+                <Text style={styles.pastCost}>{currencySymbol('EUR')}{record.totalCost.toFixed(2)}</Text>
                 <Text style={styles.pastArrow}>›</Text>
               </TouchableOpacity>
             ))}
+            {sortedRecords.length === 0 && (
+              <Text style={styles.emptyText}>No service records yet.</Text>
+            )}
           </View>
         )}
 
@@ -229,7 +248,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
   headerActions: { flexDirection: 'row', alignItems: 'center' },
-  plusBtn: { marginLeft: 18 },
   divider: { height: 1, backgroundColor: '#EEEEEE' },
   scroll: { padding: 16, paddingBottom: 40 },
 
@@ -246,7 +264,6 @@ const styles = StyleSheet.create({
   nextCardBody: { paddingLeft: 2 },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 7 },
   infoText: { fontSize: 14, color: '#333' },
-  infoTeal: { fontWeight: '700', color: TEAL },
   infoGray: { color: '#888' },
   currentKm: { fontSize: 13, color: '#888', marginTop: 2 },
   currentKmBold: { fontWeight: '700', color: '#555' },
@@ -300,4 +317,5 @@ const styles = StyleSheet.create({
   pastShop: { fontSize: 13, color: '#888' },
   pastCost: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginRight: 10 },
   pastArrow: { fontSize: 20, color: '#CCCCCC' },
+  emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 16 },
 });
