@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Modal, TouchableWithoutFeedback,
@@ -6,19 +6,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { fetchVehicles, selectVehicle } from '../../store/slices/vehicleSlice';
+import { fetchDrivers } from '../../store/slices/driverSlice';
 import {
   CarIcon, ChevronIcon, CheckCircleIcon,
   MedalIcon, PinIcon, GaugeIcon, LeafIcon,
-  RouteIcon, DollarIcon, GearIcon, SpeedometerIcon,
+  RouteIcon, DollarIcon, GearIcon, SpeedometerIcon, UsersIcon,
 } from '../../components/icons';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Vehicle } from '../../types/vehicle.types';
 
-const DUMMY_VEHICLES: Vehicle[] = [
-  { id: '1', make: 'Toyota', model: 'Hilux', year: 2022, fuelType: 'Diesel', licensePlate: 'ABC 123' },
-  { id: '2', make: 'Ford', model: 'Ranger', year: 2021, fuelType: 'Diesel', licensePlate: 'XYZ 456' },
-  { id: '3', make: 'Isuzu', model: 'D-Max', year: 2023, fuelType: 'Petrol', licensePlate: 'DEF 789' },
-];
+function vehicleSubtitle(vehicle: Vehicle): string {
+  const parts = [vehicle.year, vehicle.fuelType].filter(Boolean);
+  if (parts.length > 0) return parts.join(' • ');
+  return vehicle.vin ? `VIN ${vehicle.vin}` : '';
+}
 
 const TEAL = '#3ABFBF';
 const TEAL_DARK = '#2DA8A8';
@@ -68,9 +71,9 @@ function VehicleRow({
         <Text style={styles.vehicleRowName}>
           {vehicle.make} {vehicle.model}
         </Text>
-        <Text style={styles.vehicleRowSub}>
-          {vehicle.year} • {vehicle.fuelType}
-        </Text>
+        {!!vehicleSubtitle(vehicle) && (
+          <Text style={styles.vehicleRowSub}>{vehicleSubtitle(vehicle)}</Text>
+        )}
       </View>
       {selected && <CheckCircleIcon />}
     </TouchableOpacity>
@@ -81,15 +84,33 @@ function VehicleRow({
 
 export default function HomeScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const dispatch = useAppDispatch();
   const { claims } = useAppSelector(s => s.auth);
+  const { vehicles, selectedVehicle } = useAppSelector(s => s.vehicles);
+  const { drivers } = useAppSelector(s => s.drivers);
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownY, setDropdownY] = useState(0);
-  const [selectedVehicle, setSelectedVehicle] = useState<Vehicle>(DUMMY_VEHICLES[0]);
   const vehicleCardRef = useRef<any>(null);
 
   const firstName = claims?.firstName ?? 'Driver';
   const initial = firstName.charAt(0).toUpperCase();
+  // Fall back to the first fetched vehicle for display until the user
+  // explicitly picks one (selecting mints a new vehicle-scoped JWT, so it's
+  // not done implicitly on mount).
+  const displayVehicle = selectedVehicle ?? vehicles[0] ?? null;
+
+  useEffect(() => {
+    if (vehicles.length === 0) {
+      dispatch(fetchVehicles());
+    }
+  }, [vehicles.length, dispatch]);
+
+  useEffect(() => {
+    if (drivers.length === 0) {
+      dispatch(fetchDrivers());
+    }
+  }, [drivers.length, dispatch]);
 
   function openDropdown() {
     vehicleCardRef.current?.measureInWindow(
@@ -109,13 +130,13 @@ export default function HomeScreen() {
   }
 
   function handleSelectVehicle(vehicleId: string) {
-    const v = DUMMY_VEHICLES.find(x => x.id === vehicleId);
-    if (v) { setSelectedVehicle(v); }
+    dispatch(selectVehicle(vehicleId));
     setDropdownOpen(false);
   }
 
   const features: FeatureItem[] = [
     { label: 'Rewards', iconBg: '#F5A623', icon: <MedalIcon />, onPress: () => navigation.navigate('Rewards') },
+    { label: 'Drivers', iconBg: '#8B5CF6', icon: <UsersIcon />, onPress: () => navigation.navigate('Drivers') },
     { label: 'Route Planner', iconBg: TEAL, icon: <PinIcon />, onPress: () => navigation.navigate('RoutePlanner') },
     { label: 'Driver Score', iconBg: TEAL, icon: <GaugeIcon />, onPress: () => navigation.navigate('DriverScore') },
     { label: 'Eco Score', iconBg: '#27AE60', icon: <LeafIcon />, onPress: () => navigation.navigate('EcoScore') },
@@ -163,14 +184,12 @@ export default function HomeScreen() {
               <View style={styles.vehicleInfo}>
                 <Text style={styles.vehicleCurrentLabel}>Current Vehicle</Text>
                 <Text style={styles.vehicleName}>
-                  {selectedVehicle
-                    ? `${selectedVehicle.make} ${selectedVehicle.model}`
+                  {displayVehicle
+                    ? `${displayVehicle.make} ${displayVehicle.model}`
                     : 'No vehicle selected'}
                 </Text>
-                {selectedVehicle && (
-                  <Text style={styles.vehicleSub}>
-                    {selectedVehicle.year} • {selectedVehicle.fuelType}
-                  </Text>
+                {displayVehicle && !!vehicleSubtitle(displayVehicle) && (
+                  <Text style={styles.vehicleSub}>{vehicleSubtitle(displayVehicle)}</Text>
                 )}
               </View>
               <ChevronIcon open={dropdownOpen} />
@@ -194,15 +213,15 @@ export default function HomeScreen() {
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
           </TouchableWithoutFeedback>
           <View style={[styles.dropdown, { top: dropdownY }]}>
-            {DUMMY_VEHICLES.map(v => (
+            {vehicles.map(v => (
               <VehicleRow
                 key={v.id}
                 vehicle={v}
-                selected={v.id === selectedVehicle?.id}
+                selected={v.id === displayVehicle?.id}
                 onPress={() => handleSelectVehicle(v.id)}
               />
             ))}
-            {DUMMY_VEHICLES.length === 0 && (
+            {vehicles.length === 0 && (
               <Text style={styles.emptyDropdown}>No vehicles found</Text>
             )}
           </View>
