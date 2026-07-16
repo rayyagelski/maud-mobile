@@ -1,22 +1,18 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { GaugeIcon } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { vehiclesApi } from '../../api';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
 const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
-
-function PlusIcon({ color = TEAL, size = 24 }: { color?: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
-    </Svg>
-  );
-}
 
 function EditIcon({ color = 'white', size = 18 }: { color?: string; size?: number }) {
   return (
@@ -35,6 +31,49 @@ function EditIcon({ color = 'white', size = 18 }: { color?: string; size?: numbe
 
 export default function OdometerScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
+  const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+
+  const [odometer, setOdometer] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!vehicleId) {
+      setIsLoading(false);
+      return;
+    }
+    vehiclesApi.getOdometer(vehicleId)
+      .then(res => setOdometer(res.data.odometer))
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
+  }, [vehicleId]);
+
+  function openModal() {
+    setInputValue(odometer != null ? String(Math.round(odometer)) : '');
+    setModalVisible(true);
+  }
+
+  async function handleSave() {
+    if (!vehicleId) return;
+    const parsed = parseFloat(inputValue.replace(',', '.'));
+    if (!parsed || parsed <= 0) {
+      Alert.alert('Invalid value', 'Enter a valid mileage.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await vehiclesApi.updateOdometer(vehicleId, parsed);
+      setOdometer(parsed);
+      setModalVisible(false);
+    } catch {
+      Alert.alert('Error', 'Could not update mileage. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -44,9 +83,7 @@ export default function OdometerScreen() {
             <BackArrowIcon size={22} color="#1A1A1A" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Odometer</Text>
-          <TouchableOpacity hitSlop={HIT}>
-            <PlusIcon />
-          </TouchableOpacity>
+          <View style={{ width: 22 }} />
         </View>
       </SafeAreaView>
       <View style={styles.divider} />
@@ -60,15 +97,59 @@ export default function OdometerScreen() {
           </View>
 
           <Text style={styles.mileageLabel}>Current Mileage</Text>
-          <Text style={styles.mileageValue}>45,280</Text>
+          {isLoading ? (
+            <ActivityIndicator color={TEAL} style={{ marginVertical: 8 }} />
+          ) : (
+            <Text style={styles.mileageValue}>
+              {odometer != null ? Math.round(odometer).toLocaleString() : '—'}
+            </Text>
+          )}
           <Text style={styles.mileageUnit}>kilometers</Text>
 
-          <TouchableOpacity style={styles.updateBtn} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={[styles.updateBtn, !vehicleId && styles.updateBtnDisabled]}
+            activeOpacity={0.85}
+            onPress={openModal}
+            disabled={!vehicleId}
+          >
             <EditIcon color="white" size={18} />
             <Text style={styles.updateBtnText}>Update Mileage</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Update Mileage</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={inputValue}
+              onChangeText={setInputValue}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 45280"
+              placeholderTextColor="#AAAAAA"
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => setModalVisible(false)}
+                disabled={isSaving}
+              >
+                <Text style={styles.modalBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnSave]}
+                onPress={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.modalBtnSaveText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -108,5 +189,26 @@ const styles = StyleSheet.create({
     backgroundColor: TEAL, borderRadius: 28,
     paddingVertical: 16, paddingHorizontal: 40,
   },
+  updateBtnDisabled: { opacity: 0.5 },
   updateBtnText: { fontSize: 16, fontWeight: '700', color: 'white' },
+
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  modalCard: {
+    width: '100%', backgroundColor: 'white', borderRadius: 20, padding: 24,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A', marginBottom: 16, textAlign: 'center' },
+  modalInput: {
+    borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 20, fontWeight: '700',
+    color: '#1A1A1A', textAlign: 'center', marginBottom: 20,
+  },
+  modalActions: { flexDirection: 'row', columnGap: 12 },
+  modalBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  modalBtnCancel: { backgroundColor: '#F0F0F0' },
+  modalBtnCancelText: { fontSize: 15, fontWeight: '600', color: '#555' },
+  modalBtnSave: { backgroundColor: TEAL },
+  modalBtnSaveText: { fontSize: 15, fontWeight: '700', color: 'white' },
 });
