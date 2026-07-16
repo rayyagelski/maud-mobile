@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -7,25 +7,41 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  ClockIcon, MountainIcon, PinIcon, FuelIcon, LeafIcon,
+  ClockIcon, MountainIcon, PinIcon, LeafIcon,
   LightbulbIcon, ChevronIcon, ArrowUpIcon,
 } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { haversineDistanceKm, formatDuration, formatDistance } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
+import type { Trip, TripType as TripTypeValue } from '../../types/trip.types';
 
 const TEAL = '#3ABFBF';
 
 const TRIP_TYPES = ['Private', 'Business', 'All'] as const;
-type TripType = (typeof TRIP_TYPES)[number];
+type TripTypeFilter = (typeof TRIP_TYPES)[number];
+const TRIP_TYPE_MAP: Record<Exclude<TripTypeFilter, 'All'>, TripTypeValue> = {
+  Private: 'private',
+  Business: 'business',
+};
 
 const TIMEFRAMES = ['7 Days', '14 Days', '28 Days'];
 const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
 
-const HISTORY_ROWS = [
-  { date: '16/02/2026', time: '08:20 AM', city: 'Miami',   id: 'trip-001' },
-  { date: '15/02/2026', time: '08:20 AM', city: 'Orlando', id: 'trip-002' },
-  { date: '14/02/2026', time: '08:10 AM', city: 'Miami',   id: 'trip-003' },
-  { date: '12/02/2026', time: '08:20 AM', city: 'Daytona', id: 'trip-004' },
-];
+function timeframeDays(label: string): number {
+  return parseInt(label, 10) || 7;
+}
+
+function tripDistanceKm(trip: Trip): number {
+  return trip.route.reduce(
+    (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
+    0,
+  );
+}
+
+function tripDurationSeconds(trip: Trip): number {
+  if (!trip.endTime) return 0;
+  return Math.round((trip.endTime - trip.startTime) / 1000);
+}
 
 // ── Local icons ────────────────────────────────────────────────────────────
 
@@ -95,7 +111,8 @@ function CostCard({ icon, label, value }: {
 
 export default function TripHistoryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
-  const [tripType, setTripType] = useState<TripType>('All');
+  const allTrips = useAppSelector(s => s.trips.trips);
+  const [tripType, setTripType] = useState<TripTypeFilter>('All');
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -103,6 +120,38 @@ export default function TripHistoryScreen() {
     setSelectedTime(t);
     setDropdownOpen(false);
   }
+
+  const filteredTrips = useMemo(() => {
+    const cutoff = Date.now() - timeframeDays(selectedTime) * 24 * 60 * 60 * 1000;
+    return allTrips
+      .filter(t => t.status === 'completed' && t.startTime >= cutoff)
+      .filter(t => tripType === 'All' || t.tripType === TRIP_TYPE_MAP[tripType])
+      .sort((a, b) => b.startTime - a.startTime);
+  }, [allTrips, selectedTime, tripType]);
+
+  const stats = useMemo(() => {
+    const durations = filteredTrips.map(tripDurationSeconds);
+    const distances = filteredTrips.map(tripDistanceKm);
+    const totalDurationSec = durations.reduce((a, b) => a + b, 0);
+    const totalDistanceKm = distances.reduce((a, b) => a + b, 0);
+    const shortTrips = durations.filter(d => d > 0 && d < 5 * 60).length;
+    const avgSpeedKmh = totalDurationSec > 0 ? (totalDistanceKm / totalDurationSec) * 3600 : 0;
+    const avgDistanceKm = filteredTrips.length > 0 ? totalDistanceKm / filteredTrips.length : 0;
+    const uniqueDays = new Set(filteredTrips.map(t => new Date(t.startTime).toDateString())).size;
+    const avgDistancePerDayKm = uniqueDays > 0 ? totalDistanceKm / uniqueDays : 0;
+    const avgOperationSec = filteredTrips.length > 0 ? totalDurationSec / filteredTrips.length : 0;
+
+    const savedTrips = filteredTrips.filter(t => t.reward?.moneySavedCents != null && t.reward.currencyCode);
+    const totalSavedCents = savedTrips.reduce((sum, t) => sum + (t.reward!.moneySavedCents ?? 0), 0);
+    const currencyCode = savedTrips[0]?.reward?.currencyCode ?? null;
+    const totalCo2Grams = filteredTrips.reduce((sum, t) => sum + (t.reward?.co2AvoidedGrams ?? 0), 0);
+
+    return {
+      totalDurationSec, totalDistanceKm, shortTrips, avgSpeedKmh,
+      avgDistanceKm, avgDistancePerDayKm, avgOperationSec,
+      totalSavedCents, currencyCode, totalCo2Grams,
+    };
+  }, [filteredTrips]);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -178,13 +227,13 @@ export default function TripHistoryScreen() {
 
         {/* Summary stats */}
         <View style={[styles.card, styles.statsCard]}>
-          <StatCol icon={<SmallCarIcon color="#999" size={20} />} value="141" label="Trips" />
+          <StatCol icon={<SmallCarIcon color="#999" size={20} />} value={String(filteredTrips.length)} label="Trips" />
           <View style={styles.statsDivider} />
-          <StatCol icon={<ClockIcon color="#999" size={20} />} value="49h 42m" label="total driving" />
+          <StatCol icon={<ClockIcon color="#999" size={20} />} value={formatDuration(stats.totalDurationSec)} label="total driving" />
           <View style={styles.statsDivider} />
           <StatCol
             icon={<MountainIcon color="#999" size={20} />}
-            value="10"
+            value={String(stats.shortTrips)}
             label="short trips"
             subLabel="(<5 min)"
           />
@@ -193,32 +242,25 @@ export default function TripHistoryScreen() {
         {/* Driving Averages */}
         <Text style={styles.sectionTitle}>DRIVING AVERAGES</Text>
         <View style={styles.card}>
-          <AvgRow icon={<ArrowUpIcon color="#999" size={16} />} label="Avg Speed" value="52 km/h" />
-          <AvgRow icon={<PinIcon color="#999" size={16} />} label="Avg Distance / Trip" value="24.4 km" />
-          <AvgRow icon={<SmallCarIcon color="#999" size={16} />} label="Avg Distance / Day" value="44.1 km" />
-          <AvgRow icon={<ClockIcon color="#999" size={16} />} label="Avg Operation Time" value="12h 21m" last />
+          <AvgRow icon={<ArrowUpIcon color="#999" size={16} />} label="Avg Speed" value={`${Math.round(stats.avgSpeedKmh)} km/h`} />
+          <AvgRow icon={<PinIcon color="#999" size={16} />} label="Avg Distance / Trip" value={formatDistance(stats.avgDistanceKm)} />
+          <AvgRow icon={<SmallCarIcon color="#999" size={16} />} label="Avg Distance / Day" value={formatDistance(stats.avgDistancePerDayKm)} />
+          <AvgRow icon={<ClockIcon color="#999" size={16} />} label="Avg Operation Time" value={formatDuration(Math.round(stats.avgOperationSec))} last />
         </View>
 
         {/* Cost & Impact */}
         <Text style={styles.sectionTitle}>COST & IMPACT</Text>
         <View style={styles.costRow}>
           <CostCard
-            icon={<Text style={styles.euroIcon}>€</Text>}
-            label="Avg Cost"
-            value="€51.67"
+            icon={<Text style={styles.euroIcon}>{stats.currencyCode ? currencySymbol(stats.currencyCode) : '€'}</Text>}
+            label="Total Savings"
+            value={stats.currencyCode ? `${(stats.totalSavedCents / 100).toFixed(2)} ${stats.currencyCode}` : '—'}
           />
           <CostCard
-            icon={<FuelIcon color="#999" size={16} />}
-            label="Consumption"
-            value="7.8 L"
+            icon={<LeafIcon color="#999" size={16} />}
+            label="CO₂ Avoided"
+            value={stats.totalCo2Grams > 0 ? `${(stats.totalCo2Grams / 1000).toFixed(1)} kg` : '—'}
           />
-        </View>
-        <View style={styles.card}>
-          <View style={styles.co2Header}>
-            <LeafIcon color="#999" size={16} />
-            <Text style={styles.co2Label}>CO₂ Emissions</Text>
-          </View>
-          <Text style={styles.co2Value}>12.3 kg</Text>
         </View>
 
         {/* Insight of the Week */}
@@ -237,23 +279,35 @@ export default function TripHistoryScreen() {
         {/* Trips History list */}
         <Text style={styles.sectionTitle}>TRIPS HISTORY</Text>
         <View style={styles.card}>
-          {HISTORY_ROWS.map((row, i) => (
+          {filteredTrips.map((trip, i) => (
             <TouchableOpacity
-              key={row.id}
-              style={[styles.historyRow, i < HISTORY_ROWS.length - 1 && styles.historyRowBorder]}
-              onPress={() => navigation.navigate('MyTrip', { tripId: row.id })}
+              key={trip.id}
+              style={[styles.historyRow, i < filteredTrips.length - 1 && styles.historyRowBorder]}
+              onPress={() => navigation.navigate('MyTrip', { tripId: trip.id })}
               activeOpacity={0.7}
             >
-              <Text style={styles.historyDate}>{row.date}</Text>
-              <Text style={styles.historyTime}>{row.time}, {row.city}</Text>
+              <Text style={styles.historyDate}>
+                {new Date(trip.startTime).toLocaleDateString()}
+              </Text>
+              <Text style={styles.historyTime}>
+                {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {' • '}{formatDistance(tripDistanceKm(trip))}
+              </Text>
               <Text style={styles.historyArrow}>›</Text>
             </TouchableOpacity>
           ))}
+          {filteredTrips.length === 0 && (
+            <Text style={styles.emptyText}>No trips in this range yet.</Text>
+          )}
         </View>
 
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function currencySymbol(code: string): string {
+  return { EUR: '€', USD: '$', GBP: '£' }[code] ?? code;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -336,11 +390,6 @@ const styles = StyleSheet.create({
   costCardLabel: { fontSize: 12, color: '#888', marginLeft: 4 },
   costCardValue: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
 
-  // CO2 card
-  co2Header: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  co2Label: { fontSize: 12, color: '#888', marginLeft: 6 },
-  co2Value: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
-
   // Insight card
   insightCard: {
     flexDirection: 'row', alignItems: 'flex-start',
@@ -361,4 +410,5 @@ const styles = StyleSheet.create({
   historyDate: { fontSize: 13, color: '#888', width: 90 },
   historyTime: { flex: 1, fontSize: 13, color: '#333' },
   historyArrow: { fontSize: 16, color: '#CCCCCC' },
+  emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 12 },
 });

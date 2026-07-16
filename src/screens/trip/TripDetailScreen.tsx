@@ -3,14 +3,16 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import Svg, { Circle, G, Rect, Path } from 'react-native-svg';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MountainIcon, HourglassIcon, GaugeIcon,
-  FlashIcon, LeafIcon, FuelIcon, CloudIcon, SunIcon,
+  LeafIcon, DollarIcon,
 } from '../../components/icons';
-import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -19,7 +21,7 @@ const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
 // ── Score arc (compact) ────────────────────────────────────────────────────
 
-function ScoreArc({ score }: { score: number }) {
+function ScoreArc({ score, label }: { score: number; label: string }) {
   const SIZE = 88;
   const SW = 7;
   const r = (SIZE - SW * 2) / 2;
@@ -38,7 +40,7 @@ function ScoreArc({ score }: { score: number }) {
         </G>
       </Svg>
       <Text style={arcSt.num}>{score}</Text>
-      <Text style={arcSt.lbl}>Eco</Text>
+      <Text style={arcSt.lbl}>{label}</Text>
     </View>
   );
 }
@@ -50,27 +52,28 @@ const arcSt = StyleSheet.create({
 // ── Behaviour bar ──────────────────────────────────────────────────────────
 
 function BehaviourBar({
-  label, pct, color,
-}: { label: string; pct: number; color: string }) {
+  label, count, color,
+}: { label: string; count: number; color: string }) {
+  const pct = Math.min(100, count * 20);
   return (
     <View style={bhSt.row}>
       <Text style={bhSt.label}>{label}</Text>
       <View style={bhSt.track}>
         <View style={[bhSt.fill, { width: `${pct}%` as any, backgroundColor: color }]} />
       </View>
-      <Text style={bhSt.pct}>{pct}%</Text>
+      <Text style={bhSt.pct}>{count}</Text>
     </View>
   );
 }
 const bhSt = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  label: { width: 100, fontSize: 13, color: '#555' },
+  label: { width: 120, fontSize: 13, color: '#555' },
   track: {
     flex: 1, height: 8, backgroundColor: '#EEEEEE', borderRadius: 4,
     overflow: 'hidden', marginHorizontal: 10,
   },
   fill: { height: '100%', borderRadius: 4 },
-  pct: { width: 36, fontSize: 13, fontWeight: '700', color: '#1A1A1A', textAlign: 'right' },
+  pct: { width: 24, fontSize: 13, fontWeight: '700', color: '#1A1A1A', textAlign: 'right' },
 });
 
 // ── Stat row (icon + label + value) ───────────────────────────────────────
@@ -123,6 +126,28 @@ const enSt = StyleSheet.create({
 
 export default function TripDetailScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const route = useRoute<TripDetailRouteProp>();
+  const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
+
+  const distanceKm = trip
+    ? trip.route.reduce(
+        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
+        0,
+      )
+    : 0;
+  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
+  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+  const maxSpeedKmh = trip
+    ? Math.max(0, ...trip.route.map(p => (p.speed ?? 0) * 3.6))
+    : 0;
+
+  const start = trip?.route[0];
+  const end = trip?.route[trip.route.length - 1];
+  const reward = trip?.reward;
+
+  const harshBrakeCount = trip?.events.filter(e => e.type === 'harsh_brake').length ?? 0;
+  const harshAccelCount = trip?.events.filter(e => e.type === 'harsh_accel').length ?? 0;
+  const harshCornerCount = trip?.events.filter(e => e.type === 'harsh_corner').length ?? 0;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -133,26 +158,36 @@ export default function TripDetailScreen() {
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>Trip Detail</Text>
-            <Text style={styles.headerSub}>16 Feb 2026 · 08:20 AM</Text>
+            {trip && (
+              <Text style={styles.headerSub}>
+                {new Date(trip.startTime).toLocaleDateString()} · {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            )}
           </View>
           <View style={{ width: 22 }} />
         </View>
       </SafeAreaView>
       <View style={styles.divider} />
 
+      {!trip ? (
+        <View style={styles.card}>
+          <Text style={styles.emptyText}>Trip not found.</Text>
+        </View>
+      ) : (
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Overview card: score + route */}
         <View style={[styles.card, styles.overviewCard]}>
-          <ScoreArc score={78} />
+          <ScoreArc score={reward ? Math.round(reward.ecoScore) : 0} label="Eco" />
           <View style={styles.overviewRight}>
             <View style={styles.wpRow}>
               <View style={[styles.wpDot, styles.wpDotA]}>
                 <Text style={styles.wpDotTxt}>A</Text>
               </View>
               <View style={styles.wpInfo}>
-                <Text style={styles.wpMain}>4321 Milena Blvd</Text>
-                <Text style={styles.wpSub}>Orlando, FL</Text>
+                <Text style={styles.wpMain}>
+                  {start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—'}
+                </Text>
               </View>
             </View>
             <View style={styles.wpConnector} />
@@ -161,8 +196,9 @@ export default function TripDetailScreen() {
                 <Text style={styles.wpDotTxt}>B</Text>
               </View>
               <View style={styles.wpInfo}>
-                <Text style={styles.wpMain}>1727 Brickell Ave</Text>
-                <Text style={styles.wpSub}>Miami, FL</Text>
+                <Text style={styles.wpMain}>
+                  {end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—'}
+                </Text>
               </View>
             </View>
           </View>
@@ -171,67 +207,52 @@ export default function TripDetailScreen() {
         {/* Trip stats */}
         <Text style={styles.sectionTitle}>TRIP STATS</Text>
         <View style={styles.card}>
-          <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value="120 miles" />
-          <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value="1h 35 min" />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value="51 MPH" />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value="85 MPH" last />
+          <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm)} />
+          <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
+          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(avgSpeedKmh)} km/h`} />
+          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value={`${Math.round(maxSpeedKmh)} km/h`} last />
         </View>
 
-        {/* Energy */}
-        <Text style={styles.sectionTitle}>ENERGY</Text>
-        <View style={styles.energyRow}>
-          <EnergyCard
-            icon={<FlashIcon color="#888" size={15} />}
-            label="Consumed"
-            value="28.4 kWh"
-            sub="23.7 kWh/100 mi"
-          />
-          <EnergyCard
-            icon={<FlashIcon color={TEAL} size={15} />}
-            label="Regenerated"
-            value="4.1 kWh"
-            sub="14.4% recovered"
-          />
-        </View>
-
-        {/* Driving behaviour */}
+        {/* Driving behaviour — real harsh-event counts from onboard sensors */}
         <Text style={styles.sectionTitle}>DRIVING BEHAVIOUR</Text>
         <View style={styles.card}>
-          <BehaviourBar label="Smooth" pct={72} color="#27AE60" />
-          <BehaviourBar label="Moderate" pct={20} color="#F5A623" />
-          <BehaviourBar label="Harsh" pct={8} color="#E53935" />
+          <BehaviourBar label="Harsh Braking" count={harshBrakeCount} color="#E53935" />
+          <BehaviourBar label="Harsh Acceleration" count={harshAccelCount} color="#F5A623" />
+          <BehaviourBar label="Harsh Cornering" count={harshCornerCount} color="#8B5CF6" />
         </View>
 
         {/* CO₂ & Cost */}
-        <Text style={styles.sectionTitle}>COST & IMPACT</Text>
-        <View style={styles.energyRow}>
-          <EnergyCard
-            icon={<LeafIcon color="#888" size={15} />}
-            label="CO₂ Saved"
-            value="9.4 kg"
-            sub="vs avg ICE"
-          />
-          <EnergyCard
-            icon={<FuelIcon color="#888" size={15} />}
-            label="Charge Cost"
-            value="€3.12"
-            sub="€0.11/kWh"
-          />
-        </View>
+        {reward && (
+          <>
+            <Text style={styles.sectionTitle}>COST & IMPACT</Text>
+            <View style={styles.energyRow}>
+              <EnergyCard
+                icon={<LeafIcon color="#888" size={15} />}
+                label="CO₂ Avoided"
+                value={reward.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
+              />
+              <EnergyCard
+                icon={<DollarIcon color="#888" size={15} />}
+                label="Money Saved"
+                value={
+                  reward.moneySavedCents != null && reward.currencyCode
+                    ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
+                    : '—'
+                }
+              />
+            </View>
+          </>
+        )}
 
-        {/* Weather */}
-        <Text style={styles.sectionTitle}>WEATHER</Text>
-        <View style={styles.card}>
-          <View style={styles.weatherRow}>
-            <CloudIcon color="#5B9BD5" size={28} />
-            <Text style={styles.weatherText}>Cloudy / Warm</Text>
-            <Text style={styles.weatherArrow}>→</Text>
-            <SunIcon color="#F5A623" size={28} />
-            <Text style={styles.weatherText}>Sunny / Warm</Text>
+        {reward?.aiNarrativeTip && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>AI DRIVING TIP</Text>
+            <Text style={styles.tipText}>{reward.aiNarrativeTip}</Text>
           </View>
-        </View>
+        )}
 
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -281,11 +302,6 @@ const styles = StyleSheet.create({
   // Energy row (two half-width cards)
   energyRow: { flexDirection: 'row', columnGap: 12, marginBottom: 16 },
 
-  // Weather
-  weatherRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-evenly', paddingVertical: 4,
-  },
-  weatherText: { fontSize: 13, color: '#555', fontWeight: '500' },
-  weatherArrow: { fontSize: 18, color: '#999', fontWeight: '300' },
+  tipText: { fontSize: 13, color: '#555', lineHeight: 19 },
+  emptyText: { fontSize: 14, color: '#999', textAlign: 'center', padding: 24 },
 });

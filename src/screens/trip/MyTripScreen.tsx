@@ -3,60 +3,26 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  MountainIcon, HourglassIcon, GaugeIcon,
-  LeafIcon, FuelIcon, CloudIcon, SunIcon,
+  MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, DollarIcon,
 } from '../../components/icons';
-import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MAP_HEIGHT = Dimensions.get('window').height * 0.46;
-const POPUP_WIDTH = Math.min(Dimensions.get('window').width * 0.65, 255);
 
-const MAP_REGION = {
-  latitude: 27.15,
-  longitude: -80.78,
-  latitudeDelta: 3.8,
-  longitudeDelta: 3.0,
+const FALLBACK_MAP_REGION = {
+  latitude: 25.276987,
+  longitude: 55.296249,
+  latitudeDelta: 0.5,
+  longitudeDelta: 0.5,
 };
-
-const ROUTE_COORDS = [
-  { latitude: 28.538, longitude: -81.379 }, // Orlando
-  { latitude: 28.204, longitude: -81.080 },
-  { latitude: 27.900, longitude: -80.700 }, // Melbourne area
-  { latitude: 27.450, longitude: -80.350 }, // Fort Pierce area
-  { latitude: 27.290, longitude: -80.380 }, // Stuart area
-  { latitude: 26.940, longitude: -80.200 }, // Jupiter area
-  { latitude: 26.710, longitude: -80.054 }, // Palm Beach
-  { latitude: 26.122, longitude: -80.143 }, // Fort Lauderdale
-  { latitude: 25.762, longitude: -80.192 }, // Miami
-];
-
-type Incident = {
-  id: string;
-  coord: { latitude: number; longitude: number };
-  title: string;
-  lines: string[];
-};
-
-const INCIDENTS: Incident[] = [
-  {
-    id: '1',
-    coord: { latitude: 27.900, longitude: -80.700 },
-    title: 'Over Speed Limit',
-    lines: ['Speed Limit:  55 MPH', 'Your Speed:  85 MPH', '1:35 PM, 1066 Brickell RD'],
-  },
-  {
-    id: '2',
-    coord: { latitude: 27.290, longitude: -80.380 },
-    title: 'Phone Usage',
-    lines: ['Speed Limit:  45 MPH', 'Your Speed:  53 MPH', '1:45 PM - 1:55 PM', '1231 Brickell RD'],
-  },
-];
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -69,14 +35,6 @@ function WaypointPin({ label, color }: { label: string; color: string }) {
         <Text style={styles.pinLabel}>{label}</Text>
       </View>
       <View style={[styles.pinTail, { borderTopColor: color }]} />
-    </View>
-  );
-}
-
-function RedDot() {
-  return (
-    <View style={styles.redDotOuter}>
-      <View style={styles.redDotInner} />
     </View>
   );
 }
@@ -95,24 +53,23 @@ function PerfRow({ icon, label, value }: { icon: React.ReactNode; label: string;
 
 export default function MyTripScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const routeProp = useRoute<MyTripRouteProp>();
+  const trip = useAppSelector(s => s.trips.trips.find(t => t.id === routeProp.params?.tripId));
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<any>(null);
-  // Prevents map onPress from immediately clearing a marker tap on Android
-  const markerJustTapped = useRef(false);
 
-  function handleMarkerPress(inc: Incident) {
-    markerJustTapped.current = true;
-    setSelectedIncident(inc);
-  }
-
-  function handleMapPress() {
-    if (markerJustTapped.current) {
-      markerJustTapped.current = false;
-      return;
-    }
-    setSelectedIncident(null);
-  }
+  const routeCoords = trip?.route.map(p => ({ latitude: p.latitude, longitude: p.longitude })) ?? [];
+  const distanceKm = trip
+    ? trip.route.reduce(
+        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
+        0,
+      )
+    : 0;
+  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
+  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+  const reward = trip?.reward;
+  const start = routeCoords[0];
+  const end = routeCoords[routeCoords.length - 1];
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -123,58 +80,40 @@ export default function MyTripScreen() {
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           provider={PROVIDER_GOOGLE}
-          initialRegion={MAP_REGION}
+          initialRegion={start ? { ...start, latitudeDelta: 0.2, longitudeDelta: 0.2 } : FALLBACK_MAP_REGION}
           onMapReady={() => {
             setMapReady(true);
-            mapRef.current?.fitToCoordinates(ROUTE_COORDS, {
-              edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
-              animated: false,
-            });
+            if (routeCoords.length > 1) {
+              mapRef.current?.fitToCoordinates(routeCoords, {
+                edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
+                animated: false,
+              });
+            }
           }}
-          onPress={handleMapPress}
         >
-          {mapReady && (
+          {mapReady && routeCoords.length > 1 && (
             <Polyline
-              coordinates={ROUTE_COORDS}
+              coordinates={routeCoords}
               strokeColor="rgba(255,255,255,0.9)"
               strokeWidth={10}
             />
           )}
-          {mapReady && (
+          {mapReady && routeCoords.length > 1 && (
             <Polyline
-              coordinates={ROUTE_COORDS}
+              coordinates={routeCoords}
               strokeColor="#2B3DE8"
               strokeWidth={6}
               lineCap="round"
               lineJoin="round"
             />
           )}
-          {mapReady && INCIDENTS.map(inc => (
-            <Marker
-              key={inc.id}
-              coordinate={inc.coord}
-              anchor={{ x: 0.5, y: 0.5 }}
-              onPress={() => handleMarkerPress(inc)}
-              tracksViewChanges={false}
-            >
-              <RedDot />
-            </Marker>
-          ))}
-          {mapReady && (
-            <Marker
-              coordinate={ROUTE_COORDS[0]}
-              anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={false}
-            >
+          {mapReady && start && (
+            <Marker coordinate={start} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
               <WaypointPin label="A" color="#3ABFBF" />
             </Marker>
           )}
-          {mapReady && (
-            <Marker
-              coordinate={ROUTE_COORDS[ROUTE_COORDS.length - 1]}
-              anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={false}
-            >
+          {mapReady && end && end !== start && (
+            <Marker coordinate={end} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
               <WaypointPin label="B" color="#1A1A1A" />
             </Marker>
           )}
@@ -186,84 +125,78 @@ export default function MyTripScreen() {
             <BackArrowIcon size={22} color="#1A1A1A" />
           </TouchableOpacity>
         </SafeAreaView>
-
-        {/* Incident popup */}
-        {selectedIncident && (
-          <TouchableOpacity
-            style={styles.incidentPopup}
-            onPress={() => setSelectedIncident(null)}
-            activeOpacity={0.95}
-          >
-            <Text style={styles.incidentTitle}>{selectedIncident.title}</Text>
-            {selectedIncident.lines.map((line, i) => (
-              <Text key={i} style={styles.incidentLine}>{line}</Text>
-            ))}
-          </TouchableOpacity>
-        )}
       </View>
 
       {/* ── Bottom scrollable panel ── */}
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Route + stats (single card) */}
-        <View style={styles.card}>
-          <View style={styles.wpRow}>
-            <View style={[styles.wpDot, styles.wpDotA]}>
-              <Text style={styles.wpDotText}>A</Text>
-            </View>
-            <View style={styles.wpInfo}>
-              <Text style={styles.wpMain}>4321 Milena Blvd</Text>
-              <Text style={styles.wpSub}>Orlando, FL 22882</Text>
-            </View>
+        {!trip ? (
+          <View style={styles.card}>
+            <Text style={styles.emptyText}>Trip not found.</Text>
           </View>
-          <View style={styles.wpConnector} />
-          <View style={styles.wpRow}>
-            <View style={[styles.wpDot, styles.wpDotB]}>
-              <Text style={styles.wpDotText}>B</Text>
+        ) : (
+          <>
+            {/* Route + stats (single card) */}
+            <View style={styles.card}>
+              <View style={styles.wpRow}>
+                <View style={[styles.wpDot, styles.wpDotA]}>
+                  <Text style={styles.wpDotText}>A</Text>
+                </View>
+                <View style={styles.wpInfo}>
+                  <Text style={styles.wpMain}>
+                    {start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.wpConnector} />
+              <View style={styles.wpRow}>
+                <View style={[styles.wpDot, styles.wpDotB]}>
+                  <Text style={styles.wpDotText}>B</Text>
+                </View>
+                <View style={styles.wpInfo}>
+                  <Text style={styles.wpMain}>
+                    {end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.cardDivider} />
+              <PerfRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm)} />
+              <View style={styles.rowDiv} />
+              <PerfRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
+              <View style={styles.rowDiv} />
+              <PerfRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(avgSpeedKmh)} km/h`} />
             </View>
-            <View style={styles.wpInfo}>
-              <Text style={styles.wpMain}>1727 Brickell Ave</Text>
-              <Text style={styles.wpSub}>Miami, FL, 28282</Text>
-            </View>
-          </View>
-          <View style={styles.cardDivider} />
-          <PerfRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value="120 miles" />
-          <View style={styles.rowDiv} />
-          <PerfRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value="1h 35 min" />
-          <View style={styles.rowDiv} />
-          <PerfRow icon={<GaugeIcon color="#999" size={18} />} label="Odometer" value="23570 Mi" />
-        </View>
 
-        {/* Cost & Consumption */}
-        <Text style={styles.sectionLabel}>COST & CONSUMPTION</Text>
-        <View style={styles.costRow}>
-          <View style={styles.costCard}>
-            <View style={styles.costCardHeader}>
-              <LeafIcon color="#999" size={16} />
-              <Text style={styles.costCardLabel}> CO₂ Emissions</Text>
-            </View>
-            <Text style={styles.costValue}>12.3 kg</Text>
-          </View>
-          <View style={styles.costCard}>
-            <View style={styles.costCardHeader}>
-              <FuelIcon color="#999" size={16} />
-              <Text style={styles.costCardLabel}> Consumption</Text>
-            </View>
-            <Text style={styles.costValue}>7.8 L</Text>
-          </View>
-        </View>
-
-        {/* Weather */}
-        <Text style={styles.sectionLabel}>WEATHER</Text>
-        <View style={styles.card}>
-          <View style={styles.weatherRow}>
-            <CloudIcon color="#5B9BD5" size={30} />
-            <Text style={styles.weatherText}>Cloudy/ Warm</Text>
-            <Text style={styles.weatherArrow}>→</Text>
-            <SunIcon color="#F5A623" size={30} />
-            <Text style={styles.weatherText}>Sunny/ Warm</Text>
-          </View>
-        </View>
+            {/* Cost & Impact */}
+            {reward && (
+              <>
+                <Text style={styles.sectionLabel}>COST & IMPACT</Text>
+                <View style={styles.costRow}>
+                  <View style={styles.costCard}>
+                    <View style={styles.costCardHeader}>
+                      <LeafIcon color="#999" size={16} />
+                      <Text style={styles.costCardLabel}> CO₂ Avoided</Text>
+                    </View>
+                    <Text style={styles.costValue}>
+                      {reward.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.costCard}>
+                    <View style={styles.costCardHeader}>
+                      <DollarIcon color="#999" size={16} />
+                      <Text style={styles.costCardLabel}> Money Saved</Text>
+                    </View>
+                    <Text style={styles.costValue}>
+                      {reward.moneySavedCents != null && reward.currencyCode
+                        ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
+                        : '—'}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            )}
+          </>
+        )}
 
       </ScrollView>
     </SafeAreaView>
@@ -303,27 +236,6 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
 
-  // Incident markers
-  redDotOuter: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: '#D32F2F',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)',
-  },
-  redDotInner: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#8B0000' },
-
-  // Incident popup
-  incidentPopup: {
-    position: 'absolute', top: 54, right: 12,
-    width: POPUP_WIDTH,
-    backgroundColor: 'white', borderRadius: 14,
-    paddingHorizontal: 16, paddingVertical: 14,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15, shadowRadius: 10, elevation: 8,
-  },
-  incidentTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 },
-  incidentLine: { fontSize: 13, color: '#555', marginBottom: 3 },
-
   // Bottom scroll
   scroll: { padding: 16, paddingBottom: 36 },
 
@@ -358,7 +270,7 @@ const styles = StyleSheet.create({
   // Section label
   sectionLabel: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', letterSpacing: 0.4, marginBottom: 10 },
 
-  // Cost & Consumption
+  // Cost & Impact
   costRow: { flexDirection: 'row', columnGap: 12, marginBottom: 16 },
   costCard: {
     flex: 1, backgroundColor: 'white', borderRadius: 18, padding: 16,
@@ -369,11 +281,5 @@ const styles = StyleSheet.create({
   costCardLabel: { fontSize: 12, color: '#888' },
   costValue: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
 
-  // Weather
-  weatherRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-evenly', paddingVertical: 4,
-  },
-  weatherText: { fontSize: 14, color: '#555', fontWeight: '500' },
-  weatherArrow: { fontSize: 18, color: '#999', fontWeight: '300' },
+  emptyText: { fontSize: 14, color: '#999', textAlign: 'center', padding: 24 },
 });

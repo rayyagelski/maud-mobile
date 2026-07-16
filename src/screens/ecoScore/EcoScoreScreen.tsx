@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -7,23 +7,28 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  FlashIcon, LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon,
+  LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon, DollarIcon,
 } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
+import type { Trip } from '../../types/trip.types';
 
 const TEAL = '#3ABFBF';
 
 const TIMEFRAMES = ['7 Days', '14 Days', '28 Days'];
 const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
-const MINI_BAR_HEIGHTS = [38, 44, 50, 46, 58, 55, 64, 68, 72, 76, 84, 90, 100];
-const TREND_HEIGHTS = [18, 24, 30, 34, 40, 44, 50, 57, 63, 70, 76, 84, 91, 100];
+const TREND_TABS = ['Eco Score', 'Savings', 'Points'] as const;
+type TrendTab = (typeof TREND_TABS)[number];
 
-const DETAIL_ROWS = [
-  { date: '16/02/2026', time: '08:20 AM', city: 'Miami',   pts: '+27', id: 'trip-001' },
-  { date: '15/02/2026', time: '08:20 AM', city: 'Orlando', pts: '+12', id: 'trip-002' },
-  { date: '14/02/2026', time: '08:10 AM', city: 'Miami',   pts: '+7',  id: 'trip-003' },
-  { date: '12/02/2026', time: '08:20 AM', city: 'Daytona', pts: '+3',  id: 'trip-004' },
-];
+function timeframeDays(label: string): number {
+  return parseInt(label, 10) || 7;
+}
+
+function avgEcoScore(trips: Trip[]): number {
+  const scored = trips.filter(t => t.reward);
+  if (scored.length === 0) return 0;
+  return Math.round(scored.reduce((sum, t) => sum + (t.reward?.ecoScore ?? 0), 0) / scored.length);
+}
 
 // ── Score arc ──────────────────────────────────────────────────────────────
 
@@ -57,10 +62,13 @@ const arcSt = StyleSheet.create({
 
 // ── Mini bar chart ─────────────────────────────────────────────────────────
 
-function MiniBarChart() {
+function MiniBarChart({ values }: { values: number[] }) {
+  if (values.length === 0) {
+    return <Text style={miniSt.noData}>No scored trips yet in this range.</Text>;
+  }
   return (
     <View style={miniSt.container}>
-      {MINI_BAR_HEIGHTS.map((h, i) => (
+      {values.map((h, i) => (
         <View key={i} style={[miniSt.bar, { height: `${h}%` as any }]} />
       ))}
     </View>
@@ -69,17 +77,21 @@ function MiniBarChart() {
 const miniSt = StyleSheet.create({
   container: { flexDirection: 'row', alignItems: 'flex-end', height: 48, columnGap: 3, marginTop: 10 },
   bar: { width: 9, backgroundColor: TEAL, borderRadius: 2 },
+  noData: { fontSize: 12, color: '#AAAAAA', marginTop: 10 },
 });
 
 // ── Trend bar chart ────────────────────────────────────────────────────────
 
-function TrendBarChart() {
+function TrendBarChart({ values }: { values: number[] }) {
+  if (values.length === 0) {
+    return <Text style={trendSt.noData}>No trips in this range yet.</Text>;
+  }
   return (
     <View style={trendSt.wrapper}>
-      {TREND_HEIGHTS.map((h, i) => (
+      {values.map((h, i) => (
         <View key={i} style={trendSt.col}>
           <View style={trendSt.barBg}>
-            <View style={[trendSt.barFill, { height: `${h}%` as any }]} />
+            <View style={[trendSt.barFill, { height: `${Math.max(4, h)}%` as any }]} />
           </View>
           <Text style={trendSt.xLabel}>{i + 1}</Text>
         </View>
@@ -93,6 +105,7 @@ const trendSt = StyleSheet.create({
   barBg: { width: '80%', height: '100%', justifyContent: 'flex-end' },
   barFill: { width: '100%', backgroundColor: TEAL, borderRadius: 2, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   xLabel: { fontSize: 9, color: '#AAAAAA', marginTop: 4 },
+  noData: { fontSize: 12, color: '#AAAAAA', textAlign: 'center', marginTop: 20 },
 });
 
 // ── Reward column ─────────────────────────────────────────────────────────
@@ -111,14 +124,55 @@ function RewardCol({ icon, value, label }: { icon: React.ReactNode; value: strin
 
 export default function EcoScoreScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const allTrips = useAppSelector(s => s.trips.trips);
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [trendTab, setTrendTab] = useState('Energy');
+  const [trendTab, setTrendTab] = useState<TrendTab>('Eco Score');
 
   function selectTime(t: string) {
     setSelectedTime(t);
     setDropdownOpen(false);
   }
+
+  const { current, previous } = useMemo(() => {
+    const days = timeframeDays(selectedTime);
+    const now = Date.now();
+    const cutoff = now - days * 24 * 60 * 60 * 1000;
+    const prevCutoff = cutoff - days * 24 * 60 * 60 * 1000;
+    return {
+      current: allTrips
+        .filter(t => t.status === 'completed' && t.startTime >= cutoff)
+        .sort((a, b) => a.startTime - b.startTime),
+      previous: allTrips.filter(t => t.status === 'completed' && t.startTime >= prevCutoff && t.startTime < cutoff),
+    };
+  }, [allTrips, selectedTime]);
+
+  const overallScore = avgEcoScore(current);
+  const prevScore = avgEcoScore(previous);
+  const trendPct = prevScore > 0 ? Math.round(((overallScore - prevScore) / prevScore) * 100) : null;
+  const totalPoints = current.reduce((sum, t) => sum + (t.reward?.tripPointsEarned ?? 0), 0);
+  const totalCo2Grams = current.reduce((sum, t) => sum + (t.reward?.co2AvoidedGrams ?? 0), 0);
+  const savedTrips = current.filter(t => t.reward?.moneySavedCents != null && t.reward.currencyCode);
+  const totalSavedCents = savedTrips.reduce((sum, t) => sum + (t.reward!.moneySavedCents ?? 0), 0);
+  const currencyCode = savedTrips[0]?.reward?.currencyCode ?? null;
+
+  const scoredTrips = useMemo(() => current.filter(t => t.reward), [current]);
+
+  const miniBarValues = useMemo(
+    () => scoredTrips.slice(-13).map(t => Math.max(8, Math.round(t.reward?.ecoScore ?? 0))),
+    [scoredTrips],
+  );
+
+  const trendValues = useMemo(() => {
+    const trips = scoredTrips.slice(-14);
+    if (trendTab === 'Eco Score') return trips.map(t => t.reward?.ecoScore ?? 0);
+    if (trendTab === 'Points') {
+      const max = Math.max(1, ...trips.map(t => t.reward?.tripPointsEarned ?? 0));
+      return trips.map(t => ((t.reward?.tripPointsEarned ?? 0) / max) * 100);
+    }
+    const max = Math.max(1, ...trips.map(t => t.reward?.moneySavedCents ?? 0));
+    return trips.map(t => ((t.reward?.moneySavedCents ?? 0) / max) * 100);
+  }, [scoredTrips, trendTab]);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -138,14 +192,16 @@ export default function EcoScoreScreen() {
         {/* Score card */}
         <View style={styles.card}>
           <View style={styles.scoreRow}>
-            <ScoreArc score={82} />
+            <ScoreArc score={overallScore} />
             <View style={styles.scoreRight}>
-              <Text style={styles.ptsMonth}>+740 pts this month</Text>
-              <View style={styles.trendRow}>
-                <TrendUpIcon color={TEAL} size={14} />
-                <Text style={styles.trendText}>  +4% vs last month</Text>
-              </View>
-              <MiniBarChart />
+              <Text style={styles.ptsMonth}>+{totalPoints} pts this period</Text>
+              {trendPct !== null && (
+                <View style={styles.trendRow}>
+                  <TrendUpIcon color={TEAL} size={14} />
+                  <Text style={styles.trendText}>  {trendPct >= 0 ? '+' : ''}{trendPct}% vs previous period</Text>
+                </View>
+              )}
+              <MiniBarChart values={miniBarValues} />
             </View>
           </View>
         </View>
@@ -192,36 +248,17 @@ export default function EcoScoreScreen() {
         <Text style={styles.sectionTitle}>ECO REWARDS</Text>
         <View style={styles.card}>
           <View style={styles.rewardsRow}>
-            <RewardCol icon={<FlashIcon color="#888" size={20} />} value="+17.6 kWh" label="Saved" />
+            <RewardCol
+              icon={<DollarIcon color="#888" size={20} />}
+              value={currencyCode ? `${(totalSavedCents / 100).toFixed(2)} ${currencyCode}` : '—'}
+              label="Saved" />
             <View style={styles.rewardsDivider} />
-            <RewardCol icon={<LeafIcon color="#888" size={20} />} value="+9.4 kg" label={'CO₂ avoided'} />
+            <RewardCol
+              icon={<LeafIcon color="#888" size={20} />}
+              value={totalCo2Grams > 0 ? `${(totalCo2Grams / 1000).toFixed(1)} kg` : '—'}
+              label={'CO₂ avoided'} />
             <View style={styles.rewardsDivider} />
-            <RewardCol icon={<StarOutlineIcon color="#888" size={20} />} value="+320" label="Eco Points" />
-          </View>
-        </View>
-
-        {/* Baseline comparison */}
-        <View style={styles.card}>
-          <Text style={styles.baselineTitle}>Baseline (similar EVs / conditions)</Text>
-          <View style={styles.grayBar} />
-          <View style={styles.tealBarRow}>
-            <View style={styles.tealBar} />
-            <Text style={styles.barArrow}>›</Text>
-          </View>
-          <Text style={styles.drivingLabel}>Your Driving + Charging</Text>
-          <View style={styles.highlightBox}>
-            <Text style={styles.highlightText}>
-              You drove + charged{'\n'}more efficiently{'\n'}than{' '}
-              <Text style={styles.highlightBold}>76%</Text>
-              {' '}of similar EV drivers
-            </Text>
-          </View>
-          <View style={styles.improvingRow}>
-            <Text style={styles.lastDaysText}>Last {selectedTime}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.improvingText}>improving  </Text>
-              <TrendUpIcon color={TEAL} size={14} />
-            </View>
+            <RewardCol icon={<StarOutlineIcon color="#888" size={20} />} value={`+${totalPoints}`} label="Eco Points" />
           </View>
         </View>
 
@@ -229,7 +266,7 @@ export default function EcoScoreScreen() {
         <Text style={styles.sectionTitle}>ECO SAVINGS TREND</Text>
         <View style={styles.card}>
           <View style={styles.tabRow}>
-            {['Energy', 'Cost', 'Points'].map(tab => (
+            {TREND_TABS.map(tab => (
               <TouchableOpacity
                 key={tab}
                 style={[styles.tab, trendTab === tab && styles.tabActive]}
@@ -240,25 +277,30 @@ export default function EcoScoreScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <TrendBarChart />
+          <TrendBarChart values={trendValues} />
         </View>
 
         {/* Details per day/trip */}
-        <Text style={styles.sectionTitle}>DETAILS PER DAY/TRIP</Text>
+        <Text style={styles.sectionTitle}>DETAILS PER TRIP</Text>
         <View style={styles.card}>
-          {DETAIL_ROWS.map((row, i) => (
+          {scoredTrips.slice(-10).reverse().map((trip, i, arr) => (
             <TouchableOpacity
-              key={row.id}
-              style={[styles.detailRow, i < DETAIL_ROWS.length - 1 && styles.detailRowBorder]}
-              onPress={() => navigation.navigate('TripDetail', { tripId: row.id })}
+              key={trip.id}
+              style={[styles.detailRow, i < arr.length - 1 && styles.detailRowBorder]}
+              onPress={() => navigation.navigate('TripDetail', { tripId: trip.id })}
               activeOpacity={0.7}
             >
-              <Text style={styles.detailDate}>{row.date}</Text>
-              <Text style={styles.detailTime}>{row.time}, {row.city}</Text>
-              <Text style={styles.detailPts}>{row.pts}</Text>
+              <Text style={styles.detailDate}>{new Date(trip.startTime).toLocaleDateString()}</Text>
+              <Text style={styles.detailTime}>
+                {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+              <Text style={styles.detailPts}>+{trip.reward?.tripPointsEarned ?? 0}</Text>
               <Text style={styles.detailArrow}>›</Text>
             </TouchableOpacity>
           ))}
+          {scoredTrips.length === 0 && (
+            <Text style={styles.emptyText}>No scored trips yet in this range.</Text>
+          )}
         </View>
 
       </ScrollView>
@@ -331,22 +373,6 @@ const styles = StyleSheet.create({
   rewardValue: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginTop: 8, marginBottom: 4 },
   rewardLabel: { fontSize: 11, color: '#888', textAlign: 'center' },
 
-  // Baseline comparison
-  baselineTitle: { fontSize: 13, color: '#555', marginBottom: 10 },
-  grayBar: { height: 5, backgroundColor: '#E5E5E5', borderRadius: 3, marginBottom: 8 },
-  tealBarRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  tealBar: { height: 8, flex: 0.78, backgroundColor: TEAL, borderRadius: 4 },
-  barArrow: { fontSize: 18, fontWeight: '700', color: TEAL, marginLeft: 8 },
-  drivingLabel: { fontSize: 13, color: '#555', marginBottom: 12 },
-  highlightBox: {
-    backgroundColor: '#E8F7F7', borderRadius: 12, padding: 16, marginBottom: 14, alignItems: 'center',
-  },
-  highlightText: { fontSize: 14, color: '#333', textAlign: 'center', lineHeight: 22 },
-  highlightBold: { fontWeight: '800', color: '#1A1A1A' },
-  improvingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  lastDaysText: { fontSize: 13, color: '#888' },
-  improvingText: { fontSize: 13, fontWeight: '600', color: TEAL },
-
   // Trend tabs
   tabRow: { flexDirection: 'row', columnGap: 8, marginBottom: 4 },
   tab: {
@@ -364,4 +390,5 @@ const styles = StyleSheet.create({
   detailTime: { flex: 1, fontSize: 13, color: '#333' },
   detailPts: { fontSize: 13, fontWeight: '700', color: TEAL, marginRight: 8 },
   detailArrow: { fontSize: 16, color: '#CCCCCC' },
+  emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 12 },
 });

@@ -1,7 +1,6 @@
 export type TripType = 'business' | 'private' | 'commute';
 export type TransportMode = 'car' | 'truck' | 'scooter' | 'cycling' | 'walking';
-export type TripStatus = 'pending' | 'active' | 'completed' | 'synced';
-export type RoadType = 'urban' | 'highway' | 'rural' | 'unknown';
+export type TripStatus = 'active' | 'completed';
 
 export interface GpsPoint {
   latitude: number;
@@ -22,31 +21,65 @@ export interface TelematicsEvent {
   metadata?: Record<string, unknown>;
 }
 
-export interface TripCost {
-  fuelCost: number;
-  leaseCost: number;
-  insuranceCost: number;
-  maintenanceCost: number;
-  total: number;
-  currency: string;
+// Context flags submitted alongside a trip — mirrors TripRewardController's
+// "context" block (App\Controller\API\Rewards\TripRewardController).
+export interface TripContext {
+  isNight: boolean;
+  isAfterMidnight: boolean;
+  isRain: boolean;
+  highwayShare: number; // 0.0–1.0
 }
 
-export interface TripAnalytics {
-  distanceKm: number;
-  durationSeconds: number;
+// Aggregate event counters submitted at trip-end — mirrors TripRewardController's
+// "events" block. Individual TelematicsEvents (above) are the source these are derived from.
+export interface TripEventCounters {
+  speedingSeconds: number;
+  harshBrakeCount: number;
+  harshAccelCount: number;
+  harshCornerCount: number;
+  phoneTextSeconds: number;
+}
+
+// Optional energy block — only sent when the active vehicle has a known
+// fuel type + estimated consumption. Mirrors TripRewardController's "energy" block.
+export interface TripEnergy {
+  fuelType: string;
   fuelUsedLiters?: number;
-  co2Kg?: number;
-  averageSpeedKmh: number;
-  maxSpeedKmh: number;
-  harshEventCount: number;
-  ecoScore?: number;
-  cost?: TripCost;
-  weatherStart?: string;
-  weatherEnd?: string;
-  tempStartC?: number;
-  tempEndC?: number;
+  fuelBaselineLiters?: number;
+  kwhUsed?: number;
+  kwhBaseline?: number;
+  fuelPricePerLiter?: number;
+  electricityPricePerKwh?: number;
+  currencyCode?: string;
 }
 
+export interface TripVoicePayload {
+  script: string;
+  summaryKey: string;
+  highlights: string[];
+  tips: string[];
+}
+
+// Shape of a successful POST /trips/reward response (camelCased on the client).
+export interface TripRewardResult {
+  tripRewardId: number;
+  safetyScore: number;
+  ecoScore: number;
+  tripRewardScore: number;
+  tripPointsEarned: number;
+  phoneSubscore: number;
+  distanceKm: number;
+  co2AvoidedGrams: number | null;
+  moneySavedCents: number | null;
+  currencyCode: string | null;
+  voicePayload: TripVoicePayload;
+  aiNarrativeTip: string | null;
+}
+
+// Locally-persisted trip record. The backend has no trip read-back endpoint —
+// TripReward only stores aggregate scoring fields, not GPS route/waypoints/weather —
+// so this local record (kept in redux-persist) is the sole source for trip
+// history/detail/map screens. `reward` is populated once submitTripReward succeeds.
 export interface Trip {
   id: string;
   vehicleId: string;
@@ -58,8 +91,13 @@ export interface Trip {
   endTime?: number;
   route: GpsPoint[];
   events: TelematicsEvent[];
-  analytics?: TripAnalytics;
-  syncedAt?: number;
+  context?: TripContext;
+  // Snapshot of the aggregate counters submitted in the request (speeding
+  // seconds, phone-usage seconds, harsh-event counts) — kept locally so
+  // DriverScore/EcoScore can aggregate across history without depending on
+  // the backend (which only returns computed scores, not the raw counters).
+  eventCounters?: TripEventCounters;
+  reward?: TripRewardResult;
 }
 
 export interface TripState {
