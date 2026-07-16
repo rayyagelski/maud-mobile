@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Switch, ScrollView,
 } from 'react-native';
@@ -6,6 +6,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { VideoCameraIcon, WarningTriangleIcon } from '../../components/icons';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { setAlertsEnabled } from '../../store/slices/complianceSlice';
+import { formatDistance } from '../../utils/helpers';
 import type { MainTabNavigationProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -13,7 +17,9 @@ const ORANGE = '#F47920';
 
 export default function ComplianceScreen() {
   const navigation = useNavigation<MainTabNavigationProp>();
-  const [alertsEnabled, setAlertsEnabled] = useState(true);
+  const dispatch = useAppDispatch();
+  const { alertsEnabled, activeAlert } = useAppSelector(s => s.compliance);
+  const { isTracking } = useAppSelector(s => s.trips);
 
   return (
     <View style={styles.safe}>
@@ -48,7 +54,7 @@ export default function ComplianceScreen() {
             </View>
             <Switch
               value={alertsEnabled}
-              onValueChange={setAlertsEnabled}
+              onValueChange={(v) => { dispatch(setAlertsEnabled(v)); }}
               trackColor={{ false: '#E0E0E0', true: TEAL }}
               thumbColor="white"
             />
@@ -56,16 +62,33 @@ export default function ComplianceScreen() {
         </View>
 
         {/* Enforcement zone alert card */}
-        <View style={styles.alertCard}>
-          <View style={styles.cameraCircle}>
-            <VideoCameraIcon color="white" size={44} />
+        {activeAlert ? (
+          <View style={styles.alertCard}>
+            <View style={styles.cameraCircle}>
+              <VideoCameraIcon color="white" size={44} />
+            </View>
+            <Text style={styles.alertTitle}>
+              {'You are entering an\nenforcement zone.'}
+            </Text>
+            <Text style={styles.alertDistance}>{formatDistance(activeAlert.distanceMeters / 1000)}</Text>
+            <Text style={styles.alertSub}>
+              {activeAlert.speedLimitKmh ? `Reduce speed to ${activeAlert.speedLimitKmh} km/h` : 'Reduce speed and drive carefully'}
+            </Text>
           </View>
-          <Text style={styles.alertTitle}>
-            {'You are entering an\nenforcement zone.'}
-          </Text>
-          <Text style={styles.alertDistance}>500m</Text>
-          <Text style={styles.alertSub}>Reduce speed to 50 km/h</Text>
-        </View>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              {!alertsEnabled ? 'Alerts are off' : !isTracking ? 'No active trip' : 'No alerts nearby'}
+            </Text>
+            <Text style={styles.cardSub}>
+              {!alertsEnabled
+                ? 'Turn on Compliance Intelligence to get warned near enforcement zones.'
+                : !isTracking
+                  ? "Alerts monitor your route once a trip is being tracked."
+                  : "You'll be alerted here if you approach a known enforcement zone."}
+            </Text>
+          </View>
+        )}
 
         {/* Stay Safe card */}
         <View style={styles.card}>

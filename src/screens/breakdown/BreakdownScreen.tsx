@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import Geolocation from '@react-native-community/geolocation';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { UsersIcon, BuildingIcon, PhoneIcon } from '../../components/icons';
+import { searchNearbyGarages, type NearbyGarage } from '../../services/here/herePlacesClient';
+import { formatDistance } from '../../utils/helpers';
 import type { MainTabNavigationProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -16,21 +19,12 @@ interface Contact {
   Icon: React.ComponentType<{ color?: string; size?: number }>;
 }
 
+// No backend source exists for personalized auto-club/manufacturer/insurance
+// contact numbers (out of Phase 2 scope) — these stay generic placeholders.
 const QUICK_CONTACTS: Contact[] = [
   { label: 'Auto Club',     phone: '+18002224357', Icon: UsersIcon },
   { label: 'Manufacturer',  phone: '+18006637237', Icon: BuildingIcon },
   { label: 'Insurance',     phone: '+18005550123', Icon: PhoneIcon },
-];
-
-interface Garage {
-  name: string;
-  address: string;
-  phone: string;
-}
-
-const NEARBY_GARAGES: Garage[] = [
-  { name: 'Elite Auto Repairs', address: 'Oak Street. 0.7 miles', phone: '+18005550001' },
-  { name: 'Premier Car Care',   address: 'Oak Street. 0.8 miles', phone: '+18005550002' },
 ];
 
 function dial(phone: string) {
@@ -39,6 +33,25 @@ function dial(phone: string) {
 
 export default function BreakdownScreen() {
   const navigation = useNavigation<MainTabNavigationProp>();
+  const [garages, setGarages] = useState<NearbyGarage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Geolocation.getCurrentPosition(
+      ({ coords }) => {
+        searchNearbyGarages({ latitude: coords.latitude, longitude: coords.longitude })
+          .then(setGarages)
+          .catch(() => setError('Could not load nearby garages right now.'))
+          .finally(() => setIsLoading(false));
+      },
+      () => {
+        setError('Enable location access to find nearby garages.');
+        setIsLoading(false);
+      },
+      { enableHighAccuracy: true },
+    );
+  }, []);
 
   return (
     <View style={styles.safe}>
@@ -94,18 +107,37 @@ export default function BreakdownScreen() {
         <Text style={styles.sectionLabel}>NEARBY GARAGES</Text>
 
         <View style={styles.contactGroup}>
-          {NEARBY_GARAGES.map(({ name, address, phone }, i) => (
-            <View key={name}>
+          {isLoading && (
+            <View style={[styles.contactRow, { justifyContent: 'center' }]}>
+              <ActivityIndicator color={TEAL} />
+            </View>
+          )}
+          {!isLoading && error && (
+            <View style={styles.contactRow}>
+              <Text style={styles.contactPhone}>{error}</Text>
+            </View>
+          )}
+          {!isLoading && !error && garages.length === 0 && (
+            <View style={styles.contactRow}>
+              <Text style={styles.contactPhone}>No garages found nearby.</Text>
+            </View>
+          )}
+          {!isLoading && !error && garages.map((garage, i) => (
+            <View key={garage.id}>
               <View style={styles.contactRow}>
                 <View style={styles.garageInfo}>
-                  <Text style={styles.contactName}>{name}</Text>
-                  <Text style={styles.contactPhone}>{address}</Text>
+                  <Text style={styles.contactName}>{garage.name}</Text>
+                  <Text style={styles.contactPhone}>
+                    {garage.address} · {formatDistance(garage.distanceMeters / 1000)}
+                  </Text>
                 </View>
-                <TouchableOpacity onPress={() => dial(phone)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.6}>
-                  <PhoneIcon color="#BBBBBB" size={22} />
-                </TouchableOpacity>
+                {garage.phone && (
+                  <TouchableOpacity onPress={() => dial(garage.phone!)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.6}>
+                    <PhoneIcon color="#BBBBBB" size={22} />
+                  </TouchableOpacity>
+                )}
               </View>
-              {i < NEARBY_GARAGES.length - 1 && <View style={styles.divider} />}
+              {i < garages.length - 1 && <View style={styles.divider} />}
             </View>
           ))}
         </View>
