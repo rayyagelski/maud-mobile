@@ -37,19 +37,6 @@ export const selectVehicle = createAsyncThunk(
   },
 );
 
-export const createVehicle = createAsyncThunk(
-  'vehicles/create',
-  async (data: Omit<Vehicle, 'id'>, { rejectWithValue }) => {
-    try {
-      const res = await vehiclesApi.create(data);
-      return res.data;
-    } catch (err: unknown) {
-      const e = err as { errStatus?: string };
-      return rejectWithValue(e.errStatus ?? 'Failed to add vehicle');
-    }
-  },
-);
-
 const vehicleSlice = createSlice({
   name: 'vehicles',
   initialState,
@@ -71,15 +58,6 @@ const vehicleSlice = createSlice({
       })
       .addCase(selectVehicle.fulfilled, (state, action: PayloadAction<string>) => {
         state.selectedVehicle = state.vehicles.find(v => v.id === action.payload) ?? null;
-      })
-      .addCase(createVehicle.pending, (state) => { state.isLoading = true; })
-      .addCase(createVehicle.fulfilled, (state, action: PayloadAction<Vehicle>) => {
-        state.isLoading = false;
-        state.vehicles.push(action.payload);
-      })
-      .addCase(createVehicle.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.payload as string;
       });
   },
 });

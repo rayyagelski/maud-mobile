@@ -4,3 +4,8 @@ export { authApi } from './endpoints/auth';
 export { vehiclesApi } from './endpoints/vehicles';
 export { tripsApi } from './endpoints/trips';
 export { driversApi } from './endpoints/drivers';
+export { countriesApi } from './endpoints/countries';
+export type { ActiveCountry } from './endpoints/countries';
+export { expensesApi } from './endpoints/expenses';
+export { serviceRecordsApi } from './endpoints/serviceRecords';
+export { rewardsApi } from './endpoints/rewards';

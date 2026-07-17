@@ -9,6 +9,9 @@ desktop.ini
 .env
 .env.*
 
+# Real API keys — see src/config/env.example.ts for the template
+src/config/env.ts
+
 # VS Code
 .vscode/
 

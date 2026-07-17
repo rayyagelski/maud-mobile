@@ -5,13 +5,14 @@ export interface Vehicle {
   id: string;
   make: string;
   model: string;
-  year: number;
-  fuelType: FuelType;
-  vehicleType: VehicleType;
+  year?: number;
+  fuelType?: FuelType;
+  vehicleType?: VehicleType;
   engineSize?: number;
   vin?: string;
   odometer?: number;
   estimatedConsumption?: number; // L/100km or kWh/100km
+  isActive?: boolean;
 }
 
 export interface OdometerResponse {

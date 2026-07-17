@@ -3,17 +3,26 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  FlashIcon, PhoneIcon, ArrowUpIcon, GiftIcon,
+  FlashIcon, PhoneIcon, GiftIcon,
   LeafIcon, DollarIcon, HourglassIcon,
-  PersonIcon, ThumbsUpIcon, ThumbsDownIcon,
+  PersonIcon, ThumbsUpIcon, ThumbsDownIcon, SparkleIcon,
 } from '../../components/icons';
-import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { useAppSelector } from '../../hooks/useAppSelector';
+import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
+
+function ratingLabel(score: number): string {
+  if (score >= 90) return 'Excellent';
+  if (score >= 75) return 'Great';
+  if (score >= 60) return 'Good';
+  return 'Needs Work';
+}
 
 // ── Score arc ──────────────────────────────────────────────────────────────
 
@@ -39,7 +48,7 @@ function ScoreArc({ score }: { score: number }) {
         </G>
       </Svg>
       <Text style={arcSt.score}>{score}</Text>
-      <Text style={arcSt.label}>✦ Excellent</Text>
+      <Text style={arcSt.label}>✦ {ratingLabel(score)}</Text>
     </View>
   );
 }
@@ -75,9 +84,36 @@ function ScoreRow({ icon, label, rating, score, barColor }: {
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
+const SUMMARY_TITLES: Record<string, string> = {
+  excellent_drive: 'EXCELLENT DRIVE!',
+  good_drive: 'GREAT DRIVE!',
+  average_drive: 'GOOD DRIVE',
+  needs_improvement: 'TRIP COMPLETE',
+};
+
 export default function TripSummaryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const route = useRoute<TripSummaryRouteProp>();
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+
+  const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
+  const reward = trip?.reward;
+
+  const distanceKm = trip
+    ? trip.route.reduce(
+        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
+        0,
+      )
+    : reward?.distanceKm ?? 0;
+  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
+  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+
+  const heroTitle = (reward && SUMMARY_TITLES[reward.voicePayload.summaryKey]) ?? 'TRIP COMPLETE';
+  const moneySavedLabel =
+    reward?.moneySavedCents != null && reward.currencyCode
+      ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
+      : '—';
+  const co2Label = reward?.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—';
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -99,24 +135,24 @@ export default function TripSummaryScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Hero title */}
-        <Text style={styles.heroTitle}>GREAT DRIVE!</Text>
+        <Text style={styles.heroTitle}>{heroTitle}</Text>
         <Text style={styles.heroSub}>Every smart choice makes a difference.</Text>
 
         {/* Score card */}
         <View style={styles.card}>
           <View style={styles.heroRow}>
-            <ScoreArc score={92} />
+            <ScoreArc score={reward ? Math.round(reward.tripRewardScore) : 0} />
             <View style={styles.savingsCol}>
               <Text style={styles.savingsLabel}>You saved</Text>
               <View style={styles.savingsRow}>
-                <Text style={styles.savingsAmountLarge}>$2.18</Text>
+                <Text style={styles.savingsAmountLarge}>{moneySavedLabel}</Text>
                 <View style={[styles.badge, { backgroundColor: '#F5A623' }]}>
                   <DollarIcon color="white" size={20} />
                 </View>
               </View>
-              <Text style={[styles.savingsLabel, { marginTop: 14 }]}>Co2 Avoided</Text>
+              <Text style={[styles.savingsLabel, { marginTop: 14 }]}>CO2 Avoided</Text>
               <View style={styles.savingsRow}>
-                <Text style={styles.savingsAmount}>2,420 lbs</Text>
+                <Text style={styles.savingsAmount}>{co2Label}</Text>
                 <View style={[styles.badge, { backgroundColor: '#27AE60' }]}>
                   <LeafIcon color="white" size={20} />
                 </View>
@@ -129,63 +165,82 @@ export default function TripSummaryScreen() {
         <View style={[styles.card, styles.statsCard]}>
           <View style={styles.statItem}>
             <PersonIcon color="#BBBBBB" size={22} />
-            <Text style={styles.statVal}>18.6 mi</Text>
+            <Text style={styles.statVal}>{formatDistance(distanceKm)}</Text>
             <Text style={styles.statMeta}>Distance</Text>
           </View>
           <View style={styles.statSep} />
           <View style={styles.statItem}>
             <HourglassIcon color="#BBBBBB" size={22} />
-            <Text style={styles.statVal}>24 min</Text>
+            <Text style={styles.statVal}>{formatDuration(durationSeconds)}</Text>
             <Text style={styles.statMeta}>Duration</Text>
           </View>
           <View style={styles.statSep} />
           <View style={styles.statItem}>
             <FlashIcon color="#BBBBBB" size={22} />
-            <Text style={styles.statVal}>47 mph</Text>
+            <Text style={styles.statVal}>{Math.round(avgSpeedKmh)} km/h</Text>
             <Text style={styles.statMeta}>Avg. Speed</Text>
           </View>
         </View>
 
-        {/* How you scored header */}
-        <View style={styles.scoredHeader}>
-          <Text style={styles.scoredTitle}>HOW YOU SCORED</Text>
-          <Text style={styles.scoredPts}>+410 pts</Text>
-        </View>
-
-        {/* Scores card */}
-        <View style={styles.card}>
-          <ScoreRow icon={<FlashIcon color="#888" size={16} />}
-            label="Eco Driving" rating="Good" score={80} barColor="#F5A623" />
-          <View style={styles.rowDiv} />
-          <ScoreRow icon={<PhoneIcon color="#888" size={16} />}
-            label="Phone Usage" rating="Perfect" score={100} barColor={TEAL} />
-          <View style={styles.rowDiv} />
-          <ScoreRow icon={<FlashIcon color="#888" size={16} />}
-            label="Smooth Braking" rating="Great" score={90} barColor={TEAL} />
-          <View style={styles.rowDiv} />
-          <ScoreRow icon={<ArrowUpIcon color="#888" size={16} />}
-            label="Speed Control" rating="Perfect" score={100} barColor={TEAL} />
-        </View>
-
-        {/* Rewards card */}
-        <View style={styles.card}>
-          <View style={styles.rewardsRow}>
-            <View style={styles.giftBox}>
-              <GiftIcon color={TEAL} size={28} />
+        {reward ? (
+          <>
+            {/* How you scored header */}
+            <View style={styles.scoredHeader}>
+              <Text style={styles.scoredTitle}>HOW YOU SCORED</Text>
+              <Text style={styles.scoredPts}>+{reward.tripPointsEarned} pts</Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rewardsTitle}>Nice Work! You earned 15 points</Text>
-              <Text style={styles.rewardsSub}>Stay consistent and unlock bigger rewards</Text>
-              <Text style={styles.rewardsSub}>You are 35 point away from your next rewards!</Text>
-              <View style={styles.rewardsProgressRow}>
-                <View style={styles.rewardsBarBg}>
-                  <View style={styles.rewardsBarFill} />
+
+            {/* Scores card — sourced directly from the backend's scoring pipeline */}
+            <View style={styles.card}>
+              <ScoreRow icon={<LeafIcon color="#888" size={16} />}
+                label="Eco Driving" rating={ratingLabel(reward.ecoScore)}
+                score={Math.round(reward.ecoScore)} barColor="#F5A623" />
+              <View style={styles.rowDiv} />
+              <ScoreRow icon={<PhoneIcon color="#888" size={16} />}
+                label="Phone Usage" rating={ratingLabel(reward.phoneSubscore)}
+                score={Math.round(reward.phoneSubscore)} barColor={TEAL} />
+              <View style={styles.rowDiv} />
+              <ScoreRow icon={<FlashIcon color="#888" size={16} />}
+                label="Overall Safety" rating={ratingLabel(reward.safetyScore)}
+                score={Math.round(reward.safetyScore)} barColor={TEAL} />
+            </View>
+
+            {/* Rewards card */}
+            <View style={styles.card}>
+              <View style={styles.rewardsRow}>
+                <View style={styles.giftBox}>
+                  <GiftIcon color={TEAL} size={28} />
                 </View>
-                <Text style={styles.rewardsPts}>65/100 pts</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rewardsTitle}>
+                    Nice Work! You earned {reward.tripPointsEarned} point{reward.tripPointsEarned === 1 ? '' : 's'}
+                  </Text>
+                  <Text style={styles.rewardsSub}>Keep it up to unlock bigger rewards over time.</Text>
+                </View>
               </View>
             </View>
+
+            {reward.aiNarrativeTip && (
+              <View style={styles.card}>
+                <View style={styles.rewardsRow}>
+                  <View style={[styles.giftBox, { backgroundColor: '#EFF9F9' }]}>
+                    <SparkleIcon color={TEAL} size={26} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rewardsTitle}>AI Driving Tip</Text>
+                    <Text style={styles.rewardsSub}>{reward.aiNarrativeTip}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.rewardsSub}>
+              This trip couldn't be scored yet — it may have been submitted while offline. Your route is still saved, and scoring will complete automatically once you're back online.
+            </Text>
           </View>
-        </View>
+        )}
 
         {/* Trip feedback */}
         <Text style={styles.feedTitle}>How was your Trip?</Text>
@@ -253,7 +308,7 @@ const styles = StyleSheet.create({
   savingsCol: { flex: 1, paddingLeft: 18 },
   savingsLabel: { fontSize: 12, color: '#888888', marginBottom: 4 },
   savingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  savingsAmountLarge: { fontSize: 36, fontWeight: '900', color: '#1A1A1A' },
+  savingsAmountLarge: { fontSize: 30, fontWeight: '900', color: '#1A1A1A' },
   savingsAmount: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
   badge: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
 
@@ -294,13 +349,6 @@ const styles = StyleSheet.create({
   },
   rewardsTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
   rewardsSub: { fontSize: 12, color: '#888888', lineHeight: 18 },
-  rewardsProgressRow: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: 10, columnGap: 10,
-  },
-  rewardsBarBg: { flex: 1, height: 7, backgroundColor: '#EEEEEE', borderRadius: 4, overflow: 'hidden' },
-  rewardsBarFill: { width: '65%', height: '100%', backgroundColor: TEAL, borderRadius: 4 },
-  rewardsPts: { fontSize: 12, color: '#888888' },
 
   // Feedback
   feedTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
