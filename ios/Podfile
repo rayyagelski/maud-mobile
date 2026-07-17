@@ -48,6 +48,9 @@ target 'MAUDConnect' do
         # Xcode 16+ sandboxes user script phases by default, which breaks
         # CocoaPods embed/copy scripts that use rsync across framework boundaries.
         config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+        # use_frameworks! :static makes every pod a module; react-native-maps and
+        # other ObjC pods import React-Core headers that are not modular — allow it.
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
     end
   end
