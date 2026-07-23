@@ -25,3 +25,8 @@ export const WEATHER_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
 
 export const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
 export const OVERPASS_BASE_URL = 'https://overpass-api.de/api/interpreter';
+
+// How often accumulated trip points get PATCHed to VGD while a trip is in
+// progress (mirrors the old native app's timer-driven batch upload, so a
+// killed app / crash mid-trip loses at most one interval's worth of data).
+export const VGD_POINT_FLUSH_INTERVAL_MS = 30 * 1000;

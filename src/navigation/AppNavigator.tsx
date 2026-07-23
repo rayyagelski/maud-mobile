@@ -10,6 +10,7 @@ import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
 import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
+import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useSyncEngine } from '../services/syncEngine';
 import { configureClient } from '../api/client';
 import { refreshToken, setToken } from '../store/slices/authSlice';
@@ -25,6 +26,7 @@ function TripDetectionRunner() {
   useTripAutoDetection();
   useHarshEventTracker();
   useComplianceMonitor();
+  useVgdPointFlush();
   useSyncEngine();
   return null;
 }

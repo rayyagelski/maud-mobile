@@ -9,3 +9,4 @@ export type { ActiveCountry } from './endpoints/countries';
 export { expensesApi } from './endpoints/expenses';
 export { serviceRecordsApi } from './endpoints/serviceRecords';
 export { rewardsApi } from './endpoints/rewards';
+export { vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from './endpoints/vgd';

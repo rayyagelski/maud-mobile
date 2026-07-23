@@ -98,6 +98,19 @@ export interface Trip {
   // the backend (which only returns computed scores, not the raw counters).
   eventCounters?: TripEventCounters;
   reward?: TripRewardResult;
+  // Vehicle Generated Data write-path state (separate from `reward` above —
+  // VGD and trip_reward are two independent backend destinations for the
+  // same trip). `vgdTripId` is the client-generated UUID sent as VGD's `id`
+  // on createTrip, reused unchanged across retries/offline replay. The
+  // `vgdSent*`/`vgdCumulativeDistanceKm`/`vgdLastSentPoint` fields track flush
+  // progress in one place so both the periodic flush hook and endTrip's final
+  // flush read/advance the same cursor rather than duplicating or dropping points.
+  vgdTripId?: string;
+  vgdTripCreated?: boolean;
+  vgdSentRouteCount?: number;
+  vgdSentEventCount?: number;
+  vgdCumulativeDistanceKm?: number;
+  vgdLastSentPoint?: GpsPoint;
 }
 
 export interface TripState {

@@ -8,11 +8,23 @@ import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MountainIcon, HourglassIcon, GaugeIcon,
-  LeafIcon, DollarIcon,
+  LeafIcon, DollarIcon, PinIcon, CloudIcon, WarningTriangleIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
+import type { VgdTripEventIndicator } from '../../types/vgd.types';
+
+const EVENT_INDICATOR_LABELS: Record<VgdTripEventIndicator, string> = {
+  hard_braking: 'Hard braking',
+  acceleration: 'Harsh acceleration',
+  cornering: 'Harsh cornering',
+  speed_limit: 'Speed limit exceeded',
+  road_type: 'Road type change',
+  trip_start: 'Trip start',
+  trip_end: 'Trip end',
+};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -149,6 +161,18 @@ export default function TripDetailScreen() {
   const harshAccelCount = trip?.events.filter(e => e.type === 'harsh_accel').length ?? 0;
   const harshCornerCount = trip?.events.filter(e => e.type === 'harsh_corner').length ?? 0;
 
+  // Vehicle Generated Data read-back — only for trips that actually made it
+  // into VGD (older trips predating this feature have no vgdTripId at all).
+  const vgdEnabled = Boolean(trip?.vgdTripId && trip?.vgdTripCreated);
+  const {
+    details: vgdDetails,
+    events: vgdEvents,
+    isLoading: vgdLoading,
+    isProcessing: vgdProcessing,
+  } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
+  const vgdAnalytics = vgdDetails?.analytics;
+  const visibleVgdEvents = vgdEvents.filter(e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end');
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <SafeAreaView edges={['top']} style={styles.safeHeader}>
@@ -249,6 +273,61 @@ export default function TripDetailScreen() {
             <Text style={styles.sectionTitle}>AI DRIVING TIP</Text>
             <Text style={styles.tipText}>{reward.aiNarrativeTip}</Text>
           </View>
+        )}
+
+        {/* Vehicle Generated Data — server-processed detail (addresses,
+            weather, road-type/speed-limit/harsh-event enrichment), read back
+            from vgd_query. Processed asynchronously by vgd_analytics after
+            trip-end, so this can take a little while to appear. */}
+        {vgdEnabled && (
+          <>
+            <Text style={styles.sectionTitle}>VEHICLE GENERATED DATA</Text>
+            <View style={styles.card}>
+              {vgdLoading && !vgdAnalytics ? (
+                <Text style={styles.emptyText}>Loading…</Text>
+              ) : vgdProcessing ? (
+                <Text style={styles.emptyText}>Still processing…</Text>
+              ) : vgdAnalytics ? (
+                <>
+                  {vgdAnalytics.startAddress && (
+                    <StatRow icon={<PinIcon color="#999" size={18} />} label="Start" value={vgdAnalytics.startAddress} />
+                  )}
+                  {vgdAnalytics.endAddress && (
+                    <StatRow icon={<PinIcon color="#999" size={18} />} label="End" value={vgdAnalytics.endAddress} />
+                  )}
+                  {vgdAnalytics.averageSpeed != null && (
+                    <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(vgdAnalytics.averageSpeed)} km/h`} />
+                  )}
+                  <StatRow icon={<LeafIcon color="#999" size={18} />} label="CO₂" value={`${Math.round(vgdAnalytics.co2emissions)} g/km`} />
+                  {(vgdAnalytics.endWeather?.temperatureDesc || vgdAnalytics.endWeather?.skyInfo) && (
+                    <StatRow
+                      icon={<CloudIcon color="#999" size={18} />}
+                      label="Weather"
+                      value={vgdAnalytics.endWeather?.skyInfo ?? vgdAnalytics.endWeather?.temperatureDesc ?? '—'}
+                      last
+                    />
+                  )}
+                </>
+              ) : (
+                <Text style={styles.emptyText}>No data available.</Text>
+              )}
+            </View>
+
+            {visibleVgdEvents.length > 0 && (
+              <View style={styles.card}>
+                {visibleVgdEvents.map((event, i) => (
+                  <StatRow
+                    key={`${event.indicator}-${event.point.time}-${i}`}
+                    icon={<WarningTriangleIcon color="#999" size={18} />}
+                    label={EVENT_INDICATOR_LABELS[event.indicator]}
+                    value={event.point.parameters.address
+                      ?? new Date(event.point.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    last={i === visibleVgdEvents.length - 1}
+                  />
+                ))}
+              </View>
+            )}
+          </>
         )}
 
       </ScrollView>

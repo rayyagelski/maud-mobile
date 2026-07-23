@@ -19,6 +19,18 @@ export function configureClient(
   tokenRefresher = refreshToken;
 }
 
+// Exposes the same token source to other axios instances (e.g. vgdClient.ts)
+// that need the identical vehicle-scoped JWT this client already carries —
+// VGD verifies against the same MAUD-API signer, so there's no separate
+// token to fetch.
+export function getSharedToken(): string | null {
+  return tokenGetter ? tokenGetter() : null;
+}
+
+export async function getRefreshedSharedToken(): Promise<string | null> {
+  return tokenRefresher ? tokenRefresher() : null;
+}
+
 client.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   if (!tokenGetter) return config;
 

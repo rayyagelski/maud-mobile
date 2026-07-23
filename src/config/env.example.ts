@@ -13,3 +13,8 @@ export const HERE_API_KEY = 'REPLACE_ME_HERE_API_KEY';
 
 // Get a free-tier key at https://openweathermap.org/api.
 export const OPENWEATHER_API_KEY = 'REPLACE_ME_OPENWEATHER_API_KEY';
+
+// Base URL for the Vehicle Generated Data ingest API (VehicleGeneratedData /
+// "vgd_app" service) — includes the required /v1 suffix (routes are mounted
+// at /v1/trips etc, see the service's src/app.js).
+export const VGD_BASE_URL = 'https://vgd.myautodata.com/v1';
