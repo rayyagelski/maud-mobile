@@ -17,6 +17,8 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { startTrip, endTrip } from '../../store/slices/tripSlice';
+import { vehiclesApi } from '../../api';
+import type { FuelPriceResponse } from '../../types/vehicle.types';
 import {
   fetchHereRoute, geocodeAddress, suggestAddresses,
   type LatLng, type HereRouteResult, type AddressSuggestion,
@@ -101,6 +103,7 @@ export default function RoutePlannerScreen() {
   const [isEndingTrip, setIsEndingTrip] = useState(false);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapHeightAnim = useRef(new Animated.Value(MAP_HEIGHT)).current;
+  const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
 
   // Collapse the map (rather than letting the keyboard just overlay on top
   // of the destination field/suggestions with no reflow at all) while the
@@ -135,6 +138,23 @@ export default function RoutePlannerScreen() {
       { enableHighAccuracy: true },
     );
   }, []);
+
+  // Fuel/electricity price for the Trip Cost estimate below — fail-soft like
+  // every other auxiliary lookup in this app (weather, AI tip, reward
+  // submission): a failed price fetch just means Trip Cost stays unfilled,
+  // never blocks route planning.
+  const fuelPriceVehicleId = selectedVehicle?.id ?? vehicles[0]?.id;
+  useEffect(() => {
+    if (!fuelPriceVehicleId) {
+      setFuelPrice(null);
+      return;
+    }
+    let cancelled = false;
+    vehiclesApi.getFuelPrice(fuelPriceVehicleId)
+      .then((res) => { if (!cancelled) setFuelPrice(res.data); })
+      .catch(() => { if (!cancelled) setFuelPrice(null); });
+    return () => { cancelled = true; };
+  }, [fuelPriceVehicleId]);
 
   // As-you-type address suggestions, debounced and biased near the current
   // location — only fires once there's enough text to search meaningfully.
@@ -223,6 +243,21 @@ export default function RoutePlannerScreen() {
     : isImperial
       ? `${gramsToLbs(co2Grams).toFixed(1)} lb`
       : `${(co2Grams / 1000).toFixed(1)} kg`;
+
+  // Trip cost estimate — fuel/energy cost only (distance × consumption ×
+  // price). Deliberately not full parity with the web app's "Driving
+  // Analysis" Total Cost (which also includes insurance/lease/tax/
+  // maintenance) — that data isn't exposed to mobile. Same "omit rather than
+  // fabricate" convention: no label at all until both consumption and a real
+  // price are known.
+  const tripCostAmount = fuelOrEnergyUsed != null && fuelPrice
+    ? isElectric
+      ? fuelPrice.electricityPricePerKwh != null ? fuelOrEnergyUsed * fuelPrice.electricityPricePerKwh : null
+      : fuelPrice.fuelPricePerLiter != null ? fuelOrEnergyUsed * fuelPrice.fuelPricePerLiter : null
+    : null;
+  const tripCostLabel = tripCostAmount != null
+    ? `${tripCostAmount.toFixed(2)} ${fuelPrice?.currencyCode ?? ''}`.trim()
+    : '—';
 
   async function handleStartEndTrip() {
     if (isTracking && activeTrip) {
@@ -406,7 +441,7 @@ export default function RoutePlannerScreen() {
         <StatCard
           icon={<DollarIcon color="#888" size={16} />}
           label="Trip cost"
-          value="—"
+          value={tripCostLabel}
         />
 
         {/* Start / End Trip */}

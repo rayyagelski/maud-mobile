@@ -20,6 +20,15 @@ export interface OdometerResponse {
   odometer: number;
 }
 
+// Matches App\Handler\API\Vehicle\GetVehicleFuelPriceHandler's response
+// exactly — one of the two price fields is always null (electric vs fuel),
+// never both populated.
+export interface FuelPriceResponse {
+  fuelPricePerLiter: number | null;
+  electricityPricePerKwh: number | null;
+  currencyCode: string;
+}
+
 export interface VehicleState {
   vehicles: Vehicle[];
   selectedVehicle: Vehicle | null;

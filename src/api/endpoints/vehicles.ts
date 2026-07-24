@@ -1,5 +1,5 @@
 import client from '../client';
-import type { Vehicle, FuelType, OdometerResponse } from '../../types/vehicle.types';
+import type { Vehicle, FuelType, OdometerResponse, FuelPriceResponse } from '../../types/vehicle.types';
 
 // Actual shape of GET /vehicles (App\Serializer\API\VehicleListNormalizer) —
 // does not match the mobile Vehicle type 1:1, so it's mapped below.
@@ -51,6 +51,9 @@ export const vehiclesApi = {
 
   updateOdometer: (vehicleId: string, odometer: number) =>
     client.post(`/vehicles/${vehicleId}/odometer`, { odometer }),
+
+  getFuelPrice: (vehicleId: string) =>
+    client.get<FuelPriceResponse>(`/vehicles/${vehicleId}/fuel-price`),
 
   // Vehicle creation is intentionally web-only (Customer\Me\Vehicle flow) —
   // it cascades into insurance/leasing/financing/registration setup that
