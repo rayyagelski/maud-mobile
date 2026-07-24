@@ -18,9 +18,6 @@ setup_permissions([
   'Motion',
 ])
 
-# Static frameworks allow Swift to import React Native modules (React_RCTAppDelegate etc.)
-use_frameworks! :linkage => :static
-
 target 'MAUDConnect' do
   config = use_native_modules!
 
@@ -43,15 +40,19 @@ target 'MAUDConnect' do
 
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
-        # Static frameworks require a consistent deployment target across all pods
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.4'
-        # Xcode 16+ sandboxes user script phases by default, which breaks
-        # CocoaPods embed/copy scripts that use rsync across framework boundaries.
         config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
-        # use_frameworks! :static makes every pod a module; react-native-maps and
-        # other ObjC pods import React-Core headers that are not modular — allow it.
-        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
+    end
+
+    # RNScreens declares `static constexpr auto = @17` (ObjC NSNumber literal)
+    # which is not a valid constant expression under c++20. Patch to `const`.
+    # RNScreens is a development pod sourced from node_modules, not Pods/.
+    screens_file = File.expand_path('../node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm', __dir__)
+    if File.exist?(screens_file)
+      content = File.read(screens_file)
+      patched = content.gsub(/static constexpr auto (DEFAULT_TITLE\w+)/, 'static const auto \1')
+      File.write(screens_file, patched) if patched != content
     end
   end
 end

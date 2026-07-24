@@ -25,7 +25,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>GMSApiKey</key>
-	<string>YOUR_GOOGLE_API_KEY</string>
+	<string>AIzaSyAboVVnBFnPXjXaslhzQj2o9l5ZD8qt17s</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -35,12 +35,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>MAUD Connect needs your location to track trips and show your position on the map.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>MAUD Connect needs background location access to log trips automatically.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MAUD Connect needs your location to track trips and show your position on the map.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>MAUD Connect uses motion sensors to detect driving behaviour and score your trips.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
