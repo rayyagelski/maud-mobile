@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Dimensions, Alert, Animated, Keyboard, Platform,
+  TextInput, Dimensions, Alert, Keyboard, Platform,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,12 +33,14 @@ const TEAL = '#3ABFBF';
 const NAV_BG = '#1C3829';
 const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const MAP_HEIGHT = SCREEN_HEIGHT * 0.52;
-// Collapsed height while the keyboard is up — keeps just enough of the map
-// visible for context (nav header) while giving the destination field/
-// suggestions room to sit above the keyboard instead of behind it.
-const MAP_HEIGHT_COLLAPSED = SCREEN_HEIGHT * 0.15;
-const KEYBOARD_ANIM_MS = 250;
+// The panel is a draggable overlay sitting on top of the (now fixed-size)
+// map — default height matches the old static layout's proportion; expanded
+// height overlaps nearly the whole map, leaving just enough for the nav
+// header/back button, per the user's "expandable to overlap the map" ask.
+const PANEL_HEIGHT_DEFAULT = SCREEN_HEIGHT * 0.48;
+const PANEL_HEIGHT_EXPANDED = SCREEN_HEIGHT * 0.92;
+const PANEL_SNAP_MIDPOINT = (PANEL_HEIGHT_DEFAULT + PANEL_HEIGHT_EXPANDED) / 2;
+const SPRING_CONFIG = { damping: 18, stiffness: 150 };
 
 const FALLBACK_REGION = {
   latitude: 25.276987,
@@ -102,34 +106,53 @@ export default function RoutePlannerScreen() {
   const [isRouting, setIsRouting] = useState(false);
   const [isEndingTrip, setIsEndingTrip] = useState(false);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mapHeightAnim = useRef(new Animated.Value(MAP_HEIGHT)).current;
   const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
 
-  // Collapse the map (rather than letting the keyboard just overlay on top
-  // of the destination field/suggestions with no reflow at all) while the
-  // keyboard is visible, then restore it once dismissed — the same
-  // expanding/collapsing pattern other apps (e.g. Yahoo Finance's bottom
-  // sheet) use instead of a static layout the keyboard can cover.
+  // Draggable bottom sheet — panelHeight is animated on the UI thread via
+  // Reanimated (unlike RN core's Animated, this supports animating `height`
+  // directly, not just transform/opacity). dragStartHeight captures the
+  // height at gesture-start so onUpdate can compute an absolute new height
+  // from the cumulative drag distance rather than accumulating per-frame
+  // deltas (which would drift).
+  const panelHeight = useSharedValue(PANEL_HEIGHT_DEFAULT);
+  const dragStartHeight = useSharedValue(PANEL_HEIGHT_DEFAULT);
+
+  function snapPanelTo(height: number) {
+    panelHeight.value = withSpring(height, SPRING_CONFIG);
+  }
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      dragStartHeight.value = panelHeight.value;
+    })
+    .onUpdate((event) => {
+      const next = dragStartHeight.value - event.translationY;
+      panelHeight.value = Math.min(PANEL_HEIGHT_EXPANDED, Math.max(PANEL_HEIGHT_DEFAULT, next));
+    })
+    .onEnd(() => {
+      panelHeight.value = withSpring(
+        panelHeight.value > PANEL_SNAP_MIDPOINT ? PANEL_HEIGHT_EXPANDED : PANEL_HEIGHT_DEFAULT,
+        SPRING_CONFIG,
+      );
+    });
+
+  const panelAnimatedStyle = useAnimatedStyle(() => ({ height: panelHeight.value }));
+
+  // Keyboard appearing/disappearing snaps the same sheet the drag gesture
+  // drives — one mechanism, two triggers — so the destination field/
+  // suggestions end up above the keyboard instead of behind it.
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const animateTo = (toValue: number) => {
-      Animated.timing(mapHeightAnim, {
-        toValue,
-        duration: KEYBOARD_ANIM_MS,
-        useNativeDriver: false, // height isn't supported by the native driver
-      }).start();
-    };
-
-    const showSub = Keyboard.addListener(showEvent, () => animateTo(MAP_HEIGHT_COLLAPSED));
-    const hideSub = Keyboard.addListener(hideEvent, () => animateTo(MAP_HEIGHT));
+    const showSub = Keyboard.addListener(showEvent, () => snapPanelTo(PANEL_HEIGHT_EXPANDED));
+    const hideSub = Keyboard.addListener(hideEvent, () => snapPanelTo(PANEL_HEIGHT_DEFAULT));
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, [mapHeightAnim]);
+  }, []);
 
   useEffect(() => {
     Geolocation.getCurrentPosition(
@@ -288,8 +311,8 @@ export default function RoutePlannerScreen() {
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
-      {/* ── Map section ── */}
-      <Animated.View style={[styles.mapContainer, { height: mapHeightAnim }]}>
+      {/* ── Map section (fixed, full-size background — the panel overlaps it) ── */}
+      <View style={styles.mapContainer}>
         <MapView
           provider={PROVIDER_GOOGLE}
           style={StyleSheet.absoluteFill}
@@ -349,14 +372,20 @@ export default function RoutePlannerScreen() {
         <View style={styles.compassBtn}>
           <Text style={styles.compassArrow}>▲</Text>
         </View>
-      </Animated.View>
+      </View>
 
-      {/* ── Bottom panel ── */}
-      <ScrollView
-        style={styles.panel}
-        contentContainerStyle={styles.panelContent}
-        showsVerticalScrollIndicator={false}
-      >
+      {/* ── Bottom panel: draggable overlay sheet ── */}
+      <Animated.View style={[styles.panel, panelAnimatedStyle]}>
+        <GestureDetector gesture={panGesture}>
+          <View style={styles.dragHandleArea}>
+            <View style={styles.dragHandleBar} />
+          </View>
+        </GestureDetector>
+        <ScrollView
+          style={styles.panelScroll}
+          contentContainerStyle={styles.panelContent}
+          showsVerticalScrollIndicator={false}
+        >
         {/* From / To card */}
         <View style={styles.routeCard}>
           <View style={styles.routeRow}>
@@ -455,7 +484,8 @@ export default function RoutePlannerScreen() {
             {isEndingTrip ? 'Ending…' : isTracking ? 'End Trip' : 'Start Trip'}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -465,8 +495,8 @@ export default function RoutePlannerScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F5F5F5' },
 
-  // Map
-  mapContainer: { width: '100%', overflow: 'hidden' },
+  // Map — fixed, fills all space; the panel overlaps it via absolute positioning
+  mapContainer: { flex: 1, overflow: 'hidden' },
   mapBackOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 },
   mapBackBtn: {
     marginLeft: 16, marginTop: 8,
@@ -537,9 +567,19 @@ const styles = StyleSheet.create({
   },
   compassArrow: { fontSize: 18, color: '#E53935' },
 
-  // Bottom panel
-  panel: { flex: 1, backgroundColor: '#F5F5F5' },
-  panelContent: { padding: 16, rowGap: 0, paddingBottom: 32 },
+  // Bottom panel — draggable overlay sheet sitting on top of the map
+  panel: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#F5F5F5',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08, shadowRadius: 12, elevation: 8,
+  },
+  dragHandleArea: { alignItems: 'center', paddingVertical: 10 },
+  dragHandleBar: { width: 40, height: 5, borderRadius: 3, backgroundColor: '#DDDDDD' },
+  panelScroll: { flex: 1 },
+  panelContent: { padding: 16, paddingTop: 4, rowGap: 0, paddingBottom: 32 },
 
   // Route card
   routeCard: {
