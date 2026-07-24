@@ -19,3 +19,13 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// react-native-background-geolocation ships its native Android library as a
+// local maven repo bundled inside the npm package (not on Maven Central) —
+// required for the autolinked dependency to resolve at all.
+allprojects {
+    repositories {
+        maven { url "${project(':react-native-background-geolocation').projectDir}/libs" }
+        maven { url 'https://developer.huawei.com/repo/' }
+    }
+}

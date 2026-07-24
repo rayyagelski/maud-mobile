@@ -75,6 +75,11 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 def localProps = new Properties()
 file("../local.properties").with { f -> if (f.exists()) localProps.load(f.newInputStream()) }
 
+// react-native-background-geolocation's required app.gradle hook (native
+// build config for the location SDK) — must be applied before the android{} block.
+Project background_geolocation = project(':react-native-background-geolocation')
+apply from: "${background_geolocation.projectDir}/app.gradle"
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -89,6 +94,11 @@ android {
         versionName "1.0"
         manifestPlaceholders = [
             googleMapsApiKey: localProps.getProperty("GOOGLE_MAPS_API_KEY", ""),
+            // "UNDEFINED" is fine for DEBUG builds per the SDK's own docs —
+            // a real license (per-app, one-time purchase) is only required
+            // for RELEASE builds, same REPLACE_ME-style placeholder pattern
+            // as the other API keys in this project.
+            bgGeoLicense: localProps.getProperty("BACKGROUND_GEOLOCATION_LICENSE", "UNDEFINED"),
             usesCleartextTraffic: "true"
         ]
     }

@@ -17,6 +17,32 @@ export default function LocationPermissionScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const [isRequesting, setIsRequesting] = useState(false);
 
+  // Background location must be requested as a separate, later step on both
+  // platforms — the OS won't grant it alongside the initial foreground
+  // request. Shown only after foreground access is actually granted, since
+  // neither platform allows requesting background permission first. A
+  // failure/denial here is non-fatal: trips just fall back to foreground-only
+  // tracking (the original, more limited behavior) rather than blocking the app.
+  async function requestBackgroundLocation() {
+    const permission = Platform.OS === 'ios'
+      ? PERMISSIONS.IOS.LOCATION_ALWAYS
+      : PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
+
+    await new Promise<void>((resolve) => {
+      Alert.alert(
+        'Track Trips in the Background',
+        'To keep recording your trip while your phone is locked or in your pocket, MAUD Connect needs "Allow all the time" location access. Without this, trips will only be tracked while the app is open on screen.',
+        [{ text: 'Continue', onPress: () => resolve() }],
+      );
+    });
+
+    try {
+      await request(permission);
+    } catch {
+      // Denied/unavailable — fall back to foreground-only tracking, not fatal.
+    }
+  }
+
   async function handleAllow() {
     setIsRequesting(true);
     try {
@@ -37,6 +63,10 @@ export default function LocationPermissionScreen() {
         // Permanently denied — send to settings
         navigation.replace('TurnOnLocation');
         return;
+      }
+
+      if (result === RESULTS.GRANTED) {
+        await requestBackgroundLocation();
       }
     } catch {
       // Permission request failed — continue to app

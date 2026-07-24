@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import Geolocation from '@react-native-community/geolocation';
+import BackgroundGeolocation, { type Location } from 'react-native-background-geolocation';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { startTrip, endTrip, appendGpsPoint } from '../store/slices/tripSlice';
@@ -61,20 +61,34 @@ export function useTripAutoDetection() {
     // owner for the common single-driver case (no profiles created yet).
     const driverId = selectedDriver?.id ?? String(claims.userId);
 
-    const watchId = Geolocation.watchPosition(
-      ({ coords, timestamp }) => {
-        // GPS speed is in m/s; -1 means unavailable (iOS)
-        const speedMs = coords.speed != null && coords.speed >= 0 ? coords.speed : 0;
+    // react-native-background-geolocation replaces the old
+    // @react-native-community/geolocation watchPosition here specifically
+    // because plain watchPosition stops delivering updates the moment the
+    // app is backgrounded/screen locks — which silently discarded almost an
+    // entire real drive's worth of GPS data (see Phase 3 notes). This SDK's
+    // own motion-detection handles the battery-conscious "reduce polling
+    // while stationary" behaviour natively; our own speed-threshold state
+    // machine below is unchanged and just now receives real continuous fixes.
+    let removeLocationListener: (() => void) | undefined;
+    let cancelled = false;
 
-        const gpsPoint = {
-          latitude:  coords.latitude,
-          longitude: coords.longitude,
-          altitude:  coords.altitude  ?? undefined,
-          speed:     speedMs,
-          heading:   coords.heading   ?? undefined,
-          accuracy:  coords.accuracy  ?? undefined,
-          timestamp,
-        };
+    const handleLocation = (location: Location) => {
+      const { coords } = location;
+      // GPS speed is in m/s; missing/negative means unavailable
+      const speedMs = coords.speed != null && coords.speed >= 0 ? coords.speed : 0;
+      const timestamp = typeof location.timestamp === 'string'
+        ? new Date(location.timestamp).getTime()
+        : location.timestamp;
+
+      const gpsPoint = {
+        latitude:  coords.latitude,
+        longitude: coords.longitude,
+        altitude:  coords.altitude  ?? undefined,
+        speed:     speedMs,
+        heading:   coords.heading   ?? undefined,
+        accuracy:  coords.accuracy  ?? undefined,
+        timestamp,
+      };
 
         // ── Auto-start ─────────────────────────────────────────────────────
         if (!isTrackingRef.current && !endingRef.current && speedMs >= SPEED_START_MS) {
@@ -112,17 +126,43 @@ export function useTripAutoDetection() {
             stillSinceRef.current = null;
           }
         }
-      },
-      (err) => console.warn('[TripAutoDetection]', err.message),
-      {
-        enableHighAccuracy: true,
-        distanceFilter: 5,    // update every 5 metres
-        interval: 3000,       // Android: poll interval ms
-        fastestInterval: 1000,
-      },
-    );
+      };
 
-    return () => Geolocation.clearWatch(watchId);
+    const subscription = BackgroundGeolocation.onLocation(
+      handleLocation,
+      (err) => console.warn('[TripAutoDetection]', err),
+    );
+    removeLocationListener = () => subscription.remove();
+
+    BackgroundGeolocation.ready({
+      reset: true,
+      geolocation: {
+        desiredAccuracy: BackgroundGeolocation.DesiredAccuracy.High,
+        distanceFilter: 5,        // update every 5 metres, matches prior config
+        locationUpdateInterval: 3000,
+        fastestLocationUpdateInterval: 1000,
+        // Deliberately not using stopOnStationary/disableStopDetection — the
+        // SDK's own motion-detection already reduces polling while parked;
+        // our own SPEED_STOP_MS/STILL_MS state machine above still needs
+        // occasional fixes to notice the vehicle has stopped/resumed.
+      },
+      app: {
+        stopOnTerminate: false, // keep tracking if the app is swiped away mid-trip
+        startOnBoot: true,      // resume tracking after a device reboot
+        notification: {
+          title: 'MAUD Connect',
+          text: 'Tracking your trip',
+        },
+      },
+    }).then((state) => {
+      if (cancelled) return;
+      if (!state.enabled) BackgroundGeolocation.start();
+    });
+
+    return () => {
+      cancelled = true;
+      removeLocationListener?.();
+    };
   // Re-subscribe only when auth identity, vehicle, or driver context changes.
   // isTracking / activeTrip are intentionally read via refs above.
   // eslint-disable-next-line react-hooks/exhaustive-deps

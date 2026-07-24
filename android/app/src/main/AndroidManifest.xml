@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Required for trips to keep recording while the phone is locked/backgrounded
+         (SRS-critical: this is the fix for foreground-only tracking losing most of a real drive). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
       android:name=".MainApplication"
@@ -28,5 +33,8 @@
       <meta-data
         android:name="com.google.android.geo.API_KEY"
         android:value="${googleMapsApiKey}"/>
+      <meta-data
+        android:name="com.transistorsoft.locationmanager.license"
+        android:value="${bgGeoLicense}"/>
     </application>
 </manifest>
