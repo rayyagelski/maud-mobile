@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Dimensions, Alert,
+  TextInput, Dimensions, Alert, Animated, Keyboard, Platform,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
@@ -27,6 +27,11 @@ const NAV_BG = '#1C3829';
 const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAP_HEIGHT = SCREEN_HEIGHT * 0.52;
+// Collapsed height while the keyboard is up — keeps just enough of the map
+// visible for context (nav header) while giving the destination field/
+// suggestions room to sit above the keyboard instead of behind it.
+const MAP_HEIGHT_COLLAPSED = SCREEN_HEIGHT * 0.15;
+const KEYBOARD_ANIM_MS = 250;
 
 const FALLBACK_REGION = {
   latitude: 25.276987,
@@ -91,6 +96,33 @@ export default function RoutePlannerScreen() {
   const [isRouting, setIsRouting] = useState(false);
   const [isEndingTrip, setIsEndingTrip] = useState(false);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapHeightAnim = useRef(new Animated.Value(MAP_HEIGHT)).current;
+
+  // Collapse the map (rather than letting the keyboard just overlay on top
+  // of the destination field/suggestions with no reflow at all) while the
+  // keyboard is visible, then restore it once dismissed — the same
+  // expanding/collapsing pattern other apps (e.g. Yahoo Finance's bottom
+  // sheet) use instead of a static layout the keyboard can cover.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const animateTo = (toValue: number) => {
+      Animated.timing(mapHeightAnim, {
+        toValue,
+        duration: KEYBOARD_ANIM_MS,
+        useNativeDriver: false, // height isn't supported by the native driver
+      }).start();
+    };
+
+    const showSub = Keyboard.addListener(showEvent, () => animateTo(MAP_HEIGHT_COLLAPSED));
+    const hideSub = Keyboard.addListener(hideEvent, () => animateTo(MAP_HEIGHT));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [mapHeightAnim]);
 
   useEffect(() => {
     Geolocation.getCurrentPosition(
@@ -196,7 +228,7 @@ export default function RoutePlannerScreen() {
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       {/* ── Map section ── */}
-      <View style={[styles.mapContainer, { height: MAP_HEIGHT }]}>
+      <Animated.View style={[styles.mapContainer, { height: mapHeightAnim }]}>
         <MapView
           provider={PROVIDER_GOOGLE}
           style={StyleSheet.absoluteFill}
@@ -256,7 +288,7 @@ export default function RoutePlannerScreen() {
         <View style={styles.compassBtn}>
           <Text style={styles.compassArrow}>▲</Text>
         </View>
-      </View>
+      </Animated.View>
 
       {/* ── Bottom panel ── */}
       <ScrollView
