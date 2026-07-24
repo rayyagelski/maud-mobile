@@ -5,6 +5,7 @@ import { generateId, generateUuidV4, haversineDistanceKm } from '../../utils/hel
 import { getHarshEventCounters } from '../../services/harshEventCounters';
 import { FUEL_BASELINE_MULTIPLIER } from '../../utils/constants';
 import { enqueueSyncItem } from './syncQueueSlice';
+import { updateVehicleOdometer } from './vehicleSlice';
 import { isRainingAt } from '../../services/weather/weatherClient';
 import {
   mapDriverRoleToVgd,
@@ -120,6 +121,25 @@ export const submitVgdCreateTrip = createAsyncThunk(
       if (e.status === undefined) {
         dispatch(enqueueSyncItem({ kind: 'vgd_create_trip', localTripId: args.trip.id, params }));
       }
+    }
+  },
+);
+
+// Adds the trip's driven distance to the vehicle's odometer, both
+// server-side and in local Redux state. Fetches the current value fresh
+// (matches OdometerScreen's own approach) rather than trusting a possibly-
+// stale cached one. Independent of trip_reward/VGD, fire-and-forget from
+// endTrip, fail-soft — an odometer sync must never block trip completion.
+export const updateOdometerAfterTrip = createAsyncThunk(
+  'trips/updateOdometerAfterTrip',
+  async (args: { vehicleId: string; distanceKm: number }, { dispatch }) => {
+    try {
+      const res = await vehiclesApi.getOdometer(args.vehicleId);
+      const newOdometer = res.data.odometer + args.distanceKm;
+      await vehiclesApi.updateOdometer(args.vehicleId, newOdometer);
+      dispatch(updateVehicleOdometer({ vehicleId: args.vehicleId, odometer: newOdometer }));
+    } catch {
+      // Fail-soft — odometer sync is best-effort.
     }
   },
 );
@@ -273,9 +293,10 @@ export const endTrip = createAsyncThunk(
       energy,
     };
 
-    // Final VGD flush — independent of trip_reward above, dispatched (not
-    // awaited) so a slow/offline VGD call never delays trip completion.
+    // Final VGD flush and odometer update — both independent of trip_reward
+    // above, dispatched (not awaited) so neither delays trip completion.
     dispatch(flushVgdPoints({ tripId, isTripEnd: true }));
+    dispatch(updateOdometerAfterTrip({ vehicleId: trip.vehicleId, distanceKm }));
 
     try {
       const reward = await tripsApi.submitTripReward(rewardParams);

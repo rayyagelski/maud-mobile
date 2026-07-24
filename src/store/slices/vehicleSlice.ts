@@ -44,6 +44,20 @@ const vehicleSlice = createSlice({
     clearVehicleError(state) {
       state.error = null;
     },
+    // Keeps the locally-held odometer in sync once a completed trip's
+    // distance has been added to it server-side (see tripSlice.ts's
+    // endTrip) — `vehicles` and `selectedVehicle` are separate denormalized
+    // copies, so both need updating explicitly.
+    updateVehicleOdometer(
+      state,
+      action: PayloadAction<{ vehicleId: string; odometer: number }>,
+    ) {
+      const vehicle = state.vehicles.find(v => v.id === action.payload.vehicleId);
+      if (vehicle) vehicle.odometer = action.payload.odometer;
+      if (state.selectedVehicle?.id === action.payload.vehicleId) {
+        state.selectedVehicle.odometer = action.payload.odometer;
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -62,5 +76,5 @@ const vehicleSlice = createSlice({
   },
 });
 
-export const { clearVehicleError } = vehicleSlice.actions;
+export const { clearVehicleError, updateVehicleOdometer } = vehicleSlice.actions;
 export default vehicleSlice.reducer;
