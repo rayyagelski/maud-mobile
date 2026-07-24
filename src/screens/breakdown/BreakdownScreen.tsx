@@ -8,6 +8,7 @@ import Geolocation from '@react-native-community/geolocation';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { UsersIcon, BuildingIcon, PhoneIcon } from '../../components/icons';
 import { searchNearbyGarages, type NearbyGarage } from '../../services/here/herePlacesClient';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { formatDistance } from '../../utils/helpers';
 import type { MainTabNavigationProp } from '../../types/navigation.types';
 
@@ -33,6 +34,7 @@ function dial(phone: string) {
 
 export default function BreakdownScreen() {
   const navigation = useNavigation<MainTabNavigationProp>();
+  const isImperial = useIsImperialUnits();
   const [garages, setGarages] = useState<NearbyGarage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +130,7 @@ export default function BreakdownScreen() {
                 <View style={styles.garageInfo}>
                   <Text style={styles.contactName}>{garage.name}</Text>
                   <Text style={styles.contactPhone}>
-                    {garage.address} · {formatDistance(garage.distanceMeters / 1000)}
+                    {garage.address} · {formatDistance(garage.distanceMeters / 1000, isImperial)}
                   </Text>
                 </View>
                 {garage.phone && (

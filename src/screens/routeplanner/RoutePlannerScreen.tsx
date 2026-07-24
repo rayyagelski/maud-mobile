@@ -15,12 +15,15 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { startTrip, endTrip } from '../../store/slices/tripSlice';
 import {
   fetchHereRoute, geocodeAddress, suggestAddresses,
   type LatLng, type HereRouteResult, type AddressSuggestion,
 } from '../../services/here/hereRoutingClient';
-import { formatDistance, formatDuration } from '../../utils/helpers';
+import {
+  formatDistance, formatDuration, litersToGallons, gramsToLbs, estimateFuelCo2Grams,
+} from '../../utils/helpers';
 
 const TEAL = '#3ABFBF';
 const NAV_BG = '#1C3829';
@@ -85,6 +88,7 @@ export default function RoutePlannerScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
   const { claims } = useAppSelector(s => s.auth);
+  const isImperial = useIsImperialUnits();
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
   const { activeTrip, isTracking } = useAppSelector(s => s.trips);
@@ -193,10 +197,32 @@ export default function RoutePlannerScreen() {
 
   const vehicle = selectedVehicle ?? vehicles[0] ?? null;
   const distanceKm = route ? route.distanceMeters / 1000 : null;
-  const consumptionLabel =
+
+  // Estimated fuel/energy used for the planned route — same (distance/100) *
+  // consumption calc as before, just now unit-aware for display.
+  const fuelOrEnergyUsed =
     vehicle?.estimatedConsumption && distanceKm != null
-      ? `${((distanceKm / 100) * vehicle.estimatedConsumption).toFixed(1)} ${vehicle.fuelType === 'electric' ? 'kWh' : 'L'}`
-      : '—';
+      ? (distanceKm / 100) * vehicle.estimatedConsumption
+      : null;
+  const isElectric = vehicle?.fuelType === 'electric';
+  const consumptionLabel = fuelOrEnergyUsed == null
+    ? '—'
+    : isElectric
+      ? `${fuelOrEnergyUsed.toFixed(1)} kWh` // no US-specific EV energy unit; kWh is used in both locales
+      : isImperial
+        ? `${litersToGallons(fuelOrEnergyUsed).toFixed(1)} gal`
+        : `${fuelOrEnergyUsed.toFixed(1)} L`;
+
+  // CO2 estimate — only for combustion fuel types (see estimateFuelCo2Grams'
+  // own doc comment for why EV/hydrogen are omitted rather than guessed).
+  const co2Grams = !isElectric && fuelOrEnergyUsed != null
+    ? estimateFuelCo2Grams(vehicle?.fuelType, fuelOrEnergyUsed)
+    : null;
+  const co2Label = co2Grams == null
+    ? '—'
+    : isImperial
+      ? `${gramsToLbs(co2Grams).toFixed(1)} lb`
+      : `${(co2Grams / 1000).toFixed(1)} kg`;
 
   async function handleStartEndTrip() {
     if (isTracking && activeTrip) {
@@ -268,7 +294,7 @@ export default function RoutePlannerScreen() {
             <View style={{ marginLeft: 10 }}>
               <Text style={styles.navStreet}>{isTracking ? 'Trip in progress' : 'Plan your route'}</Text>
               <Text style={styles.navTowards}>
-                {route ? `${formatDistance(route.distanceMeters / 1000)} · ${formatDuration(route.durationSeconds)}` : 'Enter a destination below'}
+                {route ? `${formatDistance(route.distanceMeters / 1000, isImperial)} · ${formatDuration(route.durationSeconds)}` : 'Enter a destination below'}
               </Text>
             </View>
           </View>
@@ -343,7 +369,7 @@ export default function RoutePlannerScreen() {
           <InfoRow
             icon={<MountainIcon color="#888" size={18} />}
             label="Distance"
-            value={route ? formatDistance(route.distanceMeters / 1000) : undefined}
+            value={route ? formatDistance(route.distanceMeters / 1000, isImperial) : undefined}
           />
           <View style={styles.infoDivider} />
           <InfoRow
@@ -367,7 +393,7 @@ export default function RoutePlannerScreen() {
           <StatCard
             icon={<LeafIcon color="#888" size={16} />}
             label="CO₂ Emissions"
-            value="—"
+            value={co2Label}
             half
           />
           <StatCard

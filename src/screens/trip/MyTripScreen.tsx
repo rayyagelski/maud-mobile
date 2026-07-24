@@ -10,6 +10,7 @@ import {
   MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, DollarIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
@@ -55,6 +56,7 @@ export default function MyTripScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const routeProp = useRoute<MyTripRouteProp>();
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === routeProp.params?.tripId));
+  const isImperial = useIsImperialUnits();
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<any>(null);
 
@@ -160,7 +162,7 @@ export default function MyTripScreen() {
                 </View>
               </View>
               <View style={styles.cardDivider} />
-              <PerfRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm)} />
+              <PerfRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm, isImperial)} />
               <View style={styles.rowDiv} />
               <PerfRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
               <View style={styles.rowDiv} />

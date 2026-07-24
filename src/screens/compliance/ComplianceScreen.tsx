@@ -8,6 +8,7 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { VideoCameraIcon, WarningTriangleIcon } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { setAlertsEnabled } from '../../store/slices/complianceSlice';
 import { formatDistance } from '../../utils/helpers';
 import type { MainTabNavigationProp } from '../../types/navigation.types';
@@ -20,6 +21,7 @@ export default function ComplianceScreen() {
   const dispatch = useAppDispatch();
   const { alertsEnabled, activeAlert } = useAppSelector(s => s.compliance);
   const { isTracking } = useAppSelector(s => s.trips);
+  const isImperial = useIsImperialUnits();
 
   return (
     <View style={styles.safe}>
@@ -70,7 +72,7 @@ export default function ComplianceScreen() {
             <Text style={styles.alertTitle}>
               {'You are entering an\nenforcement zone.'}
             </Text>
-            <Text style={styles.alertDistance}>{formatDistance(activeAlert.distanceMeters / 1000)}</Text>
+            <Text style={styles.alertDistance}>{formatDistance(activeAlert.distanceMeters / 1000, isImperial)}</Text>
             <Text style={styles.alertSub}>
               {activeAlert.speedLimitKmh ? `Reduce speed to ${activeAlert.speedLimitKmh} km/h` : 'Reduce speed and drive carefully'}
             </Text>

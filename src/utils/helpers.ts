@@ -39,7 +39,52 @@ export function formatDuration(seconds: number): string {
   return `${m}m`;
 }
 
-export function formatDistance(km: number): string {
+const METERS_PER_MILE = 1609.344;
+const FEET_PER_METER = 3.28084;
+const LITERS_PER_GALLON = 3.785411784;
+const GRAMS_PER_LB = 453.59237;
+
+// Conversions match the exact formulas in the reward-model spec doc (mirrors
+// the backend's own US/EU unit-handling section), not approximations.
+export function kmToMiles(km: number): number {
+  return (km * 1000) / METERS_PER_MILE;
+}
+
+export function litersToGallons(liters: number): number {
+  return liters / LITERS_PER_GALLON;
+}
+
+export function gramsToLbs(grams: number): number {
+  return grams / GRAMS_PER_LB;
+}
+
+// Standard tailpipe combustion emission factors (grams CO2 per litre of fuel
+// burned) — widely-cited figures (EPA/DEFRA), used here for a pre-trip
+// *estimate* only. Electric/hydrogen are deliberately not covered: EVs have
+// no tailpipe CO2 (real figure depends on regional grid intensity, which
+// isn't available client-side — see the reward-model spec's own note on
+// this), and hydrogen fuel cells are zero-tailpipe too. Omitted rather than
+// fabricated, consistent with how the rest of this app handles unavailable data.
+const CO2_GRAMS_PER_LITER: Partial<Record<'petrol' | 'diesel' | 'hybrid', number>> = {
+  petrol: 2310,
+  diesel: 2680,
+  hybrid: 2310, // most hybrids burn petrol
+};
+
+export function estimateFuelCo2Grams(
+  fuelType: string | undefined,
+  litersUsed: number,
+): number | null {
+  const factor = fuelType ? CO2_GRAMS_PER_LITER[fuelType as 'petrol' | 'diesel' | 'hybrid'] : undefined;
+  return factor ? litersUsed * factor : null;
+}
+
+export function formatDistance(km: number, isImperial = false): string {
+  if (isImperial) {
+    const miles = kmToMiles(km);
+    if (miles < 0.1) return `${Math.round(km * 1000 * FEET_PER_METER)}ft`;
+    return `${miles.toFixed(1)}mi`;
+  }
   return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 }
 

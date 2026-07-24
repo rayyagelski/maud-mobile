@@ -12,6 +12,7 @@ import {
   PersonIcon, ThumbsUpIcon, ThumbsDownIcon, SparkleIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
@@ -98,6 +99,7 @@ export default function TripSummaryScreen() {
 
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
   const reward = trip?.reward;
+  const isImperial = useIsImperialUnits();
 
   const distanceKm = trip
     ? trip.route.reduce(
@@ -165,7 +167,7 @@ export default function TripSummaryScreen() {
         <View style={[styles.card, styles.statsCard]}>
           <View style={styles.statItem}>
             <PersonIcon color="#BBBBBB" size={22} />
-            <Text style={styles.statVal}>{formatDistance(distanceKm)}</Text>
+            <Text style={styles.statVal}>{formatDistance(distanceKm, isImperial)}</Text>
             <Text style={styles.statMeta}>Distance</Text>
           </View>
           <View style={styles.statSep} />

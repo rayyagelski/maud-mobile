@@ -11,6 +11,7 @@ import {
   LeafIcon, DollarIcon, PinIcon, CloudIcon, WarningTriangleIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
@@ -140,6 +141,7 @@ export default function TripDetailScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const route = useRoute<TripDetailRouteProp>();
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
+  const isImperial = useIsImperialUnits();
 
   const distanceKm = trip
     ? trip.route.reduce(
@@ -231,7 +233,7 @@ export default function TripDetailScreen() {
         {/* Trip stats */}
         <Text style={styles.sectionTitle}>TRIP STATS</Text>
         <View style={styles.card}>
-          <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm)} />
+          <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm, isImperial)} />
           <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
           <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(avgSpeedKmh)} km/h`} />
           <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value={`${Math.round(maxSpeedKmh)} km/h`} last />

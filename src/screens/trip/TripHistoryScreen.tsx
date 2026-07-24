@@ -11,6 +11,7 @@ import {
   LightbulbIcon, ChevronIcon, ArrowUpIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { haversineDistanceKm, formatDuration, formatDistance } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip, TripType as TripTypeValue } from '../../types/trip.types';
@@ -112,6 +113,7 @@ function CostCard({ icon, label, value }: {
 export default function TripHistoryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const allTrips = useAppSelector(s => s.trips.trips);
+  const isImperial = useIsImperialUnits();
   const [tripType, setTripType] = useState<TripTypeFilter>('All');
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -243,8 +245,8 @@ export default function TripHistoryScreen() {
         <Text style={styles.sectionTitle}>DRIVING AVERAGES</Text>
         <View style={styles.card}>
           <AvgRow icon={<ArrowUpIcon color="#999" size={16} />} label="Avg Speed" value={`${Math.round(stats.avgSpeedKmh)} km/h`} />
-          <AvgRow icon={<PinIcon color="#999" size={16} />} label="Avg Distance / Trip" value={formatDistance(stats.avgDistanceKm)} />
-          <AvgRow icon={<SmallCarIcon color="#999" size={16} />} label="Avg Distance / Day" value={formatDistance(stats.avgDistancePerDayKm)} />
+          <AvgRow icon={<PinIcon color="#999" size={16} />} label="Avg Distance / Trip" value={formatDistance(stats.avgDistanceKm, isImperial)} />
+          <AvgRow icon={<SmallCarIcon color="#999" size={16} />} label="Avg Distance / Day" value={formatDistance(stats.avgDistancePerDayKm, isImperial)} />
           <AvgRow icon={<ClockIcon color="#999" size={16} />} label="Avg Operation Time" value={formatDuration(Math.round(stats.avgOperationSec))} last />
         </View>
 
@@ -291,7 +293,7 @@ export default function TripHistoryScreen() {
               </Text>
               <Text style={styles.historyTime}>
                 {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                {' • '}{formatDistance(tripDistanceKm(trip))}
+                {' • '}{formatDistance(tripDistanceKm(trip), isImperial)}
               </Text>
               <Text style={styles.historyArrow}>›</Text>
             </TouchableOpacity>
