@@ -21,25 +21,7 @@ interface HereRoutesResponse {
   }>;
 }
 
-// HERE Routing API v8 — plain REST/JSON, no native SDK. Coordinates are
-// decoded from HERE's flexible-polyline format and fed straight into the
-// existing react-native-maps <Polyline>, so no map-library swap is needed.
-export async function fetchHereRoute(origin: LatLng, destination: LatLng): Promise<HereRouteResult | null> {
-  const params = new URLSearchParams({
-    transportMode: 'car',
-    origin: `${origin.latitude},${origin.longitude}`,
-    destination: `${destination.latitude},${destination.longitude}`,
-    return: 'polyline,summary',
-    apiKey: HERE_API_KEY,
-  });
-
-  const response = await fetch(`https://router.hereapi.com/v8/routes?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`HERE routing request failed (${response.status})`);
-  }
-
-  const data: HereRoutesResponse = await response.json();
-  const sections = data.routes[0]?.sections ?? [];
+function routeFromSections(sections: HereRoutesResponse['routes'][number]['sections']): HereRouteResult | null {
   if (sections.length === 0) return null;
 
   const coordinates = sections.flatMap(section =>
@@ -52,6 +34,44 @@ export async function fetchHereRoute(origin: LatLng, destination: LatLng): Promi
   const durationSeconds = sections.reduce((sum, s) => sum + s.summary.duration, 0);
 
   return { coordinates, distanceMeters, durationSeconds };
+}
+
+// HERE Routing API v8 — plain REST/JSON, no native SDK. Coordinates are
+// decoded from HERE's flexible-polyline format and fed straight into the
+// existing react-native-maps <Polyline>, so no map-library swap is needed.
+//
+// `alternatives` requests up to N additional routes beyond the optimal one
+// (HERE's own documented range is 0–5) — the first entry in the returned
+// array is always HERE's optimal route.
+export async function fetchHereRoutes(
+  origin: LatLng,
+  destination: LatLng,
+  alternatives = 0,
+): Promise<HereRouteResult[]> {
+  const params = new URLSearchParams({
+    transportMode: 'car',
+    origin: `${origin.latitude},${origin.longitude}`,
+    destination: `${destination.latitude},${destination.longitude}`,
+    return: 'polyline,summary',
+    alternatives: String(alternatives),
+    apiKey: HERE_API_KEY,
+  });
+
+  const response = await fetch(`https://router.hereapi.com/v8/routes?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`HERE routing request failed (${response.status})`);
+  }
+
+  const data: HereRoutesResponse = await response.json();
+  return data.routes
+    .map(route => routeFromSections(route.sections))
+    .filter((r): r is HereRouteResult => r !== null);
+}
+
+// Back-compat single-route form, kept for call sites that only ever want HERE's optimal route.
+export async function fetchHereRoute(origin: LatLng, destination: LatLng): Promise<HereRouteResult | null> {
+  const routes = await fetchHereRoutes(origin, destination, 0);
+  return routes[0] ?? null;
 }
 
 export interface AddressSuggestion {

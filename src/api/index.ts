@@ -10,3 +10,5 @@ export { expensesApi } from './endpoints/expenses';
 export { serviceRecordsApi } from './endpoints/serviceRecords';
 export { rewardsApi } from './endpoints/rewards';
 export { vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from './endpoints/vgd';
+export { routesApi } from './endpoints/routes';
+export type { RouteRecommendationOption, RouteRecommendationResult } from './endpoints/routes';

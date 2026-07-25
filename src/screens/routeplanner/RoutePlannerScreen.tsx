@@ -13,21 +13,24 @@ import type { MainStackNavigationProp } from '../../types/navigation.types';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   ArrowUpIcon, MicIcon, MountainIcon, HourglassIcon,
-  LeafIcon, FuelIcon, DollarIcon, WarningTriangleIcon,
+  LeafIcon, FuelIcon, DollarIcon, WarningTriangleIcon, SparkleIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
+import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { startTrip, endTrip } from '../../store/slices/tripSlice';
-import { vehiclesApi } from '../../api';
+import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
 import type { FuelPriceResponse } from '../../types/vehicle.types';
 import {
-  fetchHereRoute, geocodeAddress, suggestAddresses,
+  fetchHereRoutes, geocodeAddress, suggestAddresses,
   type LatLng, type HereRouteResult, type AddressSuggestion,
 } from '../../services/here/hereRoutingClient';
 import {
   formatDistance, formatDuration, litersToGallons, gramsToLbs, estimateFuelCo2Grams,
 } from '../../utils/helpers';
+
+type RouteRecommendation = RouteRecommendationResult;
 
 const TEAL = '#3ABFBF';
 const NAV_BG = '#1C3829';
@@ -102,11 +105,19 @@ export default function RoutePlannerScreen() {
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
-  const [route, setRoute] = useState<HereRouteResult | null>(null);
+  // routes[0] is always HERE's optimal route; index 0 is selected by default.
+  // `route` below derives the currently-active one so the rest of the screen
+  // (distance/duration/cost/consumption/CO2, the polyline+marker) doesn't
+  // need to change — only the parts that need to know about alternatives do.
+  const [routes, setRoutes] = useState<HereRouteResult[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+  const route = routes[selectedRouteIndex] ?? null;
   const [isRouting, setIsRouting] = useState(false);
   const [isEndingTrip, setIsEndingTrip] = useState(false);
+  const [routeRecommendation, setRouteRecommendation] = useState<RouteRecommendation | null>(null);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
+  const { speak } = useVoicePlayback();
 
   // Draggable bottom sheet — panelHeight is animated on the UI thread via
   // Reanimated (unlike RN core's Animated, this supports animating `height`
@@ -201,12 +212,16 @@ export default function RoutePlannerScreen() {
     if (!origin) return;
     setIsRouting(true);
     try {
-      const result = await fetchHereRoute(origin, destination);
-      if (!result) {
+      // Request one alternative alongside HERE's optimal route — the AI
+      // recommendation below is only useful when there's actually a choice.
+      const results = await fetchHereRoutes(origin, destination, 1);
+      if (results.length === 0) {
         Alert.alert('No route', 'No route could be calculated to that destination.');
         return;
       }
-      setRoute(result);
+      setRoutes(results);
+      setSelectedRouteIndex(0);
+      setRouteRecommendation(null);
     } catch {
       Alert.alert('Route error', 'Could not calculate a route right now. Please try again.');
     } finally {
@@ -239,6 +254,7 @@ export default function RoutePlannerScreen() {
   }
 
   const vehicle = selectedVehicle ?? vehicles[0] ?? null;
+  const isElectric = vehicle?.fuelType === 'electric';
   const distanceKm = route ? route.distanceMeters / 1000 : null;
 
   // Estimated fuel/energy used for the planned route — same (distance/100) *
@@ -247,7 +263,16 @@ export default function RoutePlannerScreen() {
     vehicle?.estimatedConsumption && distanceKm != null
       ? (distanceKm / 100) * vehicle.estimatedConsumption
       : null;
-  const isElectric = vehicle?.fuelType === 'electric';
+
+  // Same fuel-cost formula as tripCostAmount below, factored out so it can
+  // be computed per-route (for the AI recommendation, which needs every
+  // option's cost, not just the selected one) without duplicating the logic.
+  function estimateTripCostForDistance(km: number): number | null {
+    if (!vehicle?.estimatedConsumption || !fuelPrice) return null;
+    const used = (km / 100) * vehicle.estimatedConsumption;
+    const price = isElectric ? fuelPrice.electricityPricePerKwh : fuelPrice.fuelPricePerLiter;
+    return price != null ? used * price : null;
+  }
   const consumptionLabel = fuelOrEnergyUsed == null
     ? '—'
     : isElectric
@@ -273,14 +298,36 @@ export default function RoutePlannerScreen() {
   // maintenance) — that data isn't exposed to mobile. Same "omit rather than
   // fabricate" convention: no label at all until both consumption and a real
   // price are known.
-  const tripCostAmount = fuelOrEnergyUsed != null && fuelPrice
-    ? isElectric
-      ? fuelPrice.electricityPricePerKwh != null ? fuelOrEnergyUsed * fuelPrice.electricityPricePerKwh : null
-      : fuelPrice.fuelPricePerLiter != null ? fuelOrEnergyUsed * fuelPrice.fuelPricePerLiter : null
-    : null;
+  const tripCostAmount = distanceKm != null ? estimateTripCostForDistance(distanceKm) : null;
   const tripCostLabel = tripCostAmount != null
     ? `${tripCostAmount.toFixed(2)} ${fuelPrice?.currencyCode ?? ''}`.trim()
     : '—';
+
+  // AI recommendation across all fetched route options — fires once routes
+  // and (if available) a fuel price are known. Fail-soft: a failed/declined
+  // recommendation just means nothing renders, routes still work normally.
+  useEffect(() => {
+    if (routes.length < 2) {
+      setRouteRecommendation(null);
+      return;
+    }
+    let cancelled = false;
+    const options = routes.map((r, index) => {
+      const km = r.distanceMeters / 1000;
+      return {
+        index,
+        distanceKm: km,
+        durationSeconds: r.durationSeconds,
+        cost: estimateTripCostForDistance(km),
+        currencyCode: fuelPrice?.currencyCode ?? null,
+      };
+    });
+    routesApi.getRecommendation(options)
+      .then((result) => { if (!cancelled) setRouteRecommendation(result); })
+      .catch(() => { if (!cancelled) setRouteRecommendation(null); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routes, fuelPrice]);
 
   async function handleStartEndTrip() {
     if (isTracking && activeTrip) {
@@ -321,6 +368,21 @@ export default function RoutePlannerScreen() {
           showsMyLocationButton={false}
           showsCompass={false}
         >
+          {/* Non-selected alternatives drawn first (dimmed, tappable to
+              select), selected route drawn last so it's always on top. */}
+          {routes.map((r, index) => (
+            index !== selectedRouteIndex && r.coordinates.length > 1 && (
+              <Polyline
+                key={index}
+                coordinates={r.coordinates}
+                strokeColor="#9AA5B1"
+                strokeWidth={4}
+                lineCap="round"
+                tappable
+                onPress={() => setSelectedRouteIndex(index)}
+              />
+            )
+          ))}
           {route && route.coordinates.length > 1 && (
             <Polyline
               coordinates={route.coordinates}
@@ -356,8 +418,13 @@ export default function RoutePlannerScreen() {
               </Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.micBtn} activeOpacity={0.8}>
-            <MicIcon color={TEAL} size={20} />
+          <TouchableOpacity
+            style={styles.micBtn}
+            activeOpacity={0.8}
+            disabled={!routeRecommendation}
+            onPress={() => routeRecommendation && speak(routeRecommendation.message)}
+          >
+            <MicIcon color={routeRecommendation ? TEAL : '#CCCCCC'} size={20} />
           </TouchableOpacity>
         </View>
 
@@ -426,6 +493,21 @@ export default function RoutePlannerScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        {/* AI recommendation across route alternatives */}
+        {routeRecommendation && (
+          <TouchableOpacity
+            style={styles.recommendationCard}
+            activeOpacity={0.85}
+            onPress={() => setSelectedRouteIndex(routeRecommendation.recommendedIndex)}
+          >
+            <View style={styles.recommendationHeader}>
+              <SparkleIcon color={TEAL} size={16} />
+              <Text style={styles.recommendationLabel}>AI RECOMMENDATION</Text>
+            </View>
+            <Text style={styles.recommendationText}>{routeRecommendation.message}</Text>
+          </TouchableOpacity>
         )}
 
         {/* Trip info rows */}
@@ -596,6 +678,16 @@ const styles = StyleSheet.create({
   routeTag: { fontSize: 13, color: '#888888', width: 36 },
   routeValue: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', flex: 1 },
   routeInput: { flex: 1, fontSize: 14, color: '#1A1A1A', padding: 0 },
+
+  // AI route recommendation
+  recommendationCard: {
+    backgroundColor: '#E6F9F7', borderRadius: 16,
+    padding: 14, marginBottom: 14,
+    borderWidth: 1, borderColor: '#CCEEEA',
+  },
+  recommendationHeader: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginBottom: 6 },
+  recommendationLabel: { fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 0.4 },
+  recommendationText: { fontSize: 13, color: '#1A1A1A', lineHeight: 18 },
 
   // Address suggestions
   suggestionsCard: {

@@ -9,10 +9,11 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   FlashIcon, PhoneIcon, GiftIcon,
   LeafIcon, DollarIcon, HourglassIcon,
-  PersonIcon, ThumbsUpIcon, ThumbsDownIcon, SparkleIcon,
+  PersonIcon, ThumbsUpIcon, ThumbsDownIcon, SparkleIcon, MicIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
+import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
@@ -100,6 +101,7 @@ export default function TripSummaryScreen() {
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
   const reward = trip?.reward;
   const isImperial = useIsImperialUnits();
+  const { speak, isSpeaking } = useVoicePlayback();
 
   const distanceKm = trip
     ? trip.route.reduce(
@@ -138,7 +140,21 @@ export default function TripSummaryScreen() {
 
         {/* Hero title */}
         <Text style={styles.heroTitle}>{heroTitle}</Text>
-        <Text style={styles.heroSub}>Every smart choice makes a difference.</Text>
+        <View style={styles.heroSubRow}>
+          <Text style={styles.heroSub}>Every smart choice makes a difference.</Text>
+          {reward?.voicePayload?.script && (
+            <TouchableOpacity
+              style={styles.listenBtn}
+              onPress={() => speak(reward.voicePayload.script)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MicIcon color={isSpeaking ? TEAL : '#888888'} size={16} />
+              <Text style={[styles.listenBtnText, isSpeaking && { color: TEAL }]}>
+                {isSpeaking ? 'Playing…' : 'Listen'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Score card */}
         <View style={styles.card}>
@@ -296,7 +312,17 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 16 },
 
   heroTitle: { fontSize: 26, fontWeight: '900', color: '#1A1A1A', marginBottom: 4, letterSpacing: 0.4 },
-  heroSub: { fontSize: 14, color: '#888888', marginBottom: 16 },
+  heroSubRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  heroSub: { fontSize: 14, color: '#888888', flexShrink: 1, marginRight: 8 },
+  listenBtn: {
+    flexDirection: 'row', alignItems: 'center', columnGap: 4,
+    paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12,
+    backgroundColor: '#F2F2F2',
+  },
+  listenBtnText: { fontSize: 12, fontWeight: '700', color: '#888888' },
 
   card: {
     backgroundColor: 'white', borderRadius: 18,
