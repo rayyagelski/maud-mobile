@@ -88,6 +88,10 @@ export function formatDistance(km: number, isImperial = false): string {
   return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 }
 
+export function formatSpeed(kmh: number, isImperial = false): string {
+  return isImperial ? `${Math.round(kmToMiles(kmh))} mph` : `${Math.round(kmh)} km/h`;
+}
+
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }

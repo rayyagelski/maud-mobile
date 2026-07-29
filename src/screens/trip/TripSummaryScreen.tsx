@@ -14,7 +14,7 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
-import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -195,7 +195,7 @@ export default function TripSummaryScreen() {
           <View style={styles.statSep} />
           <View style={styles.statItem}>
             <FlashIcon color="#BBBBBB" size={22} />
-            <Text style={styles.statVal}>{Math.round(avgSpeedKmh)} km/h</Text>
+            <Text style={styles.statVal}>{formatSpeed(avgSpeedKmh, isImperial)}</Text>
             <Text style={styles.statMeta}>Avg. Speed</Text>
           </View>
         </View>

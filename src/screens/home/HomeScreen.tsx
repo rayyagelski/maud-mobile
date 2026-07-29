@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Modal, TouchableWithoutFeedback,
+  Modal, TouchableWithoutFeedback, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -9,6 +9,7 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { fetchVehicles, selectVehicle } from '../../store/slices/vehicleSlice';
 import { fetchDrivers } from '../../store/slices/driverSlice';
+import { logout } from '../../store/slices/authSlice';
 import {
   CarIcon, ChevronIcon, CheckCircleIcon,
   MedalIcon, PinIcon, GaugeIcon, LeafIcon,
@@ -95,9 +96,6 @@ export default function HomeScreen() {
 
   const firstName = claims?.firstName ?? 'Driver';
   const initial = firstName.charAt(0).toUpperCase();
-  // Fall back to the first fetched vehicle for display until the user
-  // explicitly picks one (selecting mints a new vehicle-scoped JWT, so it's
-  // not done implicitly on mount).
   const displayVehicle = selectedVehicle ?? vehicles[0] ?? null;
 
   useEffect(() => {
@@ -105,6 +103,15 @@ export default function HomeScreen() {
       dispatch(fetchVehicles());
     }
   }, [vehicles.length, dispatch]);
+
+  // Auto-select the first vehicle once the list loads, if none is selected
+  // yet — selecting mints the vehicle-scoped JWT (vehicleId claim) that trip
+  // recording/VGD writes require, so this can't be left to a manual tap.
+  useEffect(() => {
+    if (!selectedVehicle && vehicles.length > 0) {
+      dispatch(selectVehicle(vehicles[0].id));
+    }
+  }, [selectedVehicle, vehicles, dispatch]);
 
   useEffect(() => {
     if (drivers.length === 0) {
@@ -132,6 +139,13 @@ export default function HomeScreen() {
   function handleSelectVehicle(vehicleId: string) {
     dispatch(selectVehicle(vehicleId));
     setDropdownOpen(false);
+  }
+
+  function handleAvatarPress() {
+    Alert.alert('Log out', 'Log out of MAUD Connect?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: () => dispatch(logout()) },
+    ]);
   }
 
   const features: FeatureItem[] = [
@@ -165,9 +179,9 @@ export default function HomeScreen() {
               <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.firstName}>{firstName}</Text>
             </View>
-            <View style={styles.avatar}>
+            <TouchableOpacity style={styles.avatar} onPress={handleAvatarPress} activeOpacity={0.75}>
               <Text style={styles.avatarText}>{initial}</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Vehicle card */}

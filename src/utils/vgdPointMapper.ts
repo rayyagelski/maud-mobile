@@ -91,6 +91,19 @@ export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPo
   }, []);
 }
 
+// Tags the chronologically-first point of the trip's first-ever flush batch
+// as trip_start — vgd_analytics' tripAnalytics.js requires exactly one such
+// point to compute anything at all (analyzeTrip crashes outright without
+// one, since it reads startPoint.time unconditionally). Caller only invokes
+// this on the very first flush (vgdSentRouteCount is still 0), since that's
+// the only batch that can contain the trip's true first point.
+export function markTripStart(points: VgdPoint[]): VgdPoint[] {
+  if (points.length === 0) return points;
+  const sorted = [...points].sort((a, b) => a.time - b.time);
+  sorted[0] = { ...sorted[0], type: 'trip_start' };
+  return sorted;
+}
+
 // Tags the chronologically-last point of a flush batch as trip_end. If the
 // final flush window had no new telemetry, synthesizes one from the last
 // known GPS fix (never fabricates coordinates — if there's truly no GPS fix

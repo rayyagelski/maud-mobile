@@ -12,7 +12,7 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
-import { haversineDistanceKm, formatDuration, formatDistance } from '../../utils/helpers';
+import { haversineDistanceKm, formatDuration, formatDistance, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip, TripType as TripTypeValue } from '../../types/trip.types';
 
@@ -244,7 +244,7 @@ export default function TripHistoryScreen() {
         {/* Driving Averages */}
         <Text style={styles.sectionTitle}>DRIVING AVERAGES</Text>
         <View style={styles.card}>
-          <AvgRow icon={<ArrowUpIcon color="#999" size={16} />} label="Avg Speed" value={`${Math.round(stats.avgSpeedKmh)} km/h`} />
+          <AvgRow icon={<ArrowUpIcon color="#999" size={16} />} label="Avg Speed" value={formatSpeed(stats.avgSpeedKmh, isImperial)} />
           <AvgRow icon={<PinIcon color="#999" size={16} />} label="Avg Distance / Trip" value={formatDistance(stats.avgDistanceKm, isImperial)} />
           <AvgRow icon={<SmallCarIcon color="#999" size={16} />} label="Avg Distance / Day" value={formatDistance(stats.avgDistancePerDayKm, isImperial)} />
           <AvgRow icon={<ClockIcon color="#999" size={16} />} label="Avg Operation Time" value={formatDuration(Math.round(stats.avgOperationSec))} last />

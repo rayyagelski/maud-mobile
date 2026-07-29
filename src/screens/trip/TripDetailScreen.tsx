@@ -13,7 +13,7 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
-import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
 import type { VgdTripEventIndicator } from '../../types/vgd.types';
 
@@ -235,8 +235,8 @@ export default function TripDetailScreen() {
         <View style={styles.card}>
           <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm, isImperial)} />
           <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(avgSpeedKmh)} km/h`} />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value={`${Math.round(maxSpeedKmh)} km/h`} last />
+          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} />
+          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value={formatSpeed(maxSpeedKmh, isImperial)} last />
         </View>
 
         {/* Driving behaviour — real harsh-event counts from onboard sensors */}
@@ -298,7 +298,7 @@ export default function TripDetailScreen() {
                     <StatRow icon={<PinIcon color="#999" size={18} />} label="End" value={vgdAnalytics.endAddress} />
                   )}
                   {vgdAnalytics.averageSpeed != null && (
-                    <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(vgdAnalytics.averageSpeed)} km/h`} />
+                    <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(vgdAnalytics.averageSpeed, isImperial)} />
                   )}
                   <StatRow icon={<LeafIcon color="#999" size={18} />} label="CO₂" value={`${Math.round(vgdAnalytics.co2emissions)} g/km`} />
                   {(vgdAnalytics.endWeather?.temperatureDesc || vgdAnalytics.endWeather?.skyInfo) && (

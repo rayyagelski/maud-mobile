@@ -4,6 +4,7 @@ import {
   toVgdTimeSeconds,
   mapGpsPointsToVgdPoints,
   mapTelematicsEventsToVgdPoints,
+  markTripStart,
   markTripEnd,
 } from '../src/utils/vgdPointMapper';
 import type { GpsPoint, TelematicsEvent } from '../src/types/trip.types';
@@ -122,6 +123,25 @@ describe('mapTelematicsEventsToVgdPoints', () => {
   it('drops events with no value', () => {
     const points = mapTelematicsEventsToVgdPoints([event('harsh_brake', undefined, 1700000000000)]);
     expect(points).toHaveLength(0);
+  });
+});
+
+describe('markTripStart', () => {
+  it('tags the chronologically-first point as trip_start', () => {
+    const points = mapGpsPointsToVgdPoints(
+      [point(52.520, 13.405, 1700000010000), point(52.521, 13.405, 1700000000000)],
+      0,
+    ).vgdPoints;
+
+    const marked = markTripStart(points);
+
+    expect(marked).toHaveLength(2);
+    const tripStartPoint = marked.find(p => p.type === 'trip_start');
+    expect(tripStartPoint?.time).toBe(1700000000);
+  });
+
+  it('returns an empty array unchanged when the batch is empty', () => {
+    expect(markTripStart([])).toEqual([]);
   });
 });
 

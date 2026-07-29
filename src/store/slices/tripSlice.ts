@@ -12,6 +12,7 @@ import {
   mapTripTypeToVgdPurpose,
   mapGpsPointsToVgdPoints,
   mapTelematicsEventsToVgdPoints,
+  markTripStart,
   markTripEnd,
 } from '../../utils/vgdPointMapper';
 import type {
@@ -172,6 +173,12 @@ export const flushVgdPoints = createAsyncThunk(
     );
     const eventVgdPoints = mapTelematicsEventsToVgdPoints(newEvents);
     let points = [...gpsVgdPoints, ...eventVgdPoints];
+
+    // Only the very first flush for a trip can contain its true first point —
+    // a zero cursor means nothing has been sent yet.
+    if ((trip.vgdSentRouteCount ?? 0) === 0) {
+      points = markTripStart(points);
+    }
 
     if (args.isTripEnd) {
       const fallback = newRoutePoints[newRoutePoints.length - 1] ?? trip.vgdLastSentPoint;

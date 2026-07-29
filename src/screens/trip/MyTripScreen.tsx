@@ -11,7 +11,7 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
-import { haversineDistanceKm, formatDistance, formatDuration } from '../../utils/helpers';
+import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ export default function MyTripScreen() {
               <View style={styles.rowDiv} />
               <PerfRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
               <View style={styles.rowDiv} />
-              <PerfRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={`${Math.round(avgSpeedKmh)} km/h`} />
+              <PerfRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} />
             </View>
 
             {/* Cost & Impact */}
