@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
-import { fetchVehicles, selectVehicle } from '../../store/slices/vehicleSlice';
+import { selectVehicle } from '../../store/slices/vehicleSlice';
 import { fetchDrivers } from '../../store/slices/driverSlice';
 import { logout } from '../../store/slices/authSlice';
 import {
@@ -98,20 +98,9 @@ export default function HomeScreen() {
   const initial = firstName.charAt(0).toUpperCase();
   const displayVehicle = selectedVehicle ?? vehicles[0] ?? null;
 
-  useEffect(() => {
-    if (vehicles.length === 0) {
-      dispatch(fetchVehicles());
-    }
-  }, [vehicles.length, dispatch]);
-
-  // Auto-select the first vehicle once the list loads, if none is selected
-  // yet — selecting mints the vehicle-scoped JWT (vehicleId claim) that trip
-  // recording/VGD writes require, so this can't be left to a manual tap.
-  useEffect(() => {
-    if (!selectedVehicle && vehicles.length > 0) {
-      dispatch(selectVehicle(vehicles[0].id));
-    }
-  }, [selectedVehicle, vehicles, dispatch]);
+  // Vehicle fetch + auto-select now lives in useAutoSelectVehicle, mounted
+  // app-wide via TripDetectionRunner — trip auto-detection can fire before
+  // this screen is ever visited, so it can't be left to this screen's mount.
 
   useEffect(() => {
     if (drivers.length === 0) {

@@ -11,6 +11,7 @@ import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
 import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
+import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useSyncEngine } from '../services/syncEngine';
 import { configureClient } from '../api/client';
 import { refreshToken, setToken } from '../store/slices/authSlice';
@@ -23,6 +24,7 @@ const Root = createStackNavigator<RootStackParamList>();
 // Null-render component so the hook can call useAppSelector / useAppDispatch
 // while living inside the Redux Provider and NavigationContainer.
 function TripDetectionRunner() {
+  useAutoSelectVehicle();
   useTripAutoDetection();
   useHarshEventTracker();
   useComplianceMonitor();
