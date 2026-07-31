@@ -102,6 +102,20 @@ export default function RoutePlannerScreen() {
   const { selectedDriver } = useAppSelector(s => s.drivers);
   const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
 
+  // If the user arms a start here then navigates away before the car ever
+  // actually moves, the arm must not survive the screen — otherwise it sits
+  // in persisted state and fires on the next unrelated motion blip (e.g.
+  // walking to a different car later), starting a trip nobody asked for.
+  // Only clears an arm that's still pending; once startTrip.fulfilled has
+  // run, pendingStart is already null and this is a no-op.
+  const pendingStartOnUnmountRef = useRef(pendingStart);
+  useEffect(() => { pendingStartOnUnmountRef.current = pendingStart; }, [pendingStart]);
+  useEffect(() => () => {
+    if (pendingStartOnUnmountRef.current) {
+      dispatch(clearPendingStart());
+    }
+  }, [dispatch]);
+
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -486,6 +500,11 @@ export default function RoutePlannerScreen() {
               value={destinationQuery}
               onChangeText={setDestinationQuery}
               onSubmitEditing={handleSearchDestination}
+              // Expanding on the keyboard's own show event (below) can lag or
+              // miss entirely on some Android keyboards/devices; focus fires
+              // immediately and reliably, so the panel/suggestions have room
+              // the moment typing starts rather than waiting on OS timing.
+              onFocus={() => snapPanelTo(PANEL_HEIGHT_EXPANDED)}
               returnKeyType="search"
               editable={!isRouting}
             />

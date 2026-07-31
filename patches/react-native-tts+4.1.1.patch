@@ -26,3 +26,47 @@ index dbbe046..68b4097 100644
  
      defaultConfig {
          minSdkVersion safeExtGet('minSdkVersion', 16)
+diff --git a/node_modules/react-native-tts/index.js b/node_modules/react-native-tts/index.js
+index 6da7573..7cf7217 100644
+--- a/node_modules/react-native-tts/index.js
++++ b/node_modules/react-native-tts/index.js
+@@ -5,6 +5,13 @@ const TextToSpeech = NativeModules.TextToSpeech;
+ class Tts extends NativeEventEmitter {
+   constructor() {
+     super(TextToSpeech);
++    // React Native removed NativeEventEmitter's removeListener(type, handler)
++    // in favor of calling .remove() on the subscription addListener returns —
++    // this library was never updated for that, so removeEventListener below
++    // crashed with "this.removeListener is not a function" on unmount. Track
++    // subscriptions by (type, handler) ourselves so removal still works with
++    // the same two-argument call sites this library's consumers already use.
++    this._subscriptionsByTypeAndHandler = new Map();
+   }
+ 
+   getInitStatus() {
+@@ -116,11 +123,23 @@ class Tts extends NativeEventEmitter {
+   }
+ 
+   addEventListener(type, handler) {
+-    return this.addListener(type, handler);
++    const subscription = this.addListener(type, handler);
++    let byHandler = this._subscriptionsByTypeAndHandler.get(type);
++    if (!byHandler) {
++      byHandler = new Map();
++      this._subscriptionsByTypeAndHandler.set(type, byHandler);
++    }
++    byHandler.set(handler, subscription);
++    return subscription;
+   }
+ 
+   removeEventListener(type, handler) {
+-    this.removeListener(type, handler);
++    const byHandler = this._subscriptionsByTypeAndHandler.get(type);
++    const subscription = byHandler && byHandler.get(handler);
++    if (subscription) {
++      subscription.remove();
++      byHandler.delete(handler);
++    }
+   }
+ }
+ 
