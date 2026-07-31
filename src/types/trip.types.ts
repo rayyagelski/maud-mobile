@@ -113,10 +113,23 @@ export interface Trip {
   vgdLastSentPoint?: GpsPoint;
 }
 
+// Set by a manual Route Planner "Start" tap — recording doesn't actually
+// begin (isTracking/activeTrip) until useTripAutoDetection sees real motion
+// past TRIP_AUTO_START_SPEED_KMH, so handling the phone before pulling away
+// is never recorded as part of the trip.
+export interface PendingTripStart {
+  vehicleId: string;
+  driverId: string;
+  tripType: TripType;
+  transportMode: TransportMode;
+  armedAt: number;
+}
+
 export interface TripState {
   activeTrip: Trip | null;
   trips: Trip[];
   isTracking: boolean;
   isLoading: boolean;
   error: string | null;
+  pendingStart: PendingTripStart | null;
 }

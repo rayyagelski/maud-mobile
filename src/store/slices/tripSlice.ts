@@ -25,6 +25,7 @@ import type {
   TripContext,
   TripEnergy,
   TripRewardResult,
+  PendingTripStart,
 } from '../../types/trip.types';
 import type { Vehicle } from '../../types/vehicle.types';
 import type { Driver } from '../../types/driver.types';
@@ -36,6 +37,7 @@ const initialState: TripState = {
   isTracking: false,
   isLoading: false,
   error: null,
+  pendingStart: null,
 };
 
 export const startTrip = createAsyncThunk(
@@ -349,6 +351,16 @@ const tripSlice = createSlice({
     setTracking(state, action: PayloadAction<boolean>) {
       state.isTracking = action.payload;
     },
+    // Manual (Route Planner) start arms intent only — useTripAutoDetection
+    // dispatches the actual startTrip once real motion crosses the shared
+    // speed gate, so tapping Start while still stationary never begins
+    // recording (see TRIP_AUTO_START_SPEED_KMH).
+    armPendingStart(state, action: PayloadAction<PendingTripStart>) {
+      state.pendingStart = action.payload;
+    },
+    clearPendingStart(state) {
+      state.pendingStart = null;
+    },
     clearTripError(state) {
       state.error = null;
     },
@@ -390,6 +402,7 @@ const tripSlice = createSlice({
       .addCase(startTrip.fulfilled, (state, action: PayloadAction<Trip>) => {
         state.activeTrip = action.payload;
         state.isTracking = true;
+        state.pendingStart = null;
       })
       .addCase(endTrip.pending, (state) => { state.isLoading = true; })
       .addCase(endTrip.fulfilled, (state, action: PayloadAction<Trip>) => {
@@ -433,6 +446,8 @@ export const {
   appendGpsPoint,
   addTelematicsEvent,
   setTracking,
+  armPendingStart,
+  clearPendingStart,
   clearTripError,
   applySyncedTripReward,
   markVgdTripCreated,

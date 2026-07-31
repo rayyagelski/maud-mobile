@@ -19,7 +19,7 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
-import { startTrip, endTrip } from '../../store/slices/tripSlice';
+import { endTrip, armPendingStart, clearPendingStart } from '../../store/slices/tripSlice';
 import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
 import type { FuelPriceResponse } from '../../types/vehicle.types';
 import {
@@ -100,7 +100,7 @@ export default function RoutePlannerScreen() {
   const isImperial = useIsImperialUnits();
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
-  const { activeTrip, isTracking } = useAppSelector(s => s.trips);
+  const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
 
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
@@ -339,16 +339,27 @@ export default function RoutePlannerScreen() {
       return;
     }
 
+    // Already armed and waiting for motion — tapping again cancels instead
+    // of re-arming (which would just reset armedAt for no reason).
+    if (pendingStart) {
+      dispatch(clearPendingStart());
+      return;
+    }
+
     const vehicleId = claims?.vehicleId ?? selectedVehicle?.id ?? vehicles[0]?.id;
     if (!vehicleId || !claims) {
       Alert.alert('No vehicle selected', 'Select a vehicle from Home before starting a trip.');
       return;
     }
-    dispatch(startTrip({
+    // Arm only — recording doesn't actually start until useTripAutoDetection
+    // sees real motion, so holding the phone or driving off later doesn't
+    // get misrecorded as part of the trip while still parked.
+    dispatch(armPendingStart({
       vehicleId,
       driverId: selectedDriver?.id ?? String(claims.userId),
-      tripType: 'business',
+      tripType: 'private',
       transportMode: 'car',
+      armedAt: Date.now(),
     }));
   }
 
@@ -412,7 +423,9 @@ export default function RoutePlannerScreen() {
           <View style={styles.navHeaderLeft}>
             <ArrowUpIcon color="white" size={28} />
             <View style={{ marginLeft: 10 }}>
-              <Text style={styles.navStreet}>{isTracking ? 'Trip in progress' : 'Plan your route'}</Text>
+              <Text style={styles.navStreet}>
+                {isTracking ? 'Trip in progress' : pendingStart ? 'Waiting for movement…' : 'Plan your route'}
+              </Text>
               <Text style={styles.navTowards}>
                 {route ? `${formatDistance(route.distanceMeters / 1000, isImperial)} · ${formatDuration(route.durationSeconds)}` : 'Enter a destination below'}
               </Text>
@@ -557,13 +570,13 @@ export default function RoutePlannerScreen() {
 
         {/* Start / End Trip */}
         <TouchableOpacity
-          style={[styles.startBtn, isTracking && styles.endTripBtn]}
+          style={[styles.startBtn, (isTracking || !!pendingStart) && styles.endTripBtn]}
           activeOpacity={0.88}
           disabled={isEndingTrip}
           onPress={handleStartEndTrip}
         >
           <Text style={styles.startBtnText}>
-            {isEndingTrip ? 'Ending…' : isTracking ? 'End Trip' : 'Start Trip'}
+            {isEndingTrip ? 'Ending…' : isTracking ? 'End Trip' : pendingStart ? 'Waiting to start… (tap to cancel)' : 'Start Trip'}
           </Text>
         </TouchableOpacity>
         </ScrollView>

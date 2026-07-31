@@ -2,12 +2,16 @@ import { useEffect, useRef } from 'react';
 import BackgroundGeolocation, { type Location } from 'react-native-background-geolocation';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
-import { startTrip, endTrip, appendGpsPoint } from '../store/slices/tripSlice';
+import { startTrip, endTrip, appendGpsPoint, clearPendingStart } from '../store/slices/tripSlice';
 import { navigationRef } from '../navigation/navigationRef';
 import { publishGpsFix } from '../services/gpsSpeedBus';
+import { TRIP_AUTO_START_SPEED_KMH } from '../utils/constants';
 
-// Vehicle is "moving" above this speed; below it counts as stopped.
-const SPEED_START_MS = 2.8;  // ~10 km/h — unambiguous vehicle motion
+// Vehicle is "moving" above this speed; below it counts as stopped. Shared
+// with a manual Route Planner start (see pendingStart below) and with
+// harshEventDetector's cornering gate — one number for "is this actually
+// driving", not a separate threshold per feature.
+const SPEED_START_MS = TRIP_AUTO_START_SPEED_KMH / 3.6;
 const SPEED_STOP_MS  = 0.5;  // ~1.8 km/h — stationary
 // Vehicle must remain below SPEED_STOP_MS for this long before ending the trip.
 // 45 s avoids false-ends during traffic lights / slow-moving traffic.
@@ -16,23 +20,29 @@ const STILL_MS = 45_000;
 // treated as stale (app killed mid-trip, reopened much later) and closed out
 // immediately instead of resumed.
 const STALE_TRIP_GAP_MS = 30 * 60 * 1000; // 30 min
+// A manually-armed start (Route Planner "Start" tapped, car never moved) is
+// dropped after this long rather than honored on some unrelated later motion
+// — e.g. the app was killed before pulling away and reopened hours after.
+const STALE_PENDING_START_MS = 30 * 60 * 1000; // 30 min
 
 export function useTripAutoDetection() {
   const dispatch    = useAppDispatch();
   const { claims }  = useAppSelector(s => s.auth);
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
-  const { activeTrip, isTracking }    = useAppSelector(s => s.trips);
+  const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
 
   // Mutable refs keep the watchPosition callback always reading current Redux state
   // without restarting the GPS subscription on every state change.
   const isTrackingRef  = useRef(isTracking);
   const activeTripRef  = useRef(activeTrip);
+  const pendingStartRef = useRef(pendingStart);
   const endingRef      = useRef(false);   // guards against double-dispatch of endTrip
   const stillSinceRef  = useRef<number | null>(null);
 
   useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
   useEffect(() => { activeTripRef.current = activeTrip; }, [activeTrip]);
+  useEffect(() => { pendingStartRef.current = pendingStart; }, [pendingStart]);
 
   // Stale-trip guard: redux-persist now persists `trips` (see store/index.ts),
   // so an in-flight activeTrip can be rehydrated after the app was killed
@@ -93,10 +103,26 @@ export function useTripAutoDetection() {
         // ── Auto-start ─────────────────────────────────────────────────────
         if (!isTrackingRef.current && !endingRef.current && speedMs >= SPEED_START_MS) {
           stillSinceRef.current = null;
+
+          const pending = pendingStartRef.current;
+          if (pending && Date.now() - pending.armedAt > STALE_PENDING_START_MS) {
+            dispatch(clearPendingStart());
+          } else if (pending) {
+            // Manual Route Planner start, armed while still stationary —
+            // now that real motion is detected, start using its params.
+            dispatch(startTrip(pending));
+            return;
+          }
+
           dispatch(startTrip({
             vehicleId,
             driverId,
-            tripType: 'business',
+            // Default to private — auto-detection has no way to know intent,
+            // and defaulting to business risked mis-classifying and
+            // mis-costing personal trips. Driver can change per-trip; a
+            // per-driver default is a separate, larger follow-up (needs a
+            // new backend Driver field, not just a client-side default).
+            tripType: 'private',
             transportMode: 'car',
           }));
           return;

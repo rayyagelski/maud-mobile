@@ -15,7 +15,12 @@ export const SPEEDING_FLAT_THRESHOLD_KMH = 120;
 // consumption telemetry, so baseline = actual x this multiplier.
 export const FUEL_BASELINE_MULTIPLIER = 1.1;
 export const TRIP_AUTO_STOP_INACTIVITY_MS = 5 * 60 * 1000; // 5 min
-export const TRIP_AUTO_START_SPEED_KMH = 5;
+// 1 mph — the single "is this vehicle actually moving" gate shared by both
+// auto-detect and manual (Route Planner) trip start. Below this, no
+// recording of any kind (points, phone-usage seconds, harsh events) happens,
+// so handling the phone before mounting it — or after tapping Start but
+// before pulling away — is never misclassified as driving.
+export const TRIP_AUTO_START_SPEED_KMH = 1.60934;
 export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
 export const GPS_LOCATION_INTERVAL_MS = 3000;
 export const SENSOR_SAMPLE_RATE_MS = 100;
