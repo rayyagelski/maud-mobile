@@ -16,6 +16,12 @@ export function isTokenExpired(token: string): boolean {
   return Date.now() / 1000 > claims.exp;
 }
 
+// GPS positional error (commonly 3-10m even with a good fix) makes raw
+// point-to-point distance overcount real movement — shared by every caller
+// that accumulates distance across a sequence of raw GPS fixes, so a
+// segment below this floor is treated as noise rather than real movement.
+export const MIN_GPS_SEGMENT_KM = 0.005; // 5 metres
+
 export function haversineDistanceKm(a: GpsPoint, b: GpsPoint): number {
   const R = 6371;
   const dLat = toRad(b.latitude - a.latitude);

@@ -1,7 +1,7 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { tripsApi, vehiclesApi, vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from '../../api';
 import type { SubmitTripRewardParams } from '../../api/endpoints/trips';
-import { generateId, generateUuidV4, haversineDistanceKm } from '../../utils/helpers';
+import { generateId, generateUuidV4, haversineDistanceKm, MIN_GPS_SEGMENT_KM } from '../../utils/helpers';
 import { getHarshEventCounters } from '../../services/harshEventCounters';
 import { FUEL_BASELINE_MULTIPLIER } from '../../utils/constants';
 import { enqueueSyncItem } from './syncQueueSlice';
@@ -266,10 +266,22 @@ export const endTrip = createAsyncThunk(
     if (!trip || trip.id !== tripId) return rejectWithValue('No matching active trip');
 
     const endTime = Date.now();
-    const distanceKm = trip.route.reduce(
-      (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
-      0,
-    );
+    // Anchor-based accumulation, not a plain point-to-point reduce: GPS
+    // positional error (commonly 3-10m) means consecutive noisy fixes taken
+    // while stationary or barely moving still sum to nonzero distance,
+    // which drifted this trip's odometer contribution upward every time.
+    // The anchor only advances once a fix is far enough away to represent
+    // real movement, so jitter around one spot never accumulates.
+    let distanceKm = 0;
+    let anchor = trip.route[0];
+    for (let i = 1; i < trip.route.length; i += 1) {
+      const point = trip.route[i];
+      const segmentKm = haversineDistanceKm(anchor, point);
+      if (segmentKm >= MIN_GPS_SEGMENT_KM) {
+        distanceKm += segmentKm;
+        anchor = point;
+      }
+    }
     const durationSeconds = Math.round((endTime - trip.startTime) / 1000);
 
     // distance_km must be > 0 for the backend to accept the submission —

@@ -1,7 +1,7 @@
 import type { GpsPoint, TelematicsEvent, TripType } from '../types/trip.types';
 import type { Driver } from '../types/driver.types';
 import type { VgdDriverRole, VgdPoint, VgdTripPurpose } from '../types/vgd.types';
-import { haversineDistanceKm } from './helpers';
+import { haversineDistanceKm, MIN_GPS_SEGMENT_KM } from './helpers';
 
 // VGD's driver field is a fixed 3-slot family enum (main/spouse/child) —
 // coarser than mobile's self/family/other model. 'other' has no true
@@ -46,11 +46,19 @@ export function mapGpsPointsToVgdPoints(
   previousPoint?: GpsPoint,
 ): GpsPointMappingResult {
   let cumulativeKm = startingCumulativeDistanceKm;
-  let prior = previousPoint;
+  let anchor = previousPoint;
 
   const vgdPoints: VgdPoint[] = points.map((point) => {
-    if (prior) cumulativeKm += haversineDistanceKm(prior, point);
-    prior = point;
+    if (anchor) {
+      const segmentKm = haversineDistanceKm(anchor, point);
+      if (segmentKm >= MIN_GPS_SEGMENT_KM) {
+        cumulativeKm += segmentKm;
+        anchor = point;
+      }
+      // else: within GPS noise floor — anchor stays put, no distance added.
+    } else {
+      anchor = point;
+    }
 
     return {
       gps: { lat: point.latitude, lon: point.longitude },
