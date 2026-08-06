@@ -152,6 +152,12 @@ export default function HomeScreen() {
       icon: <SpeedometerIcon />,
       onPress: () => navigation.navigate('Odometer'),
     },
+    {
+      label: 'Settings',
+      iconBg: '#455A64',
+      icon: <GearIcon />,
+      onPress: () => navigation.navigate('Settings'),
+    },
   ];
 
   return (

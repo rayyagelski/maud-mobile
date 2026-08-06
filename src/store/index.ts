@@ -10,6 +10,8 @@ import expenseReducer from './slices/expenseSlice';
 import serviceRecordReducer from './slices/serviceRecordSlice';
 import rewardReducer from './slices/rewardSlice';
 import syncQueueReducer from './slices/syncQueueSlice';
+import bluetoothPairingReducer from './slices/bluetoothPairingSlice';
+import settingsReducer from './slices/settingsSlice';
 import { tokenPersistMiddleware } from './tokenPersistMiddleware';
 
 const rootReducer = combineReducers({
@@ -22,6 +24,8 @@ const rootReducer = combineReducers({
   serviceRecords: serviceRecordReducer,
   rewards: rewardReducer,
   syncQueue: syncQueueReducer,
+  bluetoothPairing: bluetoothPairingReducer,
+  settings: settingsReducer,
 });
 
 const persistConfig = {
@@ -32,7 +36,7 @@ const persistConfig = {
   // auth is deliberately NOT persisted here — the token lives in encrypted
   // storage instead (see secureTokenStorage.ts / tokenPersistMiddleware.ts)
   // and is restored on launch by AppNavigator.
-  whitelist: ['vehicles', 'drivers', 'trips', 'compliance', 'syncQueue'],
+  whitelist: ['vehicles', 'drivers', 'trips', 'compliance', 'syncQueue', 'bluetoothPairing', 'settings'],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

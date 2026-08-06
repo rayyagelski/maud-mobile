@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -102,6 +102,17 @@ export default function TripSummaryScreen() {
   const reward = trip?.reward;
   const isImperial = useIsImperialUnits();
   const { speak, isSpeaking } = useVoicePlayback();
+  const autoPlayTripSummaryVoice = useAppSelector(s => s.settings.autoPlayTripSummaryVoice);
+
+  // Auto-play the recap once per screen visit when the user has opted in
+  // (Settings > Voice > "Auto-play trip summary") — otherwise it stays
+  // manual-only via the "Listen" button below, same script either way.
+  useEffect(() => {
+    if (autoPlayTripSummaryVoice && reward?.voicePayload?.script) {
+      speak(reward.voicePayload.script);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlayTripSummaryVoice, reward?.voicePayload?.script]);
 
   const distanceKm = trip
     ? trip.route.reduce(

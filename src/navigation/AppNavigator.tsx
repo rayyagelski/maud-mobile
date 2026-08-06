@@ -8,11 +8,16 @@ import MainStackNavigator from './MainStackNavigator';
 import { useAppSelector } from '../hooks/useAppSelector';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
+import { useTripStartAnnouncement } from '../hooks/useTripStartAnnouncement';
+import { useDriveFocusReminder } from '../hooks/useDriveFocusReminder';
 import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
+import { useSevereWeatherAlerts } from '../hooks/useSevereWeatherAlerts';
+import { useTurnByTurnGuidance } from '../hooks/useTurnByTurnGuidance';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useSyncEngine } from '../services/syncEngine';
+import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import { configureClient } from '../api/client';
 import { refreshToken, setToken } from '../store/slices/authSlice';
 import { loadToken } from '../services/secureTokenStorage';
@@ -26,8 +31,12 @@ const Root = createStackNavigator<RootStackParamList>();
 function TripDetectionRunner() {
   useAutoSelectVehicle();
   useTripAutoDetection();
+  useTripStartAnnouncement();
+  useDriveFocusReminder();
   useHarshEventTracker();
   useComplianceMonitor();
+  useSevereWeatherAlerts();
+  useTurnByTurnGuidance();
   useVgdPointFlush();
   useSyncEngine();
   return null;
@@ -82,6 +91,7 @@ export default function AppNavigator() {
   return (
     <NavigationContainer ref={navigationRef}>
       <TripDetectionRunner />
+      {isAuthenticated && <BluetoothVehiclePromptBanner />}
       <Root.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <Root.Screen name="Main" component={MainStackNavigator} />

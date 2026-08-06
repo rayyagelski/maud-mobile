@@ -73,12 +73,20 @@ export function useHarshEventTracker(): void {
       if (magnitude > peakAccelMagnitude) peakAccelMagnitude = magnitude;
     });
 
+    // Gyroscope samples arrive every SENSOR_SAMPLE_RATE_MS (100ms) and a real
+    // turn stays above the yaw-rate threshold for a second or more, so
+    // classifying per-sample would log one turn as 10-20 separate events.
+    // corneringActive gates on the rising edge only — a new event fires once
+    // per continuous above-threshold episode, not once per sample.
+    let corneringActive = false;
     const gyroSub = gyroscope.subscribe(({ x, y, z }) => {
       if (!lastGpsPoint) return;
       const gyroDegPerSec = vector3MagnitudeDegPerSec({ x, y, z });
-      if (classifyCornering(gyroDegPerSec, lastGpsSpeedMs)) {
+      const isCornering = classifyCornering(gyroDegPerSec, lastGpsSpeedMs);
+      if (isCornering && !corneringActive) {
         emitEvent('harsh_corner', lastGpsPoint, gyroDegPerSec);
       }
+      corneringActive = isCornering;
     });
 
     const unsubscribeGps = subscribeGpsFix((speedMs, timestamp, point) => {

@@ -45,6 +45,7 @@ export type MainStackParamList = {
   MyTrip: { tripId?: string };
   DriverScore: undefined;
   EcoScore: undefined;
+  Settings: undefined;
 };
 
 export type RootStackParamList = {
