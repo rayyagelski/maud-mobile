@@ -8,7 +8,9 @@ import Svg, { Path } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { GaugeIcon } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { vehiclesApi } from '../../api';
+import { kmToMiles, milesToKm } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -33,8 +35,13 @@ export default function OdometerScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+  const isImperial = useIsImperialUnits();
 
+  // Always canonical km, matching the backend/VGD schema — never the
+  // display unit. Converted to/from miles only at the display/input edges
+  // below, for imperial-locale customers.
   const [odometer, setOdometer] = useState<number | null>(null);
+  const displayOdometer = odometer != null && isImperial ? kmToMiles(odometer) : odometer;
   const [isLoading, setIsLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -52,7 +59,7 @@ export default function OdometerScreen() {
   }, [vehicleId]);
 
   function openModal() {
-    setInputValue(odometer != null ? String(Math.round(odometer)) : '');
+    setInputValue(displayOdometer != null ? String(Math.round(displayOdometer)) : '');
     setModalVisible(true);
   }
 
@@ -63,10 +70,13 @@ export default function OdometerScreen() {
       Alert.alert('Invalid value', 'Enter a valid mileage.');
       return;
     }
+    // User types in their display unit (miles for imperial locales) — convert
+    // back to the canonical km the backend/VGD schema stores before sending.
+    const odometerKm = isImperial ? milesToKm(parsed) : parsed;
     setIsSaving(true);
     try {
-      await vehiclesApi.updateOdometer(vehicleId, parsed);
-      setOdometer(parsed);
+      await vehiclesApi.updateOdometer(vehicleId, odometerKm);
+      setOdometer(odometerKm);
       setModalVisible(false);
     } catch {
       Alert.alert('Error', 'Could not update mileage. Please try again.');
@@ -101,10 +111,10 @@ export default function OdometerScreen() {
             <ActivityIndicator color={TEAL} style={{ marginVertical: 8 }} />
           ) : (
             <Text style={styles.mileageValue}>
-              {odometer != null ? Math.round(odometer).toLocaleString() : '—'}
+              {displayOdometer != null ? Math.round(displayOdometer).toLocaleString() : '—'}
             </Text>
           )}
-          <Text style={styles.mileageUnit}>kilometers</Text>
+          <Text style={styles.mileageUnit}>{isImperial ? 'miles' : 'kilometers'}</Text>
 
           <TouchableOpacity
             style={[styles.updateBtn, !vehicleId && styles.updateBtnDisabled]}

@@ -85,6 +85,15 @@ const EVENT_TYPE_TO_VGD_PARAMETER: Partial<Record<TelematicsEvent['type'], 'acce
 // per-point parameter in the real schema, so they're not sent as separate
 // VGD points — that data reaches VGD's aggregate `events` block server-side
 // via vgd_analytics' own detection, not mobile-sourced per-point flags.
+//
+// event.location is the same GpsPoint captured at classification time (see
+// useHarshEventTracker.ts), so speed/direction are real readings, not
+// fabricated — including them here is what makes a cornering event's detail
+// card carry the same context (speed, heading) as a braking/acceleration
+// event's, instead of only the single metric value. Distance/odometer are
+// deliberately still omitted: unlike speed/direction, cumulative distance
+// isn't available at this call site (only mapGpsPointsToVgdPoints tracks
+// it), and approximating it here risks a wrong number being worse than none.
 export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPoint[] {
   return events.reduce<VgdPoint[]>((acc, event) => {
     const parameterKey = EVENT_TYPE_TO_VGD_PARAMETER[event.type];
@@ -93,7 +102,11 @@ export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPo
     acc.push({
       gps: { lat: event.location.latitude, lon: event.location.longitude },
       time: toVgdTimeSeconds(event.timestamp),
-      parameters: { [parameterKey]: event.value },
+      parameters: {
+        [parameterKey]: event.value,
+        ...(event.location.speed != null && { speed: event.location.speed }),
+        ...(event.location.heading != null && { direction: Math.round(event.location.heading) }),
+      },
     });
     return acc;
   }, []);

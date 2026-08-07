@@ -56,6 +56,10 @@ export function kmToMiles(km: number): number {
   return (km * 1000) / METERS_PER_MILE;
 }
 
+export function milesToKm(miles: number): number {
+  return (miles * METERS_PER_MILE) / 1000;
+}
+
 export function litersToGallons(liters: number): number {
   return liters / LITERS_PER_GALLON;
 }

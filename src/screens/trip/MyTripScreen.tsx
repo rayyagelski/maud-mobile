@@ -11,6 +11,7 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
+import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
@@ -72,6 +73,13 @@ export default function MyTripScreen() {
   const reward = trip?.reward;
   const start = routeCoords[0];
   const end = routeCoords[routeCoords.length - 1];
+
+  // Same VGD read-back TripDetailScreen uses, so this screen's waypoint
+  // labels can show resolved addresses instead of always falling back to
+  // raw coordinates.
+  const vgdEnabled = Boolean(trip?.vgdTripId && trip?.vgdTripCreated);
+  const { details: vgdDetails } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
+  const vgdAnalytics = vgdDetails?.analytics;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -146,7 +154,8 @@ export default function MyTripScreen() {
                 </View>
                 <View style={styles.wpInfo}>
                   <Text style={styles.wpMain}>
-                    {start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—'}
+                    {vgdAnalytics?.startAddress
+                      ?? (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—')}
                   </Text>
                 </View>
               </View>
@@ -157,7 +166,8 @@ export default function MyTripScreen() {
                 </View>
                 <View style={styles.wpInfo}>
                   <Text style={styles.wpMain}>
-                    {end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—'}
+                    {vgdAnalytics?.endAddress
+                      ?? (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—')}
                   </Text>
                 </View>
               </View>
