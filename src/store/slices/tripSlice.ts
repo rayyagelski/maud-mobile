@@ -26,6 +26,7 @@ import type {
   TripEnergy,
   TripRewardResult,
   PendingTripStart,
+  PlannedRoute,
 } from '../../types/trip.types';
 import type { Vehicle } from '../../types/vehicle.types';
 import type { Driver } from '../../types/driver.types';
@@ -48,6 +49,7 @@ export const startTrip = createAsyncThunk(
       driverId: string;
       tripType: TripType;
       transportMode: TransportMode;
+      plannedRoute?: PlannedRoute;
     },
     { dispatch },
   ) => {
@@ -373,6 +375,16 @@ const tripSlice = createSlice({
     clearPendingStart(state) {
       state.pendingStart = null;
     },
+    // Attaches a route planned *after* the trip already auto-started (e.g.
+    // the vehicle was moving before Route Planner was opened) so
+    // useTurnByTurnGuidance can pick it up — without this, voice guidance
+    // could only ever activate for trips armed via Route Planner's own
+    // Start button before any motion was detected.
+    setPlannedRouteOnActiveTrip(state, action: PayloadAction<PlannedRoute>) {
+      if (state.activeTrip) {
+        state.activeTrip.plannedRoute = action.payload;
+      }
+    },
     clearTripError(state) {
       state.error = null;
     },
@@ -460,6 +472,7 @@ export const {
   setTracking,
   armPendingStart,
   clearPendingStart,
+  setPlannedRouteOnActiveTrip,
   clearTripError,
   applySyncedTripReward,
   markVgdTripCreated,

@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import BackgroundGeolocation from 'react-native-background-geolocation';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
@@ -28,6 +29,20 @@ function SettingRow({ title, subtitle, value, onValueChange }: {
       />
     </View>
   );
+}
+
+// Android only — some OEMs (Xiaomi, Samsung, Huawei, OnePlus, etc.) keep
+// their own power-manager restrictions on top of the standard OS battery-
+// optimization exemption already requested during onboarding
+// (LocationPermissionScreen). This is a manual escape hatch for users still
+// seeing the app get killed mid-trip ("not always on" real-drive feedback)
+// after that — opens the device's own OEM-specific power settings screen.
+async function handleOpenPowerSettings() {
+  try {
+    await BackgroundGeolocation.deviceSettings.showPowerManager();
+  } catch {
+    // Not supported on this device/OEM — nothing to fall back to.
+  }
 }
 
 export default function SettingsScreen() {
@@ -68,6 +83,26 @@ export default function SettingsScreen() {
             onValueChange={(v) => dispatch(setDriveFocusReminderEnabled(v))}
           />
         </View>
+
+        {Platform.OS === 'android' && (
+          <>
+            <Text style={[styles.sectionTitle, { marginTop: 20 }]}>TRACKING RELIABILITY</Text>
+            <View style={styles.card}>
+              <TouchableOpacity
+                onPress={handleOpenPowerSettings}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Improve background tracking</Text>
+                  <Text style={styles.rowSubtitle}>
+                    If trips stop recording or the app closes on its own while driving, open your
+                    phone's power-saving settings and allow MAUD Connect to run unrestricted.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );

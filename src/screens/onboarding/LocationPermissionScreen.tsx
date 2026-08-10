@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { request, check, PERMISSIONS, RESULTS } from 'react-native-permissions';
+import BackgroundGeolocation from 'react-native-background-geolocation';
 import LocationPinIcon from '../../components/common/LocationPinIcon';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
@@ -43,6 +44,35 @@ export default function LocationPermissionScreen() {
     }
   }
 
+  // Android-only: OS-level background location permission alone isn't enough
+  // to keep the app running for a full drive — many OEMs (Samsung, Xiaomi,
+  // Huawei, OnePlus, etc.) apply their own aggressive battery-management
+  // policies that kill the whole process anyway, requiring the user to
+  // manually relaunch mid-trip ("app not always on" real-drive feedback).
+  // BackgroundGeolocation's own deviceSettings API requests the standard
+  // Android "ignore battery optimizations" exemption for this app — the same
+  // fix the SDK's own docs recommend for exactly this symptom. Fail-soft:
+  // never blocks onboarding if the device/OS doesn't support it.
+  async function requestBatteryOptimizationExemption() {
+    if (Platform.OS !== 'android') return;
+    try {
+      const alreadyExempt = await BackgroundGeolocation.deviceSettings.isIgnoringBatteryOptimizations();
+      if (alreadyExempt) return;
+
+      await new Promise<void>((resolve) => {
+        Alert.alert(
+          'Keep Trip Tracking Running',
+          'Some phones stop apps running in the background to save battery, which can cut a trip recording short. Allow MAUD Connect to run without battery restrictions to keep tracking reliable for your whole drive.',
+          [{ text: 'Continue', onPress: () => resolve() }],
+        );
+      });
+
+      await BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations();
+    } catch {
+      // Not supported on this device/OS version — fall back to default behavior.
+    }
+  }
+
   async function handleAllow() {
     setIsRequesting(true);
     try {
@@ -67,6 +97,7 @@ export default function LocationPermissionScreen() {
 
       if (result === RESULTS.GRANTED) {
         await requestBackgroundLocation();
+        await requestBatteryOptimizationExemption();
       }
     } catch {
       // Permission request failed — continue to app

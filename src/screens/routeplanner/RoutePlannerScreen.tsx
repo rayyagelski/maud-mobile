@@ -19,7 +19,7 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
-import { endTrip, armPendingStart, clearPendingStart } from '../../store/slices/tripSlice';
+import { endTrip, armPendingStart, clearPendingStart, setPlannedRouteOnActiveTrip } from '../../store/slices/tripSlice';
 import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
 import type { FuelPriceResponse } from '../../types/vehicle.types';
 import {
@@ -115,6 +115,12 @@ export default function RoutePlannerScreen() {
       dispatch(clearPendingStart());
     }
   }, [dispatch]);
+
+  // Every trip-start path in the app previously hardcoded 'private' with no
+  // way to change it — TripHistoryScreen already has a Business filter, but
+  // it could never match anything. Default stays private per explicit
+  // real-drive feedback (Private = default), user can switch before starting.
+  const [tripPurpose, setTripPurpose] = useState<'private' | 'business'>('private');
 
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
@@ -228,7 +234,7 @@ export default function RoutePlannerScreen() {
     try {
       // Request one alternative alongside HERE's optimal route — the AI
       // recommendation below is only useful when there's actually a choice.
-      const results = await fetchHereRoutes(origin, destination, 1);
+      const results = await fetchHereRoutes(origin, destination, 1, isImperial);
       if (results.length === 0) {
         Alert.alert('No route', 'No route could be calculated to that destination.');
         return;
@@ -371,10 +377,23 @@ export default function RoutePlannerScreen() {
     dispatch(armPendingStart({
       vehicleId,
       driverId: selectedDriver?.id ?? String(claims.userId),
-      tripType: 'private',
+      tripType: tripPurpose,
       transportMode: 'car',
       armedAt: Date.now(),
+      // Carries the selected route into Redux so voice turn-by-turn guidance
+      // can read it after this screen unmounts — route/routes above are
+      // local state and would otherwise be lost the moment tracking begins.
+      ...(route && { plannedRoute: { coordinates: route.coordinates, maneuvers: route.maneuvers } }),
     }));
+  }
+
+  // Covers the common case where auto-detection already started the trip
+  // (the vehicle was moving before Route Planner was opened) — previously
+  // the only option here was "End Trip", forcing the user to stop recording
+  // just to plan a destination and get voice guidance.
+  function handleAttachRouteToActiveTrip() {
+    if (!route) return;
+    dispatch(setPlannedRouteOnActiveTrip({ coordinates: route.coordinates, maneuvers: route.maneuvers }));
   }
 
   const mapRegion = origin
@@ -587,6 +606,37 @@ export default function RoutePlannerScreen() {
           value={tripCostLabel}
         />
 
+        {/* Trip purpose — only changeable before a trip is armed/tracking;
+            once started (manually or auto-detected) it's fixed for that trip. */}
+        {!isTracking && !pendingStart && (
+          <View style={styles.purposeRow}>
+            {(['private', 'business'] as const).map(purpose => (
+              <TouchableOpacity
+                key={purpose}
+                style={[styles.purposePill, tripPurpose === purpose && styles.purposePillActive]}
+                onPress={() => setTripPurpose(purpose)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.purposePillText, tripPurpose === purpose && styles.purposePillTextActive]}>
+                  {purpose === 'private' ? 'Private' : 'Business'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Trip already tracking (auto-detected) with a route planned but not
+            yet attached — let voice guidance pick it up without ending the trip. */}
+        {isTracking && !!route && !activeTrip?.plannedRoute && (
+          <TouchableOpacity
+            style={styles.startBtn}
+            activeOpacity={0.88}
+            onPress={handleAttachRouteToActiveTrip}
+          >
+            <Text style={styles.startBtnText}>Guide this trip</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Start / End Trip */}
         <TouchableOpacity
           style={[styles.startBtn, (isTracking || !!pendingStart) && styles.endTripBtn]}
@@ -781,4 +831,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#E53935',
     shadowColor: '#E53935',
   },
+
+  purposeRow: {
+    flexDirection: 'row', columnGap: 8, marginTop: 18,
+  },
+  purposePill: {
+    flex: 1, paddingVertical: 12, borderRadius: 20,
+    alignItems: 'center', backgroundColor: '#F0F0F0',
+  },
+  purposePillActive: { backgroundColor: TEAL },
+  purposePillText: { fontSize: 14, fontWeight: '600', color: '#666666' },
+  purposePillTextActive: { color: 'white' },
 });

@@ -13,9 +13,11 @@ import { TRIP_AUTO_START_SPEED_KMH } from '../utils/constants';
 // driving", not a separate threshold per feature.
 const SPEED_START_MS = TRIP_AUTO_START_SPEED_KMH / 3.6;
 const SPEED_STOP_MS  = 0.5;  // ~1.8 km/h — stationary
-// Vehicle must remain below SPEED_STOP_MS for this long before ending the trip.
-// 45 s avoids false-ends during traffic lights / slow-moving traffic.
-const STILL_MS = 45_000;
+// Vehicle must remain below SPEED_STOP_MS for this long before ending the
+// trip — avoids false-ends during traffic lights / slow-moving traffic.
+// 2 min per explicit user-testing feedback (was 45s, undocumented to users
+// and shorter than expected).
+const STILL_MS = 2 * 60 * 1000;
 // A rehydrated in-flight trip whose last GPS activity is older than this is
 // treated as stale (app killed mid-trip, reopened much later) and closed out
 // immediately instead of resumed.
