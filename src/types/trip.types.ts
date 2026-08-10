@@ -1,3 +1,5 @@
+import type { LatLng, Maneuver } from '../services/here/hereRoutingClient';
+
 export type TripType = 'business' | 'private' | 'commute';
 export type TransportMode = 'car' | 'truck' | 'scooter' | 'cycling' | 'walking';
 export type TripStatus = 'active' | 'completed';
@@ -51,6 +53,15 @@ export interface TripEnergy {
   fuelPricePerLiter?: number;
   electricityPricePerKwh?: number;
   currencyCode?: string;
+}
+
+// The Route-Planner-selected route, carried onto a trip so voice-only
+// turn-by-turn guidance (useTurnByTurnGuidance) can read it after
+// RoutePlannerScreen unmounts — its own fetched route otherwise lives only
+// in local component state and is discarded once tracking begins.
+export interface PlannedRoute {
+  coordinates: LatLng[];
+  maneuvers: Maneuver[];
 }
 
 export interface TripVoicePayload {
@@ -111,6 +122,9 @@ export interface Trip {
   vgdSentEventCount?: number;
   vgdCumulativeDistanceKm?: number;
   vgdLastSentPoint?: GpsPoint;
+  // Only present for a Route-Planner-originated trip — plain auto-detected
+  // trips have no selected destination/route to guide against.
+  plannedRoute?: PlannedRoute;
 }
 
 // Set by a manual Route Planner "Start" tap — recording doesn't actually
@@ -123,6 +137,7 @@ export interface PendingTripStart {
   tripType: TripType;
   transportMode: TransportMode;
   armedAt: number;
+  plannedRoute?: PlannedRoute;
 }
 
 export interface TripState {
