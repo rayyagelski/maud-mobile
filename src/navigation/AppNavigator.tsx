@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { check, PERMISSIONS, RESULTS, type PermissionStatus } from 'react-native-permissions';
@@ -47,6 +48,36 @@ export default function AppNavigator() {
   const { isAuthenticated, token } = useAppSelector(s => s.auth);
   const prevAuth = React.useRef(false);
 
+  // TripDetectionRunner (specifically useTripAutoDetection's
+  // BackgroundGeolocation.ready()/.start()) must not run before the user has
+  // actually granted location permission — that SDK requests the same OS
+  // permission on its own, and racing it against LocationPermissionScreen's
+  // own react-native-permissions request() deadlocks Android's permission
+  // dialog (the "Requesting…" button hangs forever, and BackgroundGeolocation
+  // can end up starting/detecting motion before the user ever finished the
+  // onboarding flow). Checked on mount and re-checked on every foreground
+  // transition, since granting happens via an OS dialog or a trip to Settings
+  // that this component has no other way to observe.
+  const [locationGranted, setLocationGranted] = useState(false);
+
+  useEffect(() => {
+    const permission = Platform.OS === 'ios'
+      ? PERMISSIONS.IOS.LOCATION_WHEN_IN_USE
+      : PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION;
+
+    const checkPermission = () => {
+      check(permission).then((status: PermissionStatus) => {
+        setLocationGranted(status === RESULTS.GRANTED);
+      });
+    };
+
+    checkPermission();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkPermission();
+    });
+    return () => sub.remove();
+  }, []);
+
   // The auth token now lives in encrypted storage (not redux-persist) — restore
   // it on cold start. Restored unconditionally, even if expired: the existing
   // request interceptor in api/client.ts already refreshes expired tokens
@@ -90,7 +121,7 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer ref={navigationRef}>
-      <TripDetectionRunner />
+      {locationGranted && <TripDetectionRunner />}
       {isAuthenticated && <BluetoothVehiclePromptBanner />}
       <Root.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
