@@ -1,9 +1,28 @@
 export const API_BASE_URL = 'https://myautodata.com/api/v1';
 export const AUTH_HEADER = 'X-Token-Auth';
 
-export const HARSH_BRAKE_THRESHOLD = -3; // m/s² (linear, gravity-removed)
-export const HARSH_ACCEL_THRESHOLD = 3;  // m/s² (linear, gravity-removed)
-export const HARSH_CORNER_GYRO_THRESHOLD_DEG_S = 25; // yaw rate
+// Harsh-event thresholds, in m/s² (linear, gravity-removed) — derived from
+// vgd_analytics' own canonical g-force thresholds (D:\Projects\MAUD\vgd_analytics
+// \src\service\analytics\gForcePointsFilters.js: BRAKING_THRESHOLD=0.5g,
+// ACCELERATION_THRESHOLD=0.35g, CORNERING_THRESHOLD=0.4g — the backend's
+// server-side re-filter that classifies these points into indicator events).
+// Previously mobile used its own, disagreeing thresholds (-3/+3 m/s², both
+// equal — roughly 0.31g) which didn't match vgd_analytics at all; since
+// mobile only ever sends points already above its own on-device threshold,
+// the two systems' disagreement meant vgd_analytics' g-force filter was
+// never doing any real filtering. Aligned 2026-08-10 so both sides agree on
+// the same real-world threshold.
+const MS2_PER_G = 9.80665;
+export const HARSH_BRAKE_THRESHOLD = -0.5 * MS2_PER_G;
+export const HARSH_ACCEL_THRESHOLD = 0.35 * MS2_PER_G;
+// Cornering severity, expressed in the same unit (m/s², linear) as
+// HARSH_BRAKE_THRESHOLD/HARSH_ACCEL_THRESHOLD rather than a raw yaw-rate
+// threshold — a fixed deg/s cutoff conflates a sharp turn at parking-lot
+// speed with the same yaw rate at highway speed, which are very different
+// in severity. Derived via the centripetal-acceleration relation
+// a_lateral = speed * yawRate(rad/s), same magnitude bar as the other two
+// harsh-event axes.
+export const HARSH_CORNER_THRESHOLD_MS2 = 0.4 * MS2_PER_G;
 // GPS-speed derivative must corroborate an accelerometer spike within this
 // tolerance (SRS 4.4 "slip filtering") — rejects phone jostles (accel spike,
 // no GPS change) and GPS noise (GPS jump, no accel corroboration).
@@ -22,6 +41,10 @@ export const TRIP_AUTO_STOP_INACTIVITY_MS = 5 * 60 * 1000; // 5 min
 // before pulling away — is never misclassified as driving.
 export const TRIP_AUTO_START_SPEED_KMH = 1.60934;
 export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
+// Weather doesn't change block-by-block like speed cameras do — re-query
+// HERE only after moving this far since the last check, to keep call volume
+// (and therefore cost) reasonable.
+export const WEATHER_ALERT_REFRESH_DISTANCE_KM = 10;
 export const GPS_LOCATION_INTERVAL_MS = 3000;
 export const SENSOR_SAMPLE_RATE_MS = 100;
 

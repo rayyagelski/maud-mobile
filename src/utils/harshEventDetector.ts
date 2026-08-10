@@ -3,7 +3,7 @@
 import {
   HARSH_BRAKE_THRESHOLD,
   HARSH_ACCEL_THRESHOLD,
-  HARSH_CORNER_GYRO_THRESHOLD_DEG_S,
+  HARSH_CORNER_THRESHOLD_MS2,
   SLIP_FILTER_TOLERANCE_MS2,
   TRIP_AUTO_START_SPEED_KMH,
 } from './constants';
@@ -79,15 +79,21 @@ export function classifyLongitudinalEvent(
 }
 
 /**
- * Classifies cornering from total gyroscope angular-velocity magnitude
- * (deg/s) — gated on GPS speed so a stationary phone being rotated by hand
- * doesn't register. Approximation: without full orientation-fusion, this
+ * Classifies cornering from centripetal (lateral) acceleration, derived from
+ * gyroscope yaw rate and GPS speed (a_lateral = speed * yawRate(rad/s)) —
+ * gated on GPS speed so a stationary phone being rotated by hand doesn't
+ * register, and so the same yaw rate isn't judged equally "harsh" at parking-
+ * lot speed as at highway speed. Returns the lateral acceleration in m/s²
+ * (same unit as classifyLongitudinalEvent's value) when it crosses the harsh
+ * threshold, else null. Approximation: without full orientation-fusion, this
  * doesn't distinguish yaw from pitch/roll, so a pothole-induced rotation at
  * speed can register as "cornering" too; acceptable for Phase 1.
  */
-export function classifyCornering(gyroMagnitudeDegPerSec: number, gpsSpeedMs: number): boolean {
-  if (gpsSpeedMs < SPEED_START_MS) return false;
-  return gyroMagnitudeDegPerSec >= HARSH_CORNER_GYRO_THRESHOLD_DEG_S;
+export function classifyCornering(gyroMagnitudeDegPerSec: number, gpsSpeedMs: number): number | null {
+  if (gpsSpeedMs < SPEED_START_MS) return null;
+  const yawRateRadPerSec = gyroMagnitudeDegPerSec * (Math.PI / 180);
+  const lateralAccelMs2 = gpsSpeedMs * yawRateRadPerSec;
+  return lateralAccelMs2 >= HARSH_CORNER_THRESHOLD_MS2 ? lateralAccelMs2 : null;
 }
 
 export function radPerSecToDegPerSec(rad: number): number {

@@ -82,9 +82,10 @@ export function useHarshEventTracker(): void {
     const gyroSub = gyroscope.subscribe(({ x, y, z }) => {
       if (!lastGpsPoint) return;
       const gyroDegPerSec = vector3MagnitudeDegPerSec({ x, y, z });
-      const isCornering = classifyCornering(gyroDegPerSec, lastGpsSpeedMs);
+      const lateralAccelMs2 = classifyCornering(gyroDegPerSec, lastGpsSpeedMs);
+      const isCornering = lateralAccelMs2 != null;
       if (isCornering && !corneringActive) {
-        emitEvent('harsh_corner', lastGpsPoint, gyroDegPerSec);
+        emitEvent('harsh_corner', lastGpsPoint, lateralAccelMs2);
       }
       corneringActive = isCornering;
     });

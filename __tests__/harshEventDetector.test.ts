@@ -7,11 +7,13 @@ import {
 
 describe('classifyLongitudinalEvent (slip filtering)', () => {
   it('classifies harsh braking when GPS deceleration and accelerometer spike agree', () => {
-    // GPS shows -4 m/s² deceleration, accelerometer corroborates with a matching spike
-    expect(classifyLongitudinalEvent(-4, 4)).toBe('harsh_brake');
+    // Threshold is -0.5g (~-4.9 m/s², see constants.ts) — GPS shows -5 m/s²
+    // deceleration, accelerometer corroborates with a matching spike.
+    expect(classifyLongitudinalEvent(-5, 5)).toBe('harsh_brake');
   });
 
   it('classifies harsh acceleration when GPS acceleration and accelerometer spike agree', () => {
+    // Threshold is 0.35g (~-3.43 m/s²)
     expect(classifyLongitudinalEvent(4, 4)).toBe('harsh_accel');
   });
 
@@ -32,16 +34,28 @@ describe('classifyLongitudinalEvent (slip filtering)', () => {
 });
 
 describe('classifyCornering', () => {
-  it('detects cornering when gyro yaw rate exceeds threshold while moving', () => {
-    expect(classifyCornering(30, 10)).toBe(true);
+  it('detects cornering when derived lateral acceleration exceeds threshold while moving', () => {
+    // Threshold is 0.4g (~3.92 m/s², see constants.ts) — 30 deg/s at 10 m/s
+    // => ~5.24 m/s² lateral, above threshold
+    const result = classifyCornering(30, 10);
+    expect(result).not.toBeNull();
+    expect(result).toBeCloseTo(5.236, 2);
   });
 
-  it('does not detect cornering below the gyro threshold', () => {
-    expect(classifyCornering(10, 10)).toBe(false);
+  it('does not detect cornering below the derived lateral-acceleration threshold', () => {
+    // 10 deg/s at 10 m/s => ~1.75 m/s² lateral, below the ~3.92 m/s² threshold
+    expect(classifyCornering(10, 10)).toBeNull();
+  });
+
+  it('scales with speed — the same yaw rate is harsher at higher speed', () => {
+    // 10 deg/s at 30 m/s => ~5.24 m/s² lateral, now above threshold
+    const result = classifyCornering(10, 30);
+    expect(result).not.toBeNull();
+    expect(result).toBeCloseTo(5.236, 2);
   });
 
   it('ignores gyro rotation while stationary (phone handled by hand, not the car turning)', () => {
-    expect(classifyCornering(50, 0)).toBe(false);
+    expect(classifyCornering(50, 0)).toBeNull();
   });
 });
 
