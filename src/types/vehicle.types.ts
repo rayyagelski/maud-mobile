@@ -29,6 +29,11 @@ export interface FuelPriceResponse {
   currencyCode: string;
 }
 
+export interface TripCostResponse {
+  cost: number | null;
+  currencyCode: string;
+}
+
 export interface VehicleState {
   vehicles: Vehicle[];
   selectedVehicle: Vehicle | null;

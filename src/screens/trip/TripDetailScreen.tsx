@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -13,9 +13,11 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
+import { vehiclesApi } from '../../api';
 import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
 import type { VgdTripEventIndicator } from '../../types/vgd.types';
+import type { TripCostResponse } from '../../types/vehicle.types';
 
 const EVENT_INDICATOR_LABELS: Record<VgdTripEventIndicator, string> = {
   hard_braking: 'Hard braking',
@@ -175,6 +177,27 @@ export default function TripDetailScreen() {
   const vgdAnalytics = vgdDetails?.analytics;
   const visibleVgdEvents = vgdEvents.filter(e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end');
 
+  // Real Insurance/Tax/Leasing/Financing + Repair/Maintenance + Fuel/
+  // Electricity cost (TotalCostCalculator, server-side) — distinct from
+  // "Money Saved" below, which is a comparative trip_reward figure, not an
+  // absolute cost. Fail-soft like every other auxiliary lookup in this app.
+  const [tripCost, setTripCost] = useState<TripCostResponse | null>(null);
+  useEffect(() => {
+    if (!trip?.vehicleId || !trip?.endTime) {
+      setTripCost(null);
+      return;
+    }
+    let cancelled = false;
+    vehiclesApi.getTripCost(
+      trip.vehicleId,
+      Math.round(trip.startTime / 1000),
+      Math.round(trip.endTime / 1000),
+    )
+      .then((res) => { if (!cancelled) setTripCost(res.data); })
+      .catch(() => { if (!cancelled) setTripCost(null); });
+    return () => { cancelled = true; };
+  }, [trip?.vehicleId, trip?.startTime, trip?.endTime]);
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <SafeAreaView edges={['top']} style={styles.safeHeader}>
@@ -250,21 +273,37 @@ export default function TripDetailScreen() {
         </View>
 
         {/* CO₂ & Cost */}
-        {reward && (
+        {(reward || tripCost?.cost != null) && (
           <>
             <Text style={styles.sectionTitle}>COST & IMPACT</Text>
             <View style={styles.energyRow}>
-              <EnergyCard
-                icon={<LeafIcon color="#888" size={15} />}
-                label="CO₂ Avoided"
-                value={reward.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
-              />
+              {reward && (
+                <>
+                  <EnergyCard
+                    icon={<LeafIcon color="#888" size={15} />}
+                    label="CO₂ Avoided"
+                    value={reward.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
+                  />
+                  <EnergyCard
+                    icon={<DollarIcon color="#888" size={15} />}
+                    label="Money Saved"
+                    value={
+                      reward.moneySavedCents != null && reward.currencyCode
+                        ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
+                        : '—'
+                    }
+                  />
+                </>
+              )}
+              {/* Absolute trip cost (fuel + insurance + lease/financing +
+                  repair/maintenance) — distinct from "Money Saved" above,
+                  which only compares against a baseline. */}
               <EnergyCard
                 icon={<DollarIcon color="#888" size={15} />}
-                label="Money Saved"
+                label="Trip Cost"
                 value={
-                  reward.moneySavedCents != null && reward.currencyCode
-                    ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
+                  tripCost?.cost != null
+                    ? `${tripCost.cost.toFixed(2)} ${tripCost.currencyCode}`
                     : '—'
                 }
               />
