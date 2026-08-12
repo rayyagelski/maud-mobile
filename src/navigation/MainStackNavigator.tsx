@@ -1,5 +1,6 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
+import { useAppSelector } from '../hooks/useAppSelector';
 import MainTabNavigator from './MainTabNavigator';
 import LocationPermissionScreen from '../screens/onboarding/LocationPermissionScreen';
 import TurnOnLocationScreen from '../screens/onboarding/TurnOnLocationScreen';
@@ -30,8 +31,20 @@ import type { MainStackParamList } from '../types/navigation.types';
 const Stack = createStackNavigator<MainStackParamList>();
 
 export default function MainStackNavigator() {
+  const locationOnboardingComplete = useAppSelector(s => s.settings.locationOnboardingComplete);
+
+  // This navigator remounts from scratch whenever AppNavigator's Main/Auth
+  // Root.Screen swap flips back to "Main" (e.g. after a token refresh
+  // round-trip, or the app process being restarted by the OS mid-drive) —
+  // without this, users who already completed location onboarding got
+  // dumped straight back onto LocationPermission (the first declared
+  // Screen's implicit initial route) every single time that happened,
+  // mid-drive, even though nothing about their permission state changed.
+  const initialRouteName = locationOnboardingComplete ? 'MainTabs' : 'LocationPermission';
+
   return (
     <Stack.Navigator
+      initialRouteName={initialRouteName}
       screenOptions={{
         headerStyle: { backgroundColor: '#1E4E8C' },
         headerTintColor: '#FFFFFF',

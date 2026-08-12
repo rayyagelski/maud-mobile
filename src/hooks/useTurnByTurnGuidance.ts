@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react';
 import { useAppSelector } from './useAppSelector';
 import { useVoicePlayback } from './useVoicePlayback';
 import { subscribeGpsFix } from '../services/gpsSpeedBus';
-import { advanceDistanceTraveled, nextManeuverToAnnounce, isOffRoute } from '../utils/turnByTurnLogic';
-import type { GpsPoint } from '../types/trip.types';
+import {
+  buildCumulativeRouteDistances, distanceAlongRoute, nextManeuverToAnnounce, isOffRoute,
+} from '../utils/turnByTurnLogic';
 
 // Consecutive off-route fixes required before guidance gives up — absorbs a
 // single noisy GPS blip rather than silencing guidance on one bad fix.
@@ -30,20 +31,19 @@ export function useTurnByTurnGuidance(): void {
   useEffect(() => {
     if (!isTracking || !plannedRoute) return;
 
-    let anchor: GpsPoint | undefined;
-    let cumulativeMeters = 0;
+    // Built once per planned route — distance is tracked as a projection onto
+    // this same polyline (see distanceAlongRoute's doc comment) rather than
+    // raw accumulated GPS movement, so it stays in sync with
+    // Maneuver.distanceFromStartMeters (computed against this same polyline)
+    // regardless of how the actual driven path's length compares.
+    const cumulativeRouteDistances = buildCumulativeRouteDistances(plannedRoute.coordinates);
     let announcedCount = 0;
     let offRouteStreak = 0;
 
     const unsubscribe = subscribeGpsFix((_speedMs, _timestamp, point) => {
       offRouteStreak = isOffRoute(point, plannedRoute.coordinates) ? offRouteStreak + 1 : 0;
 
-      // Distance-traveled tracking is real-GPS-based, not a projection onto
-      // the route polyline, so it stays accurate regardless of route
-      // adherence — safe to keep advancing even while off-route.
-      const advanced = advanceDistanceTraveled(anchor, point, cumulativeMeters);
-      anchor = advanced.anchor;
-      cumulativeMeters = advanced.cumulativeMeters;
+      const distanceTraveledMeters = distanceAlongRoute(point, plannedRoute.coordinates, cumulativeRouteDistances);
 
       // Fixed-route v1: no re-routing, no "recalculating" message — just
       // mute announcements while off-route rather than permanently giving up
@@ -51,7 +51,7 @@ export function useTurnByTurnGuidance(): void {
       // OFF_ROUTE_DISTANCE_METERS of the planned route.
       if (offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD) return;
 
-      const maneuver = nextManeuverToAnnounce(plannedRoute.maneuvers, cumulativeMeters, announcedCount);
+      const maneuver = nextManeuverToAnnounce(plannedRoute.maneuvers, distanceTraveledMeters, announcedCount);
       if (maneuver) {
         announcedCount += 1;
         speakRef.current(maneuver.instruction);

@@ -47,7 +47,16 @@ export const refreshToken = createAsyncThunk(
       const res = await authApi.refresh(expiredToken);
       return res.data.token;
     } catch (err: unknown) {
-      return rejectWithValue('Session expired');
+      // client.ts's response interceptor rewrites errors to {status, errStatus,
+      // message} — a genuine 401/403 from the server means the refresh token
+      // itself is invalid/expired and the user really is logged out. Anything
+      // else (no status at all, e.g. a timeout or dropped connection — common
+      // mid-drive with patchy cellular signal) is not proof the session is
+      // invalid; treat it as transient so the caller doesn't wipe a still-good
+      // token over a network blip.
+      const status = (err as { status?: number })?.status;
+      const isAuthRejection = status === 401 || status === 403;
+      return rejectWithValue({ message: 'Session expired', isAuthRejection });
     }
   },
 );
@@ -122,10 +131,18 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, handleFulfilled)
       .addCase(register.rejected, handleRejected)
       .addCase(refreshToken.fulfilled, handleFulfilled)
-      .addCase(refreshToken.rejected, (state) => {
-        state.token = null;
-        state.claims = null;
-        state.isAuthenticated = false;
+      .addCase(refreshToken.rejected, (state, action) => {
+        const payload = action.payload as { isAuthRejection?: boolean } | undefined;
+        // Only a confirmed 401/403 means the session is actually invalid — a
+        // transient network failure leaves the existing token/claims in place
+        // so the interceptor can just retry on the next call, and so trip
+        // recording (gated on `claims` in useTripAutoDetection) doesn't get
+        // torn down over a temporary connectivity gap mid-drive.
+        if (payload?.isAuthRejection) {
+          state.token = null;
+          state.claims = null;
+          state.isAuthenticated = false;
+        }
       })
       .addCase(requestPasswordReset.pending, handlePending)
       .addCase(requestPasswordReset.fulfilled, (state) => { state.isLoading = false; })

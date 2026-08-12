@@ -1,37 +1,35 @@
 import {
-  advanceDistanceTraveled, nextManeuverToAnnounce, isOffRoute,
+  buildCumulativeRouteDistances, distanceAlongRoute, nextManeuverToAnnounce, isOffRoute,
   TURN_ANNOUNCE_DISTANCE_METERS, OFF_ROUTE_DISTANCE_METERS,
 } from '../src/utils/turnByTurnLogic';
-import type { GpsPoint } from '../src/types/trip.types';
 import type { Maneuver } from '../src/services/here/hereRoutingClient';
 
 const ORIGIN = { latitude: 51.5, longitude: -0.12 };
 
-function point(latitude: number, longitude: number, timestamp = 0): GpsPoint {
-  return { latitude, longitude, timestamp };
-}
+describe('buildCumulativeRouteDistances / distanceAlongRoute', () => {
+  // A straight north-south line, ~1.11km per 0.01 degrees of latitude.
+  const route = [
+    { latitude: 51.50, longitude: -0.12 },
+    { latitude: 51.51, longitude: -0.12 },
+    { latitude: 51.52, longitude: -0.12 },
+  ];
 
-describe('advanceDistanceTraveled', () => {
-  it('sets the anchor without adding distance on the first point', () => {
-    const result = advanceDistanceTraveled(undefined, point(51.5, -0.12), 0);
-    expect(result.cumulativeMeters).toBe(0);
-    expect(result.anchor).toEqual(point(51.5, -0.12));
+  it('returns 0 for an empty route', () => {
+    expect(distanceAlongRoute(ORIGIN, [], [])).toBe(0);
   });
 
-  it('ignores a segment within the GPS noise floor', () => {
-    const anchor = point(51.5, -0.12);
-    const jitter = point(51.50001, -0.12); // ~1m
-    const result = advanceDistanceTraveled(anchor, jitter, 0);
-    expect(result.cumulativeMeters).toBe(0);
-    expect(result.anchor).toEqual(anchor); // anchor unchanged — still filtering noise
+  it('starts cumulative distance at 0 for the first coordinate', () => {
+    const cumulative = buildCumulativeRouteDistances(route);
+    expect(cumulative[0]).toBe(0);
   });
 
-  it('accumulates distance and advances the anchor once past the noise floor', () => {
-    const anchor = point(51.5, -0.12);
-    const moved = point(51.509, -0.12); // ~1km north
-    const result = advanceDistanceTraveled(anchor, moved, 500);
-    expect(result.cumulativeMeters).toBeGreaterThan(500 + 900);
-    expect(result.anchor).toEqual(moved);
+  it('tracks distance to the nearest route point even off the exact line', () => {
+    // Slightly east of the second route point — nearest match is still index 1.
+    // This is the property that keeps maneuver timing locked to the route's
+    // own geometry regardless of how the actual driven path compares to it.
+    const cumulative = buildCumulativeRouteDistances(route);
+    const nearby = { latitude: 51.51, longitude: -0.1199 };
+    expect(distanceAlongRoute(nearby, route, cumulative)).toBe(cumulative[1]);
   });
 });
 
@@ -56,6 +54,20 @@ describe('nextManeuverToAnnounce', () => {
 
   it('returns null once every maneuver has been announced', () => {
     expect(nextManeuverToAnnounce(maneuvers, 5000, 2)).toBeNull();
+  });
+
+  it('does not announce a closely-spaced maneuver before the previous one is reached', () => {
+    // Two turns only 150m apart — well inside the normal 400m lookahead.
+    const closeManeuvers: Maneuver[] = [
+      { instruction: 'Turn left onto Main St', distanceFromStartMeters: 1000 },
+      { instruction: 'Turn right onto Oak Ave', distanceFromStartMeters: 1150 },
+    ];
+    // Just before reaching the first maneuver — the second's naive 400m
+    // window (1150 - 400 = 750) would already be satisfied here, but it
+    // must not fire until the first maneuver has actually been passed.
+    expect(nextManeuverToAnnounce(closeManeuvers, 900, 1)).toBeNull();
+    // Once past the first maneuver's position, the second is fair game.
+    expect(nextManeuverToAnnounce(closeManeuvers, 1000, 1)).toEqual(closeManeuvers[1]);
   });
 });
 
