@@ -19,6 +19,12 @@ export interface HereRouteResult {
   coordinates: LatLng[];
   distanceMeters: number;
   durationSeconds: number;
+  // HERE's historical/no-traffic baseline for this route — only present when
+  // requested via `return=typicalDuration`. Comparing this against
+  // durationSeconds (which is always traffic-aware) is how live backups are
+  // detected (see trafficBackupLogic.ts) without a separate Traffic Flow API
+  // integration.
+  typicalDurationSeconds?: number;
   maneuvers: Maneuver[];
 }
 
@@ -26,7 +32,7 @@ interface HereRoutesResponse {
   routes: Array<{
     sections: Array<{
       polyline: string;
-      summary: { length: number; duration: number };
+      summary: { length: number; duration: number; typicalDuration?: number };
       actions?: Array<{
         instruction: string;
         // Confirmed via a live request (2026-08-03): this is an index into
@@ -45,6 +51,10 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
   const coordinates: LatLng[] = [];
   const maneuvers: Maneuver[] = [];
   let distanceSoFarMeters = 0;
+  // Only meaningful if every section reported one — a partial sum would
+  // silently understate the backup delay rather than correctly reporting
+  // "unknown".
+  let typicalDurationSeconds: number | undefined = 0;
 
   for (const section of sections) {
     const sectionCoords = decodeFlexiblePolyline(section.polyline).coordinates.map(c => ({
@@ -65,11 +75,16 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
 
     coordinates.push(...sectionCoords);
     distanceSoFarMeters += section.summary.length;
+    if (typicalDurationSeconds != null && section.summary.typicalDuration != null) {
+      typicalDurationSeconds += section.summary.typicalDuration;
+    } else {
+      typicalDurationSeconds = undefined;
+    }
   }
 
   const durationSeconds = sections.reduce((sum, s) => sum + s.summary.duration, 0);
 
-  return { coordinates, distanceMeters: distanceSoFarMeters, durationSeconds, maneuvers };
+  return { coordinates, distanceMeters: distanceSoFarMeters, durationSeconds, typicalDurationSeconds, maneuvers };
 }
 
 // HERE Routing API v8 — plain REST/JSON, no native SDK. Coordinates are
@@ -89,7 +104,7 @@ export async function fetchHereRoutes(
     transportMode: 'car',
     origin: `${origin.latitude},${origin.longitude}`,
     destination: `${destination.latitude},${destination.longitude}`,
-    return: 'polyline,summary,actions,instructions',
+    return: 'polyline,summary,actions,instructions,typicalDuration',
     alternatives: String(alternatives),
     // HERE embeds distance units directly into actions[].instruction's text
     // (e.g. "Go for 727 m" vs "Go for 0.5 mi") — this is what

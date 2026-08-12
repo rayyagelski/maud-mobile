@@ -45,6 +45,10 @@ export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
 // HERE only after moving this far since the last check, to keep call volume
 // (and therefore cost) reasonable.
 export const WEATHER_ALERT_REFRESH_DISTANCE_KM = 10;
+// Traffic conditions change faster than weather but a fresh HERE routing
+// call (with alternatives) costs more than a single-route call — re-check
+// this often rather than on every GPS fix.
+export const TRAFFIC_MONITOR_REFRESH_DISTANCE_KM = 3;
 export const GPS_LOCATION_INTERVAL_MS = 3000;
 export const SENSOR_SAMPLE_RATE_MS = 100;
 

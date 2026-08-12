@@ -6,6 +6,7 @@ import vehicleReducer from './slices/vehicleSlice';
 import driverReducer from './slices/driverSlice';
 import tripReducer from './slices/tripSlice';
 import complianceReducer from './slices/complianceSlice';
+import trafficReducer from './slices/trafficSlice';
 import expenseReducer from './slices/expenseSlice';
 import serviceRecordReducer from './slices/serviceRecordSlice';
 import rewardReducer from './slices/rewardSlice';
@@ -20,6 +21,7 @@ const rootReducer = combineReducers({
   drivers: driverReducer,
   trips: tripReducer,
   compliance: complianceReducer,
+  traffic: trafficReducer,
   expenses: expenseReducer,
   serviceRecords: serviceRecordReducer,
   rewards: rewardReducer,

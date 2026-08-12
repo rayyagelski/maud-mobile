@@ -20,6 +20,7 @@ import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { endTrip, armPendingStart, clearPendingStart, setPlannedRouteOnActiveTrip } from '../../store/slices/tripSlice';
+import { dismissRerouteSuggestion, clearRerouteSuggestion } from '../../store/slices/trafficSlice';
 import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
 import type { FuelPriceResponse } from '../../types/vehicle.types';
 import {
@@ -101,6 +102,7 @@ export default function RoutePlannerScreen() {
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
   const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
+  const { rerouteSuggestion } = useAppSelector(s => s.traffic);
 
   // If the user arms a start here then navigates away before the car ever
   // actually moves, the arm must not survive the screen — otherwise it sits
@@ -396,6 +398,27 @@ export default function RoutePlannerScreen() {
     dispatch(setPlannedRouteOnActiveTrip({ coordinates: route.coordinates, maneuvers: route.maneuvers }));
   }
 
+  // Swaps both the active trip's guided route (what useTurnByTurnGuidance/
+  // useTrafficMonitor read) and this screen's own displayed route/stats to
+  // the faster alternative useTrafficMonitor found.
+  function handleAcceptReroute() {
+    if (!rerouteSuggestion) return;
+    const { alternativeRoute, alternativeDistanceMeters, alternativeDurationSeconds } = rerouteSuggestion;
+    dispatch(setPlannedRouteOnActiveTrip(alternativeRoute));
+    setRoutes([{
+      coordinates: alternativeRoute.coordinates,
+      maneuvers: alternativeRoute.maneuvers,
+      distanceMeters: alternativeDistanceMeters,
+      durationSeconds: alternativeDurationSeconds,
+    }]);
+    setSelectedRouteIndex(0);
+    dispatch(clearRerouteSuggestion());
+  }
+
+  function handleDismissReroute() {
+    dispatch(dismissRerouteSuggestion());
+  }
+
   const mapRegion = origin
     ? { ...origin, latitudeDelta: 0.045, longitudeDelta: 0.025 }
     : FALLBACK_REGION;
@@ -543,6 +566,27 @@ export default function RoutePlannerScreen() {
                 <Text style={styles.suggestionText} numberOfLines={2}>{item.label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+        )}
+
+        {/* Live traffic-backup reroute prompt (useTrafficMonitor) */}
+        {rerouteSuggestion && (
+          <View style={styles.trafficCard}>
+            <View style={styles.recommendationHeader}>
+              <WarningTriangleIcon color="#F47920" size={16} />
+              <Text style={styles.trafficLabel}>TRAFFIC BACKUP AHEAD</Text>
+            </View>
+            <Text style={styles.recommendationText}>
+              Adding about {formatDuration(rerouteSuggestion.delaySeconds)} to your trip. A faster route is available.
+            </Text>
+            <View style={styles.trafficActions}>
+              <TouchableOpacity style={styles.trafficDismissBtn} activeOpacity={0.8} onPress={handleDismissReroute}>
+                <Text style={styles.trafficDismissText}>Dismiss</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.trafficRerouteBtn} activeOpacity={0.8} onPress={handleAcceptReroute}>
+                <Text style={styles.trafficRerouteText}>Reroute</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -770,6 +814,26 @@ const styles = StyleSheet.create({
   recommendationHeader: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginBottom: 6 },
   recommendationLabel: { fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 0.4 },
   recommendationText: { fontSize: 13, color: '#1A1A1A', lineHeight: 18 },
+
+  // Live traffic-backup reroute prompt
+  trafficCard: {
+    backgroundColor: '#FFF4E8', borderRadius: 16,
+    padding: 14, marginBottom: 14,
+    borderWidth: 1, borderColor: '#FBDDBA',
+  },
+  trafficLabel: { fontSize: 11, fontWeight: '700', color: '#F47920', letterSpacing: 0.4 },
+  trafficActions: { flexDirection: 'row', columnGap: 10, marginTop: 10 },
+  trafficDismissBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 18,
+    alignItems: 'center', backgroundColor: 'white',
+    borderWidth: 1, borderColor: '#DDDDDD',
+  },
+  trafficDismissText: { fontSize: 13, fontWeight: '700', color: '#666666' },
+  trafficRerouteBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 18,
+    alignItems: 'center', backgroundColor: '#F47920',
+  },
+  trafficRerouteText: { fontSize: 13, fontWeight: '700', color: 'white' },
 
   // Address suggestions
   suggestionsCard: {

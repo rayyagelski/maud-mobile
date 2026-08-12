@@ -15,6 +15,7 @@ import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
 import { useSevereWeatherAlerts } from '../hooks/useSevereWeatherAlerts';
 import { useTurnByTurnGuidance } from '../hooks/useTurnByTurnGuidance';
+import { useTrafficMonitor } from '../hooks/useTrafficMonitor';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useSyncEngine } from '../services/syncEngine';
@@ -38,6 +39,7 @@ function TripDetectionRunner() {
   useComplianceMonitor();
   useSevereWeatherAlerts();
   useTurnByTurnGuidance();
+  useTrafficMonitor();
   useVgdPointFlush();
   useSyncEngine();
   return null;
