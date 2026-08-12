@@ -101,15 +101,15 @@ function event(type: TelematicsEvent['type'], value: number | undefined, timesta
 }
 
 describe('mapTelematicsEventsToVgdPoints', () => {
-  it('maps harsh_brake/harsh_accel events to an acceleration parameter', () => {
-    const points = mapTelematicsEventsToVgdPoints([event('harsh_brake', -4, 1700000000000)]);
+  it('maps harsh_brake/harsh_accel events to an acceleration parameter, converted from m/s² to g', () => {
+    const points = mapTelematicsEventsToVgdPoints([event('harsh_brake', -4.9, 1700000000000)]);
     expect(points).toHaveLength(1);
-    expect(points[0].parameters.acceleration).toBe(-4);
+    expect(points[0].parameters.acceleration).toBeCloseTo(-0.5, 3);
   });
 
-  it('maps harsh_corner events to a cornering parameter', () => {
-    const points = mapTelematicsEventsToVgdPoints([event('harsh_corner', 30, 1700000000000)]);
-    expect(points[0].parameters.cornering).toBe(30);
+  it('maps harsh_corner events to a cornering parameter, converted from m/s² to g', () => {
+    const points = mapTelematicsEventsToVgdPoints([event('harsh_corner', 3.923, 1700000000000)]);
+    expect(points[0].parameters.cornering).toBeCloseTo(0.4, 3);
   });
 
   it('drops event types with no matching VGD point parameter (speeding, road_type_change)', () => {

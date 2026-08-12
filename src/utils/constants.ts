@@ -12,7 +12,7 @@ export const AUTH_HEADER = 'X-Token-Auth';
 // the two systems' disagreement meant vgd_analytics' g-force filter was
 // never doing any real filtering. Aligned 2026-08-10 so both sides agree on
 // the same real-world threshold.
-const MS2_PER_G = 9.80665;
+export const MS2_PER_G = 9.80665;
 export const HARSH_BRAKE_THRESHOLD = -0.5 * MS2_PER_G;
 export const HARSH_ACCEL_THRESHOLD = 0.35 * MS2_PER_G;
 // Cornering severity, expressed in the same unit (m/s², linear) as

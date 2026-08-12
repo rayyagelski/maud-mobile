@@ -2,6 +2,7 @@ import type { GpsPoint, TelematicsEvent, TripType } from '../types/trip.types';
 import type { Driver } from '../types/driver.types';
 import type { VgdDriverRole, VgdPoint, VgdTripPurpose } from '../types/vgd.types';
 import { haversineDistanceKm, MIN_GPS_SEGMENT_KM } from './helpers';
+import { MS2_PER_G } from './constants';
 
 // VGD's driver field is a fixed 3-slot family enum (main/spouse/child) —
 // coarser than mobile's self/family/other model. 'other' has no true
@@ -94,6 +95,14 @@ const EVENT_TYPE_TO_VGD_PARAMETER: Partial<Record<TelematicsEvent['type'], 'acce
 // deliberately still omitted: unlike speed/direction, cumulative distance
 // isn't available at this call site (only mapGpsPointsToVgdPoints tracks
 // it), and approximating it here risks a wrong number being worse than none.
+//
+// event.value is computed on-device in m/s² (harshEventDetector.ts), but
+// VGD's acceleration/cornering parameters are g-force ("gs" per the old iOS
+// app's Metric, which fed CoreMotion's already-g-scaled CMAcceleration
+// straight through) — the same unit vgd_analytics' gForcePointsFilters.js
+// thresholds (0.5g/0.35g/0.4g) are written against. Divide by MS2_PER_G here
+// so the value actually stored/displayed as "g-force" is one, instead of a
+// raw m/s² number ~9.8x too large.
 export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPoint[] {
   return events.reduce<VgdPoint[]>((acc, event) => {
     const parameterKey = EVENT_TYPE_TO_VGD_PARAMETER[event.type];
@@ -103,7 +112,7 @@ export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPo
       gps: { lat: event.location.latitude, lon: event.location.longitude },
       time: toVgdTimeSeconds(event.timestamp),
       parameters: {
-        [parameterKey]: event.value,
+        [parameterKey]: event.value / MS2_PER_G,
         ...(event.location.speed != null && { speed: event.location.speed }),
         ...(event.location.heading != null && { direction: Math.round(event.location.heading) }),
       },
