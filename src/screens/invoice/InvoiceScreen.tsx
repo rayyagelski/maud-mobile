@@ -22,6 +22,7 @@ function currencySymbol(code: string): string {
 }
 
 function buildShareText(record: ServiceRecord): string {
+  const symbol = currencySymbol(record.currencyCode);
   const lines = [
     `Invoice — ${record.shop.name}`,
     record.date ? `Date: ${new Date(record.date).toLocaleDateString()}` : null,
@@ -29,10 +30,10 @@ function buildShareText(record: ServiceRecord): string {
     '',
     ...record.completedWorks.map(work => {
       const subtotal = (work.costOfLabour ?? 0) + (work.costOfParts ?? 0);
-      return `${work.description ?? 'Service'} — €${subtotal.toFixed(2)}`;
+      return `${work.description ?? 'Service'} — ${symbol}${subtotal.toFixed(2)}`;
     }),
     '',
-    `Total: €${record.totalCost.toFixed(2)}`,
+    `Total: ${symbol}${record.totalCost.toFixed(2)}`,
   ];
   return lines.filter((l): l is string => l !== null).join('\n');
 }
@@ -45,12 +46,19 @@ export default function InvoiceScreen() {
   const dispatch = useAppDispatch();
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
-  const record = useAppSelector(s => s.serviceRecords.selectedRecord);
+  const { selectedRecord, error } = useAppSelector(s => s.serviceRecords);
+  // selectedRecord is shared store-wide state that isn't reset between
+  // invoices — without this guard, opening invoice B right after invoice A
+  // (or a failed refetch of the same invoice) would keep showing A's data
+  // instead of a loading/error state while B's fetch is in flight.
+  const record = selectedRecord && String(selectedRecord.id) === route.params.serviceId ? selectedRecord : null;
 
-  useEffect(() => {
+  function loadRecord() {
     if (!vehicleId || !route.params.serviceId) return;
     dispatch(fetchServiceRecord({ vehicleId, id: route.params.serviceId }));
-  }, [vehicleId, route.params.serviceId, dispatch]);
+  }
+
+  useEffect(loadRecord, [vehicleId, route.params.serviceId, dispatch]);
 
   async function handleShare() {
     if (!record) return;
@@ -78,7 +86,16 @@ export default function InvoiceScreen() {
 
       {!record ? (
         <View style={styles.shopCard}>
-          <Text style={styles.emptyText}>Loading invoice…</Text>
+          {error ? (
+            <>
+              <Text style={styles.emptyText}>Couldn't load this invoice. {error}</Text>
+              <TouchableOpacity style={styles.retryBtn} activeOpacity={0.8} onPress={loadRecord}>
+                <Text style={styles.retryBtnText}>Try Again</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.emptyText}>Loading invoice…</Text>
+          )}
         </View>
       ) : (
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -139,18 +156,18 @@ export default function InvoiceScreen() {
                     <RefreshIcon color="#888" size={20} />
                   </View>
                   <Text style={styles.svcName}>{work.description ?? 'Service item'}</Text>
-                  <Text style={styles.svcCost}>{currencySymbol('EUR')}{subtotal.toFixed(2)}</Text>
+                  <Text style={styles.svcCost}>{currencySymbol(record.currencyCode)}{subtotal.toFixed(2)}</Text>
                 </View>
                 {work.costOfLabour != null && (
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Cost of Labor</Text>
-                    <Text style={styles.detailValue}>{currencySymbol('EUR')}{work.costOfLabour.toFixed(2)}</Text>
+                    <Text style={styles.detailValue}>{currencySymbol(record.currencyCode)}{work.costOfLabour.toFixed(2)}</Text>
                   </View>
                 )}
                 {work.costOfParts != null && (
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Cost of Parts</Text>
-                    <Text style={styles.detailValue}>{currencySymbol('EUR')}{work.costOfParts.toFixed(2)}</Text>
+                    <Text style={styles.detailValue}>{currencySymbol(record.currencyCode)}{work.costOfParts.toFixed(2)}</Text>
                   </View>
                 )}
                 {i < record.completedWorks.length - 1 && <View style={styles.svcDivider} />}
@@ -162,7 +179,7 @@ export default function InvoiceScreen() {
           <View style={styles.totalDivider} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total Cost:</Text>
-            <Text style={styles.totalAmount}>{currencySymbol('EUR')}{record.totalCost.toFixed(2)}</Text>
+            <Text style={styles.totalAmount}>{currencySymbol(record.currencyCode)}{record.totalCost.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -240,6 +257,11 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
   totalAmount: { fontSize: 26, fontWeight: '800', color: '#1A1A1A' },
   emptyText: { fontSize: 14, color: '#999', textAlign: 'center', padding: 24 },
+  retryBtn: {
+    alignSelf: 'center', backgroundColor: TEAL, borderRadius: 14,
+    paddingHorizontal: 24, paddingVertical: 12, marginBottom: 16,
+  },
+  retryBtnText: { fontSize: 14, fontWeight: '700', color: 'white' },
 
   // Bottom action bar
   bottomBar: {

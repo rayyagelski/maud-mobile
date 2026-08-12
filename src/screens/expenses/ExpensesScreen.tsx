@@ -166,6 +166,32 @@ function CostItemCard({ category, amount, maxAmount, currencyCode }: {
   );
 }
 
+// ── Itemized expense row ───────────────────────────────────────────────────
+
+// The Cost Breakdown card above only ever shows 6 category rollups — the
+// per-purchase detail entered on AddExpenseScreen (vendor, date, notes) was
+// fetched into `expenses` for the weekly chart's bucketing but never actually
+// displayed anywhere, i.e. real-drive feedback that expense detail "isn't
+// shown" was correct.
+function ExpenseItemRow({ expense, isLast }: { expense: Expense; isLast: boolean }) {
+  const meta = CATEGORY_META[expense.category];
+  return (
+    <View style={[styles.itemRow, !isLast && styles.itemRowDivider]}>
+      <View style={styles.itemIconBox}>
+        <ItemIcon iconKey={meta.iconKey} />
+      </View>
+      <View style={styles.itemMain}>
+        <Text style={styles.itemTitle} numberOfLines={1}>{expense.vendor || meta.label}</Text>
+        <Text style={styles.itemSub} numberOfLines={1}>
+          {new Date(expense.expenseDate).toLocaleDateString()}
+          {expense.notes ? ` · ${expense.notes}` : ''}
+        </Text>
+      </View>
+      <Text style={styles.itemAmount}>{currencySymbol(expense.currencyCode)}{expense.amount.toFixed(2)}</Text>
+    </View>
+  );
+}
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function ExpensesScreen() {
@@ -200,6 +226,10 @@ export default function ExpensesScreen() {
   const perDay = total / Math.max(1, days);
   const maxCategoryAmount = Math.max(1, ...Object.values(dataset ?? {}));
   const weeklyBars = useMemo(() => buildWeeklyBuckets(expenses, days), [expenses, days]);
+  const sortedExpenses = useMemo(
+    () => [...expenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate)),
+    [expenses],
+  );
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -321,6 +351,20 @@ export default function ExpensesScreen() {
           </Text>
         )}
 
+        {/* Itemized detail — per-purchase vendor/date/notes, not just the
+            category rollups above. Prediction has no real entries of its
+            own to itemize, only Analytics does. */}
+        {activeTab === 'Analytics' && sortedExpenses.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>RECENT EXPENSES</Text>
+            <View style={styles.itemsCard}>
+              {sortedExpenses.map((expense, i) => (
+                <ExpenseItemRow key={expense.id} expense={expense} isLast={i === sortedExpenses.length - 1} />
+              ))}
+            </View>
+          </>
+        )}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -421,4 +465,21 @@ const styles = StyleSheet.create({
   barFill: { height: '100%', borderRadius: 3 },
 
   emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 16 },
+
+  // Itemized expense list
+  itemsCard: {
+    backgroundColor: 'white', borderRadius: 18, paddingHorizontal: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  itemRowDivider: { borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  itemIconBox: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: '#F5F5F5',
+    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+  },
+  itemMain: { flex: 1, paddingRight: 10 },
+  itemTitle: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  itemSub: { fontSize: 12, color: '#999', marginTop: 2 },
+  itemAmount: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
 });
