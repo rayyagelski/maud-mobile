@@ -1,4 +1,4 @@
-import type { LatLng, Maneuver } from '../services/here/hereRoutingClient';
+import type { LatLng, Maneuver, SpeedLimitSpan } from '../services/here/hereRoutingClient';
 
 export type TripType = 'business' | 'private' | 'commute';
 export type TransportMode = 'car' | 'truck' | 'scooter' | 'cycling' | 'walking';
@@ -62,6 +62,10 @@ export interface TripEnergy {
 export interface PlannedRoute {
   coordinates: LatLng[];
   maneuvers: Maneuver[];
+  // Optional purely for older persisted trips rehydrated from redux-persist
+  // that predate this field — speed-zone alerts (useSpeedZoneAlerts.ts) just
+  // see no spans for those rather than crashing.
+  speedLimitSpans?: SpeedLimitSpan[];
 }
 
 export interface TripVoicePayload {

@@ -74,7 +74,9 @@ export function useTrafficMonitor(): void {
 
           dispatch(setRerouteSuggestion({
             delaySeconds: backup.delaySeconds,
-            alternativeRoute: { coordinates: better.coordinates, maneuvers: better.maneuvers },
+            alternativeRoute: {
+              coordinates: better.coordinates, maneuvers: better.maneuvers, speedLimitSpans: better.speedLimitSpans,
+            },
             alternativeDistanceMeters: better.distanceMeters,
             alternativeDurationSeconds: better.durationSeconds,
           }));

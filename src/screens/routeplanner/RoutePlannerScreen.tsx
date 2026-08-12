@@ -385,7 +385,9 @@ export default function RoutePlannerScreen() {
       // Carries the selected route into Redux so voice turn-by-turn guidance
       // can read it after this screen unmounts — route/routes above are
       // local state and would otherwise be lost the moment tracking begins.
-      ...(route && { plannedRoute: { coordinates: route.coordinates, maneuvers: route.maneuvers } }),
+      ...(route && { plannedRoute: {
+        coordinates: route.coordinates, maneuvers: route.maneuvers, speedLimitSpans: route.speedLimitSpans,
+      } }),
     }));
   }
 
@@ -395,7 +397,9 @@ export default function RoutePlannerScreen() {
   // just to plan a destination and get voice guidance.
   function handleAttachRouteToActiveTrip() {
     if (!route) return;
-    dispatch(setPlannedRouteOnActiveTrip({ coordinates: route.coordinates, maneuvers: route.maneuvers }));
+    dispatch(setPlannedRouteOnActiveTrip({
+      coordinates: route.coordinates, maneuvers: route.maneuvers, speedLimitSpans: route.speedLimitSpans,
+    }));
   }
 
   // Swaps both the active trip's guided route (what useTurnByTurnGuidance/
@@ -408,6 +412,7 @@ export default function RoutePlannerScreen() {
     setRoutes([{
       coordinates: alternativeRoute.coordinates,
       maneuvers: alternativeRoute.maneuvers,
+      speedLimitSpans: alternativeRoute.speedLimitSpans ?? [],
       distanceMeters: alternativeDistanceMeters,
       durationSeconds: alternativeDurationSeconds,
     }]);

@@ -15,6 +15,17 @@ export interface Maneuver {
   distanceFromStartMeters: number;
 }
 
+// A road-attribute segment starting at distanceFromStartMeters and running
+// until the next span's start (or the route's end for the last one) — same
+// "offset marks the start of a new segment" convention HERE's own `spans`
+// use, and the same one already relied on server-side in vgd_analytics'
+// hereRouteMatchingPointsMapper.js. speedLimitMps is null where HERE has no
+// known limit for that segment (never guessed/fabricated).
+export interface SpeedLimitSpan {
+  distanceFromStartMeters: number;
+  speedLimitMps: number | null;
+}
+
 export interface HereRouteResult {
   coordinates: LatLng[];
   distanceMeters: number;
@@ -26,6 +37,7 @@ export interface HereRouteResult {
   // integration.
   typicalDurationSeconds?: number;
   maneuvers: Maneuver[];
+  speedLimitSpans: SpeedLimitSpan[];
 }
 
 interface HereRoutesResponse {
@@ -41,8 +53,26 @@ interface HereRoutesResponse {
         // 4th decoded point of this section, not 3 metres/km in.
         offset: number;
       }>;
+      // Same offset convention as actions above (index into this section's
+      // decoded polyline, not a distance) — confirmed via
+      // hereRouteMatchingPointsMapper.js's live-verified usage of the
+      // identical `spans=speedLimit` request param server-side.
+      spans?: Array<{ offset: number; speedLimit?: number }>;
     }>;
   }>;
+}
+
+// Converts a HERE section-local polyline-point offset into a route-relative
+// distance in metres, by summing haversine distances between consecutive
+// decoded points from the section's start up to that offset. Shared by both
+// actions (maneuvers) and spans (speed limits) — same offset convention,
+// same section, same decoded points.
+function offsetToDistanceMeters(sectionCoords: LatLng[], offset: number): number {
+  let distanceMeters = 0;
+  for (let i = 1; i <= offset && i < sectionCoords.length; i++) {
+    distanceMeters += haversineMeters(sectionCoords[i - 1], sectionCoords[i]);
+  }
+  return distanceMeters;
 }
 
 function routeFromSections(sections: HereRoutesResponse['routes'][number]['sections']): HereRouteResult | null {
@@ -50,6 +80,7 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
 
   const coordinates: LatLng[] = [];
   const maneuvers: Maneuver[] = [];
+  const speedLimitSpans: SpeedLimitSpan[] = [];
   let distanceSoFarMeters = 0;
   // Only meaningful if every section reported one — a partial sum would
   // silently understate the backup delay rather than correctly reporting
@@ -63,13 +94,16 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
     }));
 
     for (const action of section.actions ?? []) {
-      let offsetDistanceMeters = 0;
-      for (let i = 1; i <= action.offset && i < sectionCoords.length; i++) {
-        offsetDistanceMeters += haversineMeters(sectionCoords[i - 1], sectionCoords[i]);
-      }
       maneuvers.push({
         instruction: action.instruction,
-        distanceFromStartMeters: distanceSoFarMeters + offsetDistanceMeters,
+        distanceFromStartMeters: distanceSoFarMeters + offsetToDistanceMeters(sectionCoords, action.offset),
+      });
+    }
+
+    for (const span of section.spans ?? []) {
+      speedLimitSpans.push({
+        distanceFromStartMeters: distanceSoFarMeters + offsetToDistanceMeters(sectionCoords, span.offset),
+        speedLimitMps: span.speedLimit ?? null,
       });
     }
 
@@ -84,7 +118,10 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
 
   const durationSeconds = sections.reduce((sum, s) => sum + s.summary.duration, 0);
 
-  return { coordinates, distanceMeters: distanceSoFarMeters, durationSeconds, typicalDurationSeconds, maneuvers };
+  return {
+    coordinates, distanceMeters: distanceSoFarMeters, durationSeconds, typicalDurationSeconds,
+    maneuvers, speedLimitSpans,
+  };
 }
 
 // HERE Routing API v8 — plain REST/JSON, no native SDK. Coordinates are
@@ -105,6 +142,10 @@ export async function fetchHereRoutes(
     origin: `${origin.latitude},${origin.longitude}`,
     destination: `${destination.latitude},${destination.longitude}`,
     return: 'polyline,summary,actions,instructions,typicalDuration',
+    // speedLimit spans — same param already confirmed working server-side
+    // against this same HERE key/plan (vgd_analytics'
+    // hereRouteMatchingPointsMapper.js). Values come back in m/s.
+    spans: 'speedLimit',
     alternatives: String(alternatives),
     // HERE embeds distance units directly into actions[].instruction's text
     // (e.g. "Go for 727 m" vs "Go for 0.5 mi") — this is what

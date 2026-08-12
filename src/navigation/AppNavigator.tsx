@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { check, PERMISSIONS, RESULTS, type PermissionStatus } from 'react-native-permissions';
@@ -15,13 +16,16 @@ import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
 import { useSevereWeatherAlerts } from '../hooks/useSevereWeatherAlerts';
 import { useTurnByTurnGuidance } from '../hooks/useTurnByTurnGuidance';
+import { useSpeedZoneAlerts } from '../hooks/useSpeedZoneAlerts';
 import { useTrafficMonitor } from '../hooks/useTrafficMonitor';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useSyncEngine } from '../services/syncEngine';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
+import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
 import { refreshToken, setToken } from '../store/slices/authSlice';
+import { setLocationOnboardingComplete } from '../store/slices/settingsSlice';
 import { loadToken } from '../services/secureTokenStorage';
 import { navigationRef } from './navigationRef';
 import type { RootStackParamList } from '../types/navigation.types';
@@ -39,10 +43,24 @@ function TripDetectionRunner() {
   useComplianceMonitor();
   useSevereWeatherAlerts();
   useTurnByTurnGuidance();
+  useSpeedZoneAlerts();
   useTrafficMonitor();
   useVgdPointFlush();
   useSyncEngine();
   return null;
+}
+
+// Owns layout for the app-root banners (Bluetooth vehicle prompt, trip
+// recording status) so they stack vertically instead of each independently
+// self-positioning at absolute top:0 and overlapping one another when both
+// are visible at once (e.g. the BT prompt appears right as a trip starts).
+function RootBannerStack() {
+  return (
+    <SafeAreaView style={styles.bannerStack} edges={['top']} pointerEvents="box-none">
+      <BluetoothVehiclePromptBanner />
+      <TripRecordingBanner />
+    </SafeAreaView>
+  );
 }
 
 export default function AppNavigator() {
@@ -61,6 +79,17 @@ export default function AppNavigator() {
   // transition, since granting happens via an OS dialog or a trip to Settings
   // that this component has no other way to observe.
   const [locationGranted, setLocationGranted] = useState(false);
+  // Foreground permission alone isn't enough to gate on, either: it's
+  // GRANTED partway through LocationPermissionScreen's flow, before the
+  // background-location and battery-optimization follow-up dialogs and
+  // before the user ever reaches MainTabs. Gating solely on locationGranted
+  // let BackgroundGeolocation start motion detection while the user was
+  // still working through those dialogs — a jittery first GPS fix (normal
+  // right after permission is freshly granted) could clear the auto-start
+  // speed threshold and start a trip, and the "Trip recording started" voice
+  // announcement, before the user was ever near the vehicle. This flag is
+  // set once the permission-flow screens actually hand off to MainTabs.
+  const locationOnboardingComplete = useAppSelector(s => s.settings.locationOnboardingComplete);
 
   useEffect(() => {
     const permission = Platform.OS === 'ios'
@@ -113,18 +142,23 @@ export default function AppNavigator() {
 
       check(permission).then((status: PermissionStatus) => {
         if (status === RESULTS.GRANTED) {
-          // Permission already granted — skip the permission screen
+          // Permission already granted — skip the permission screen. This is
+          // also the migration path for users who granted location before
+          // locationOnboardingComplete existed: they'd never revisit
+          // LocationPermissionScreen/TurnOnLocationScreen to set it, so
+          // TripDetectionRunner would stay gated off forever without this.
+          dispatch(setLocationOnboardingComplete(true));
           if (navigationRef.isReady()) navigationRef.navigate('Main' as never);
         }
       });
     }
     prevAuth.current = isAuthenticated;
-  }, [isAuthenticated]);
+  }, [isAuthenticated, dispatch]);
 
   return (
     <NavigationContainer ref={navigationRef}>
-      {locationGranted && <TripDetectionRunner />}
-      {isAuthenticated && <BluetoothVehiclePromptBanner />}
+      {locationGranted && locationOnboardingComplete && <TripDetectionRunner />}
+      {isAuthenticated && <RootBannerStack />}
       <Root.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <Root.Screen name="Main" component={MainStackNavigator} />
@@ -135,3 +169,7 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  bannerStack: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999 },
+});
