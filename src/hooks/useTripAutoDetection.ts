@@ -6,6 +6,7 @@ import { startTrip, endTrip, appendGpsPoint, clearPendingStart, setTracking } fr
 import { navigationRef } from '../navigation/navigationRef';
 import { publishGpsFix } from '../services/gpsSpeedBus';
 import { TRIP_AUTO_START_SPEED_KMH } from '../utils/constants';
+import { haversineMeters } from '../utils/complianceAlertLogic';
 
 // Vehicle is "moving" above this speed; below it counts as stopped. Shared
 // with a manual Route Planner start (see pendingStart below) and with
@@ -38,6 +39,17 @@ const STALE_TRIP_GAP_MS = 30 * 60 * 1000; // 30 min
 // dropped after this long rather than honored on some unrelated later motion
 // — e.g. the app was killed before pulling away and reopened hours after.
 const STALE_PENDING_START_MS = 30 * 60 * 1000; // 30 min
+// A manually-armed start carries the Route Planner's origin coordinate
+// (plannedRoute.coordinates[0] — the address the trip was actually planned
+// from). The live GPS fix that finally crosses SPEED_START_MS can already
+// be meaningfully past that point (walk to the car, idle before pulling
+// away, GPS drift near buildings/parking structures), which showed up as
+// the recorded trip "not starting at the actual address". Snap the start
+// point back to the planned origin when the two are still close enough to
+// plausibly be the same real-world start — beyond this, trust the live fix
+// instead (the driver likely armed the start somewhere other than where
+// they actually began driving).
+const PLANNED_ORIGIN_MAX_DRIFT_M = 300;
 // How often the stale-trip watchdog re-checks while a trip is tracking. Must
 // be much more frequent than STALE_TRIP_GAP_MS itself — this only needs to
 // run often enough to notice a trip has gone stale without the app having
@@ -157,7 +169,12 @@ export function useTripAutoDetection() {
             } else if (pending) {
               stillSinceRef.current = null;
               movingSinceRef.current = null;
-              dispatch(startTrip({ ...pending, initialPoint: gpsPoint }));
+              const plannedOrigin = pending.plannedRoute?.coordinates[0];
+              const initialPoint = plannedOrigin
+                && haversineMeters(plannedOrigin, gpsPoint) <= PLANNED_ORIGIN_MAX_DRIFT_M
+                ? { ...gpsPoint, latitude: plannedOrigin.latitude, longitude: plannedOrigin.longitude }
+                : gpsPoint;
+              dispatch(startTrip({ ...pending, initialPoint }));
               return;
             }
 
