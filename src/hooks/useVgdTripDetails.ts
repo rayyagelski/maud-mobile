@@ -48,7 +48,17 @@ export function useVgdTripDetails(
         ]);
         if (cancelledRef.current) return;
 
-        const stillProcessing = !detailsRes.data.trip.analytics;
+        // analytics itself is built (and thus truthy) as soon as vgd_analytics
+        // has run at all — startAddress/endAddress are populated by a separate
+        // reverse-geocode step inside that same pass and can still be null on
+        // the very first successful poll (e.g. HERE geocoding hasn't returned
+        // yet). Treating analytics-without-addresses as "still processing"
+        // gives that step the same retry budget as the rest of analytics,
+        // instead of the hook declaring done the instant analytics exists and
+        // permanently showing raw coordinates for a trip whose addresses were
+        // simply still in flight.
+        const analytics = detailsRes.data.trip.analytics;
+        const stillProcessing = !analytics || (!analytics.startAddress && !analytics.endAddress);
         if (stillProcessing && retryIndex < RETRY_DELAYS_MS.length) {
           setIsProcessing(true);
           timer = setTimeout(() => attempt(retryIndex + 1), RETRY_DELAYS_MS[retryIndex]);
