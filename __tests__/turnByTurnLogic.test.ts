@@ -15,7 +15,7 @@ describe('buildCumulativeRouteDistances / distanceAlongRoute', () => {
   ];
 
   it('returns 0 for an empty route', () => {
-    expect(distanceAlongRoute(ORIGIN, [], [])).toBe(0);
+    expect(distanceAlongRoute(ORIGIN, [], [])).toEqual({ distanceMeters: 0, matchedIndex: 0 });
   });
 
   it('starts cumulative distance at 0 for the first coordinate', () => {
@@ -29,7 +29,34 @@ describe('buildCumulativeRouteDistances / distanceAlongRoute', () => {
     // own geometry regardless of how the actual driven path compares to it.
     const cumulative = buildCumulativeRouteDistances(route);
     const nearby = { latitude: 51.51, longitude: -0.1199 };
-    expect(distanceAlongRoute(nearby, route, cumulative)).toBe(cumulative[1]);
+    const match = distanceAlongRoute(nearby, route, cumulative);
+    expect(match.distanceMeters).toBe(cumulative[1]);
+    expect(match.matchedIndex).toBe(1);
+  });
+
+  it('anchors the search to a window around lastMatchedIndex, ignoring a nearer vertex outside it', () => {
+    // A long outbound leg (indices 0-99, heading east so it stays far from
+    // the start in longitude) followed by a loop back to right next to the
+    // start — the kind of dense, self-proximate polyline HERE returns
+    // through a subdivision or cul-de-sac. Index 0 and the final loop-back
+    // index are close together in space but far apart in route progress.
+    const loopRoute = [
+      ...Array.from({ length: 100 }, (_, i) => ({ latitude: 51.50, longitude: -0.12 + i * 0.0005 })),
+      { latitude: 51.5002, longitude: -0.12 }, // loops back near start (index 100)
+    ];
+    const loopBackIndex = loopRoute.length - 1;
+    const cumulative = buildCumulativeRouteDistances(loopRoute);
+    const position = { latitude: 51.5002, longitude: -0.12 };
+
+    // Unanchored (first fix / after off-route reacquire): nearest vertex
+    // overall is the loop-back index, even though the driver is actually
+    // just past index 0.
+    expect(distanceAlongRoute(position, loopRoute, cumulative, null).matchedIndex).toBe(loopBackIndex);
+
+    // Anchored to a previous match near index 0: the search window doesn't
+    // reach the loop-back index, so it correctly stays locked to the start
+    // leg instead of jumping to the geometrically-closer but wrong-leg vertex.
+    expect(distanceAlongRoute(position, loopRoute, cumulative, 0).matchedIndex).toBe(0);
   });
 });
 

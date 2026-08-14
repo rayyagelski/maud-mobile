@@ -39,11 +39,22 @@ export function useTurnByTurnGuidance(): void {
     const cumulativeRouteDistances = buildCumulativeRouteDistances(plannedRoute.coordinates);
     let announcedCount = 0;
     let offRouteStreak = 0;
+    // Anchors distanceAlongRoute's search window to the previous fix's match
+    // (see turnByTurnLogic.ts) instead of the whole route — null forces a
+    // full-route search, which we want both on the very first fix and right
+    // after re-acquiring from off-route (the anchor from before going
+    // off-route is no longer trustworthy).
+    let lastMatchedIndex: number | null = null;
 
     const unsubscribe = subscribeGpsFix((_speedMs, _timestamp, point) => {
+      const wasOffRoute = offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD;
       offRouteStreak = isOffRoute(point, plannedRoute.coordinates) ? offRouteStreak + 1 : 0;
+      if (wasOffRoute && offRouteStreak === 0) lastMatchedIndex = null;
 
-      const distanceTraveledMeters = distanceAlongRoute(point, plannedRoute.coordinates, cumulativeRouteDistances);
+      const { distanceMeters: distanceTraveledMeters, matchedIndex } = distanceAlongRoute(
+        point, plannedRoute.coordinates, cumulativeRouteDistances, lastMatchedIndex,
+      );
+      lastMatchedIndex = matchedIndex;
 
       // Fixed-route v1: no re-routing, no "recalculating" message — just
       // mute announcements while off-route rather than permanently giving up

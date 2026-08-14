@@ -22,6 +22,26 @@ export function buildCumulativeRouteDistances(routeCoordinates: Coordinate[]): n
   return cumulative;
 }
 
+export interface RouteMatch {
+  distanceMeters: number;
+  matchedIndex: number;
+}
+
+// Vertex-index window to search around the previously matched point, rather
+// than the whole route. Bounds map-matching to a plausible neighborhood of
+// the driver's actual progress, so a geometrically-closer vertex belonging to
+// a different leg of the route (a parallel street, a nearby cul-de-sac arm, a
+// loop's return leg — all common in the dense polylines HERE returns through
+// subdivisions/communities) can't hijack the match just because it happens to
+// be a few metres nearer than the correct vertex. On open roads this window
+// is harmless since the correct vertex is already the unambiguous nearest
+// one; it only matters where multiple route legs run close together.
+// Forward-biased since driving only advances progress; a little backward
+// slack absorbs GPS noise and minor backtracking (missed turn, reversing out
+// of a driveway).
+const MATCH_BACKWARD_SLACK_INDICES = 5;
+const MATCH_FORWARD_WINDOW_INDICES = 80;
+
 // Distance traveled, expressed against the *planned route's* geometry rather
 // than raw accumulated GPS movement. advanceDistanceTraveled's raw approach
 // drifts away from Maneuver.distanceFromStartMeters on any curve, GPS noise,
@@ -31,22 +51,36 @@ export function buildCumulativeRouteDistances(routeCoordinates: Coordinate[]): n
 // announcements fire early, late, or effectively skipped. Projecting each fix
 // onto the nearest point of the same polyline the maneuver distances came
 // from keeps the two locked together regardless of that drift.
+//
+// lastMatchedIndex anchors the search to a window around the previous fix's
+// match (see MATCH_*_INDICES above) instead of searching the entire route on
+// every fix — pass null only for the very first fix of a trip (or after
+// re-acquiring from off-route), when there's no prior match to anchor to.
 export function distanceAlongRoute(
   position: Coordinate,
   routeCoordinates: Coordinate[],
   cumulativeDistances: number[],
-): number {
-  if (routeCoordinates.length === 0) return 0;
-  let nearestIndex = 0;
+  lastMatchedIndex: number | null = null,
+): RouteMatch {
+  if (routeCoordinates.length === 0) return { distanceMeters: 0, matchedIndex: 0 };
+
+  const searchStart = lastMatchedIndex == null
+    ? 0
+    : Math.max(0, lastMatchedIndex - MATCH_BACKWARD_SLACK_INDICES);
+  const searchEnd = lastMatchedIndex == null
+    ? routeCoordinates.length - 1
+    : Math.min(routeCoordinates.length - 1, lastMatchedIndex + MATCH_FORWARD_WINDOW_INDICES);
+
+  let nearestIndex = searchStart;
   let nearestMeters = Infinity;
-  for (let i = 0; i < routeCoordinates.length; i++) {
+  for (let i = searchStart; i <= searchEnd; i++) {
     const distance = haversineMeters(position, routeCoordinates[i]);
     if (distance < nearestMeters) {
       nearestMeters = distance;
       nearestIndex = i;
     }
   }
-  return cumulativeDistances[nearestIndex] ?? 0;
+  return { distanceMeters: cumulativeDistances[nearestIndex] ?? 0, matchedIndex: nearestIndex };
 }
 
 // Maneuvers are ordered by increasing distanceFromStartMeters — the next one

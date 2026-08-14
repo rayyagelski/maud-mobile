@@ -41,9 +41,16 @@ export function useSpeedZoneAlerts(): void {
     const cumulativeRouteDistances = buildCumulativeRouteDistances(plannedRoute.coordinates);
     let lastAnnouncedSpanStartMeters: number | null = null;
     let complianceWatch: SpeedZoneComplianceWatch | null = null;
+    // Anchors distanceAlongRoute's search window to the previous fix's match
+    // instead of the whole route — see turnByTurnLogic.ts and
+    // useTurnByTurnGuidance.ts, which use the same pattern.
+    let lastMatchedIndex: number | null = null;
 
     const unsubscribe = subscribeGpsFix((speedMs, timestamp, point) => {
-      const distanceTraveledMeters = distanceAlongRoute(point, plannedRoute.coordinates, cumulativeRouteDistances);
+      const { distanceMeters: distanceTraveledMeters, matchedIndex } = distanceAlongRoute(
+        point, plannedRoute.coordinates, cumulativeRouteDistances, lastMatchedIndex,
+      );
+      lastMatchedIndex = matchedIndex;
 
       const announcement = nextSpeedZoneToAnnounce(spans, distanceTraveledMeters, lastAnnouncedSpanStartMeters);
       if (announcement) {
