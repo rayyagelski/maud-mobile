@@ -143,9 +143,7 @@ export function useTripAutoDetection() {
 
         // ── Auto-start ─────────────────────────────────────────────────────
         if (!isTrackingRef.current && !endingRef.current) {
-          const accurateEnough = coords.accuracy == null || coords.accuracy <= MAX_START_ACCURACY_M;
-
-          if (accurateEnough && speedMs >= SPEED_START_MS) {
+          if (speedMs >= SPEED_START_MS) {
             // A pending start means the user already tapped "Start Trip" in
             // Route Planner — real intent, not ambient motion the app is
             // guessing about. MOVING_CONFIRM_MS's whole purpose is to filter
@@ -163,13 +161,24 @@ export function useTripAutoDetection() {
               return;
             }
 
+            // Start the confirm clock on the first qualifying-speed fix
+            // regardless of its accuracy — the first fixes after a cold GPS
+            // lock are frequently low-accuracy, and gating the clock itself
+            // on accuracy meant it often couldn't start ticking until well
+            // after the car had already pulled away (accuracy only improves
+            // a few seconds into a drive). Accuracy is instead checked below,
+            // as a gate on the fix that actually finalizes the start.
             if (movingSinceRef.current === null) {
               movingSinceRef.current = Date.now();
             }
 
-            if (Date.now() - movingSinceRef.current < MOVING_CONFIRM_MS) {
-              // Speed has qualified but hasn't held long enough yet — wait
-              // for more fixes rather than starting off a single reading.
+            const accurateEnough = coords.accuracy == null || coords.accuracy <= MAX_START_ACCURACY_M;
+
+            if (!accurateEnough || Date.now() - movingSinceRef.current < MOVING_CONFIRM_MS) {
+              // Speed has qualified but hasn't held long enough yet, or this
+              // particular fix isn't accurate enough to trust as the trip's
+              // starting point — wait for more fixes rather than starting
+              // off an unreliable reading.
               return;
             }
 
@@ -191,13 +200,11 @@ export function useTripAutoDetection() {
             return;
           }
 
-          // Speed dropped back below threshold (or this fix was too
-          // inaccurate to trust either way) — reset the confirmation window
-          // so the next qualifying streak has to hold for the full duration
-          // again, same as a single noisy fix never counting on its own.
-          if (speedMs < SPEED_START_MS) {
-            movingSinceRef.current = null;
-          }
+          // Speed dropped back below threshold — reset the confirmation
+          // window so the next qualifying streak has to hold for the full
+          // duration again, same as a single noisy fix never counting on
+          // its own.
+          movingSinceRef.current = null;
           return;
         }
 
