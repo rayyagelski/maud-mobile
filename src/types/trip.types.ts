@@ -16,7 +16,7 @@ export interface GpsPoint {
 
 export interface TelematicsEvent {
   id: string;
-  type: 'harsh_brake' | 'harsh_accel' | 'harsh_corner' | 'speeding' | 'road_type_change';
+  type: 'harsh_brake' | 'harsh_accel' | 'harsh_corner' | 'speeding' | 'road_type_change' | 'phone_usage';
   timestamp: number;
   location: GpsPoint;
   value?: number;

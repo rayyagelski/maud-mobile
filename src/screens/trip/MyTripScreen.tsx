@@ -78,8 +78,14 @@ export default function MyTripScreen() {
   // labels can show resolved addresses instead of always falling back to
   // raw coordinates.
   const vgdEnabled = Boolean(trip?.vgdTripId && trip?.vgdTripCreated);
-  const { details: vgdDetails } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
+  const { details: vgdDetails, events: vgdEvents } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
   const vgdAnalytics = vgdDetails?.analytics;
+  // Over-speed-limit markers on the route, from VGD's server-side detection.
+  const speedLimitEvents = vgdEvents.filter(e => e.indicator === 'speed_limit');
+  // Phone-usage markers — device-local only (useHarshEventTracker's AppState
+  // backgrounding proxy, see MIN_PHONE_USAGE_EVENT_SECONDS), since there's no
+  // VGD point parameter for phone usage to round-trip it through the server.
+  const phoneUsageEvents = trip?.events.filter(e => e.type === 'phone_usage') ?? [];
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -127,6 +133,26 @@ export default function MyTripScreen() {
               <WaypointPin label="B" color="#1A1A1A" />
             </Marker>
           )}
+          {mapReady && speedLimitEvents.map((event, i) => (
+            <Marker
+              key={`speed-${event.point.time}-${i}`}
+              coordinate={{ latitude: event.point.gps.lat, longitude: event.point.gps.lon }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.eventDot} />
+            </Marker>
+          ))}
+          {mapReady && phoneUsageEvents.map((event, i) => (
+            <Marker
+              key={`phone-${event.id}-${i}`}
+              coordinate={{ latitude: event.location.latitude, longitude: event.location.longitude }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.eventDot} />
+            </Marker>
+          ))}
         </MapView>
 
         {/* Floating back button */}
@@ -241,6 +267,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 4, elevation: 6,
   },
   pinLabel: { color: 'white', fontWeight: '800', fontSize: 13 },
+  eventDot: {
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: '#E53935', borderWidth: 2, borderColor: 'white',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3, shadowRadius: 2, elevation: 4,
+  },
   pinTail: {
     width: 0, height: 0,
     borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 7,

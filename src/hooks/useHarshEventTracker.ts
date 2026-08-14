@@ -18,7 +18,7 @@ import {
   vector3MagnitudeDegPerSec,
 } from '../utils/harshEventDetector';
 import { generateId } from '../utils/helpers';
-import { SENSOR_SAMPLE_RATE_MS, SPEEDING_FLAT_THRESHOLD_KMH } from '../utils/constants';
+import { SENSOR_SAMPLE_RATE_MS, SPEEDING_FLAT_THRESHOLD_KMH, MIN_PHONE_USAGE_EVENT_SECONDS } from '../utils/constants';
 import type { GpsPoint, TelematicsEvent } from '../types/trip.types';
 
 /**
@@ -119,14 +119,24 @@ export function useHarshEventTracker(): void {
     // for turn-by-turn use, so that would never fire). Approximates a driver
     // switching away to another app; won't catch in-app-foreground distraction.
     let backgroundedAt: number | null = null;
+    let backgroundedAtPoint: GpsPoint | null = null;
     const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
         if (backgroundedAt != null) {
-          addPhoneTextSeconds(Math.round((Date.now() - backgroundedAt) / 1000));
+          const seconds = Math.round((Date.now() - backgroundedAt) / 1000);
+          addPhoneTextSeconds(seconds);
+          // Location-tagged event (map markers) needs its own minimum
+          // duration — a real distraction event, not every notification-shade
+          // pull, which the raw seconds counter above still tallies regardless.
+          if (seconds >= MIN_PHONE_USAGE_EVENT_SECONDS && backgroundedAtPoint) {
+            emitEvent('phone_usage', backgroundedAtPoint, seconds);
+          }
           backgroundedAt = null;
+          backgroundedAtPoint = null;
         }
       } else if (backgroundedAt == null) {
         backgroundedAt = Date.now();
+        backgroundedAtPoint = lastGpsPoint;
       }
     });
 

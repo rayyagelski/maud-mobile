@@ -27,6 +27,11 @@ export const HARSH_CORNER_THRESHOLD_MS2 = 0.4 * MS2_PER_G;
 // tolerance (SRS 4.4 "slip filtering") — rejects phone jostles (accel spike,
 // no GPS change) and GPS noise (GPS jump, no accel corroboration).
 export const SLIP_FILTER_TOLERANCE_MS2 = 1.5;
+// Minimum backgrounded duration before it's logged as a discrete phone_usage
+// TelematicsEvent (with location, for map markers) rather than just adding to
+// the phoneTextSeconds aggregate counter — filters out trivial blips (e.g. an
+// accidental app-switcher swipe) from cluttering the trip map with markers.
+export const MIN_PHONE_USAGE_EVENT_SECONDS = 5;
 // Phase 1 approximation: no posted-speed-limit lookup yet (that's compliance-
 // phase work) — flat threshold instead.
 export const SPEEDING_FLAT_THRESHOLD_KMH = 120;
