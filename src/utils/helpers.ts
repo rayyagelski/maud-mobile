@@ -1,4 +1,4 @@
-import type { GpsPoint } from '../types/trip.types';
+import type { GpsPoint, Trip } from '../types/trip.types';
 
 export function decodeJwt(token: string): Record<string, unknown> | null {
   try {
@@ -36,6 +36,36 @@ export function haversineDistanceKm(a: GpsPoint, b: GpsPoint): number {
 
 function toRad(deg: number): number {
   return deg * (Math.PI / 180);
+}
+
+// A `source: 'vgd'` trip (backfilled from the backend after a reinstall/new
+// device — see tripHistorySync.ts) has no route/events (VGD's read-back has
+// no raw point-by-point data), so it carries summaryDistanceKm/
+// summaryDurationSeconds/summaryAvgSpeedKmh instead. These three helpers
+// consolidate what used to be several near-identical trip.route.reduce(...)
+// copies across MyTripScreen/TripDetailScreen/TripHistoryScreen/
+// TripSummaryScreen, each of which only ever worked for `source: 'local'`
+// trips — prefer the summary field when present, fall back to deriving from
+// `route` otherwise (still correct for a normal locally-recorded trip).
+export function tripDistanceKm(trip: Trip): number {
+  if (trip.summaryDistanceKm != null) return trip.summaryDistanceKm;
+  return trip.route.reduce(
+    (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
+    0,
+  );
+}
+
+export function tripDurationSeconds(trip: Trip): number {
+  if (trip.summaryDurationSeconds != null) return trip.summaryDurationSeconds;
+  if (!trip.endTime) return 0;
+  return Math.round((trip.endTime - trip.startTime) / 1000);
+}
+
+export function tripAvgSpeedKmh(trip: Trip): number {
+  if (trip.summaryAvgSpeedKmh != null) return trip.summaryAvgSpeedKmh;
+  const durationSeconds = tripDurationSeconds(trip);
+  if (durationSeconds <= 0) return 0;
+  return (tripDistanceKm(trip) / durationSeconds) * 3600;
 }
 
 export function formatDuration(seconds: number): string {

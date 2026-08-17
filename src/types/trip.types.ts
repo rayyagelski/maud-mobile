@@ -91,10 +91,18 @@ export interface TripRewardResult {
   aiNarrativeTip: string | null;
 }
 
-// Locally-persisted trip record. The backend has no trip read-back endpoint —
-// TripReward only stores aggregate scoring fields, not GPS route/waypoints/weather —
-// so this local record (kept in redux-persist) is the sole source for trip
-// history/detail/map screens. `reward` is populated once submitTripReward succeeds.
+// Locally-persisted trip record. Most trips are `source: 'local'` — fully
+// recorded on-device, kept in redux-persist. A trip can also be `source:
+// 'vgd'` — backfilled from VGD's trip-history read-back (see
+// syncTripHistoryFromBackend in this file) after a reinstall/new device,
+// where the local recording never happened. VGD has no read-back for the
+// raw point-by-point route (only accepts points on write), so a 'vgd'-source
+// trip always has empty route/events and instead carries summaryDistanceKm/
+// summaryDurationSeconds/summaryAvgSpeedKmh computed from VGD's own
+// aggregate analytics — screens should prefer these over deriving from
+// `route` when present. `reward` is populated once submitTripReward succeeds
+// for a local trip, or backfilled from the trip_reward history endpoint
+// (joined by vgdTripId === externalTripId) for a 'vgd'-source one.
 export interface Trip {
   id: string;
   vehicleId: string;
@@ -106,6 +114,13 @@ export interface Trip {
   endTime?: number;
   route: GpsPoint[];
   events: TelematicsEvent[];
+  // Absent (undefined) on any trip recorded before this field existed —
+  // treat as 'local' wherever the distinction matters, same as the optional
+  // vgd* fields below already do for older persisted trips.
+  source?: 'local' | 'vgd';
+  summaryDistanceKm?: number;
+  summaryDurationSeconds?: number;
+  summaryAvgSpeedKmh?: number;
   context?: TripContext;
   // Snapshot of the aggregate counters submitted in the request (speeding
   // seconds, phone-usage seconds, harsh-event counts) — kept locally so

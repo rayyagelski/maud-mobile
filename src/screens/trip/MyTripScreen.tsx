@@ -12,7 +12,9 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
-import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
+import {
+  formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
+} from '../../utils/helpers';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -62,17 +64,10 @@ export default function MyTripScreen() {
   const mapRef = useRef<any>(null);
 
   const routeCoords = trip?.route.map(p => ({ latitude: p.latitude, longitude: p.longitude })) ?? [];
-  const distanceKm = trip
-    ? trip.route.reduce(
-        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
-        0,
-      )
-    : 0;
-  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
-  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+  const distanceKm = trip ? tripDistanceKm(trip) : 0;
+  const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
+  const avgSpeedKmh = trip ? tripAvgSpeedKmh(trip) : 0;
   const reward = trip?.reward;
-  const start = routeCoords[0];
-  const end = routeCoords[routeCoords.length - 1];
 
   // Same VGD read-back TripDetailScreen uses, so this screen's waypoint
   // labels can show resolved addresses instead of always falling back to
@@ -86,6 +81,17 @@ export default function MyTripScreen() {
   // backgrounding proxy, see MIN_PHONE_USAGE_EVENT_SECONDS), since there's no
   // VGD point parameter for phone usage to round-trip it through the server.
   const phoneUsageEvents = trip?.events.filter(e => e.type === 'phone_usage') ?? [];
+
+  // A `source: 'vgd'` trip (backfilled from the backend, see
+  // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
+  // trip_end events for waypoint pins, so a restored trip still shows A/B
+  // markers even without a driven-path polyline.
+  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point.gps;
+  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point.gps;
+  const start = routeCoords[0]
+    ?? (vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined);
+  const end = routeCoords[routeCoords.length - 1]
+    ?? (vgdEndPoint ? { latitude: vgdEndPoint.lat, longitude: vgdEndPoint.lon } : undefined);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>

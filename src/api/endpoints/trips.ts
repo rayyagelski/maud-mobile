@@ -117,9 +117,38 @@ function fromResponseDto(dto: TripRewardResponseDto): TripRewardResult {
   };
 }
 
+// GET /api/v1/trips/reward (list) — backs trip-history restore after a
+// reinstall/new device. Same per-trip shape as the POST response, plus
+// external_trip_id so the caller can join each record onto its
+// corresponding VGD trip (see syncTripHistoryFromBackend in tripSlice.ts).
+interface TripRewardListResponseDto {
+  trips: Array<TripRewardResponseDto & { external_trip_id: string | null }>;
+  stats: { total: number };
+}
+
+export interface TripRewardHistoryEntry {
+  externalTripId: string | null;
+  reward: TripRewardResult;
+}
+
 export const tripsApi = {
   submitTripReward: async (params: SubmitTripRewardParams): Promise<TripRewardResult> => {
     const res = await client.post<TripRewardResponseDto>('/trips/reward', toRequestDto(params));
     return fromResponseDto(res.data);
+  },
+
+  listRewards: async (
+    vehicleUuid: string, offset: number, limit: number,
+  ): Promise<{ entries: TripRewardHistoryEntry[]; total: number }> => {
+    const res = await client.get<TripRewardListResponseDto>('/trips/reward', {
+      params: { vehicle_uuid: vehicleUuid, offset, limit },
+    });
+    return {
+      entries: res.data.trips.map(dto => ({
+        externalTripId: dto.external_trip_id,
+        reward: fromResponseDto(dto),
+      })),
+      total: res.data.stats.total,
+    };
   },
 };

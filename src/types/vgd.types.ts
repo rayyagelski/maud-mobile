@@ -78,6 +78,38 @@ export interface VgdTripDetails {
   analytics?: VgdTripAnalytics; // absent until vgd_analytics has processed the trip
 }
 
+// GET /trips (list) returns a narrower analytics projection than GET
+// /trips/:tripId — verified against maud_vgd_query's MongoDBStorage.js
+// listTrips() aggregation $project (startTime/endTime/startAddress/
+// endAddress/startOdometer/endOdometer/distance only — no duration,
+// averageSpeed, co2emissions, or weather). Full detail is fetched lazily per
+// trip via getTripDetails/useVgdTripDetails when the user opens it, same as
+// already happens today.
+export interface VgdTripSummaryAnalytics {
+  startTime: number | null;
+  endTime: number | null;
+  startAddress: string | null;
+  endAddress: string | null;
+  startOdometer?: number;
+  endOdometer?: number;
+  distance: number; // metres
+}
+
+export interface VgdTripSummary {
+  tripId: string;
+  vehicleId: string;
+  driver: VgdDriverRole;
+  purpose: VgdTripPurpose;
+  note?: string;
+  isReadonly?: boolean;
+  analytics?: VgdTripSummaryAnalytics;
+}
+
+export interface VgdTripListResponse {
+  trips: VgdTripSummary[];
+  stats: { total: number };
+}
+
 // Real indicator vocabulary confirmed from vgd_analytics' filter source
 // (gForcePointsFilters.js, speedLimitPointsFilter.js, roadTypePointsFilter.js,
 // tripAnalytics.js's findBorderEvents). speed_limit/road_type come from HERE

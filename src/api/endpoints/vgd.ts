@@ -4,6 +4,7 @@ import type {
   VgdPoint,
   VgdTripDetails,
   VgdTripEventsResponse,
+  VgdTripListResponse,
 } from '../../types/vgd.types';
 
 // Real error status returned by VehicleGeneratedData's createTripHandler.js
@@ -24,5 +25,19 @@ export const vgdApi = {
   listTripEvents: (tripId: string, vehicleId: string) =>
     vgdClient.get<VgdTripEventsResponse>(`/trips/${tripId}/events`, {
       params: { vehicleId, offset: 0, limit: 100 },
+    }),
+
+  // Backs trip-history restore after a reinstall/new device — the app
+  // previously never called this, relying solely on local redux-persist
+  // state as if it were the only copy of trip history (it isn't; VGD has
+  // always had it). Sorted most-recent-first to match how history screens
+  // display trips, same convention already used server-side (maud's
+  // GetVehicleOdometerHandler sorts the same way for its own single-trip
+  // lookup).
+  listTrips: (vehicleId: string, offset: number, limit: number) =>
+    vgdClient.get<VgdTripListResponse>('/trips', {
+      params: {
+        vehicleId, offset, limit, sort: 'analytics.startTime', order: 'desc',
+      },
     }),
 };

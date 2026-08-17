@@ -15,6 +15,7 @@ import {
   markTripStart,
   markTripEnd,
 } from '../../utils/vgdPointMapper';
+import { reconcileTripHistory } from '../../utils/tripHistorySync';
 import type {
   Trip,
   TripState,
@@ -278,6 +279,41 @@ function buildEnergy(vehicle: Vehicle | null | undefined, distanceKm: number): T
   };
 }
 
+// Backfills trip history from the backend — dispatched once per app session
+// on login (see AppNavigator.tsx's isAuthenticated-transition effect). The
+// app previously treated on-device redux-persist storage as the only copy
+// of trip history, so a reinstall/new device showed a permanently empty
+// history even though VGD (route/analytics) and trip_reward (scoring) both
+// already had it server-side — this was a real, reported gap, not by
+// design. Fail-soft like every other auxiliary/background sync in this
+// app: a failed fetch just leaves existing trips untouched, no error shown.
+const TRIP_HISTORY_SYNC_PAGE_SIZE = 100;
+
+export const syncTripHistoryFromBackend = createAsyncThunk(
+  'trips/syncHistory',
+  async (params: { vehicleId: string; driverId: string }) => {
+    try {
+      const [tripsRes, rewardsRes] = await Promise.all([
+        vgdApi.listTrips(params.vehicleId, 0, TRIP_HISTORY_SYNC_PAGE_SIZE),
+        tripsApi.listRewards(params.vehicleId, 0, TRIP_HISTORY_SYNC_PAGE_SIZE),
+      ]);
+      return {
+        vehicleId: params.vehicleId,
+        driverId: params.driverId,
+        vgdSummaries: tripsRes.data.trips,
+        rewardEntries: rewardsRes.entries,
+      };
+    } catch {
+      return {
+        vehicleId: params.vehicleId,
+        driverId: params.driverId,
+        vgdSummaries: [],
+        rewardEntries: [],
+      };
+    }
+  },
+);
+
 export const endTrip = createAsyncThunk(
   'trips/end',
   async (
@@ -483,6 +519,15 @@ const tripSlice = createSlice({
         state.isLoading = false;
         state.activeTrip = null;
         state.isTracking = false;
+      })
+      .addCase(syncTripHistoryFromBackend.fulfilled, (state, action) => {
+        state.trips = reconcileTripHistory(
+          state.trips,
+          action.payload.vgdSummaries,
+          action.payload.rewardEntries,
+          action.payload.vehicleId,
+          action.payload.driverId,
+        );
       });
   },
 });

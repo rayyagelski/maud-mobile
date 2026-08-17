@@ -14,7 +14,9 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { vehiclesApi } from '../../api';
-import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
+import {
+  formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
+} from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
 import type { VgdTripEventIndicator } from '../../types/vgd.types';
 import type { TripCostResponse } from '../../types/vehicle.types';
@@ -145,20 +147,13 @@ export default function TripDetailScreen() {
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
   const isImperial = useIsImperialUnits();
 
-  const distanceKm = trip
-    ? trip.route.reduce(
-        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
-        0,
-      )
-    : 0;
-  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
-  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+  const distanceKm = trip ? tripDistanceKm(trip) : 0;
+  const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
+  const avgSpeedKmh = trip ? tripAvgSpeedKmh(trip) : 0;
   const maxSpeedKmh = trip
     ? Math.max(0, ...trip.route.map(p => (p.speed ?? 0) * 3.6))
     : 0;
 
-  const start = trip?.route[0];
-  const end = trip?.route[trip.route.length - 1];
   const reward = trip?.reward;
 
   const harshBrakeCount = trip?.events.filter(e => e.type === 'harsh_brake').length ?? 0;
@@ -176,6 +171,16 @@ export default function TripDetailScreen() {
   } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
   const vgdAnalytics = vgdDetails?.analytics;
   const visibleVgdEvents = vgdEvents.filter(e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end');
+
+  // A `source: 'vgd'` trip (backfilled from the backend, see
+  // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
+  // trip_end events, same as MyTripScreen.tsx.
+  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point.gps;
+  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point.gps;
+  const start = trip?.route[0]
+    ?? (vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined);
+  const end = trip?.route[trip.route.length - 1]
+    ?? (vgdEndPoint ? { latitude: vgdEndPoint.lat, longitude: vgdEndPoint.lon } : undefined);
 
   // Real Insurance/Tax/Leasing/Financing + Repair/Maintenance + Fuel/
   // Electricity cost (TotalCostCalculator, server-side) — distinct from

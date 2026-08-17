@@ -12,9 +12,11 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
-import { haversineDistanceKm, formatDuration, formatDistance, formatSpeed } from '../../utils/helpers';
+import {
+  formatDuration, formatDistance, formatSpeed, tripDistanceKm, tripDurationSeconds,
+} from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
-import type { Trip, TripType as TripTypeValue } from '../../types/trip.types';
+import type { TripType as TripTypeValue } from '../../types/trip.types';
 
 const TEAL = '#3ABFBF';
 
@@ -30,18 +32,6 @@ const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
 
 function timeframeDays(label: string): number {
   return parseInt(label, 10) || 7;
-}
-
-function tripDistanceKm(trip: Trip): number {
-  return trip.route.reduce(
-    (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
-    0,
-  );
-}
-
-function tripDurationSeconds(trip: Trip): number {
-  if (!trip.endTime) return 0;
-  return Math.round((trip.endTime - trip.startTime) / 1000);
 }
 
 // ── Local icons ────────────────────────────────────────────────────────────

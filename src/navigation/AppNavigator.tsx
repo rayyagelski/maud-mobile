@@ -21,6 +21,7 @@ import { useLiveSpeedZoneAlerts } from '../hooks/useLiveSpeedZoneAlerts';
 import { useTrafficMonitor } from '../hooks/useTrafficMonitor';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
+import { useTripHistorySync } from '../hooks/useTripHistorySync';
 import { useSyncEngine } from '../services/syncEngine';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
@@ -69,6 +70,12 @@ export default function AppNavigator() {
   const dispatch = useAppDispatch();
   const { isAuthenticated, token } = useAppSelector(s => s.auth);
   const prevAuth = React.useRef(false);
+
+  // Deliberately not gated on locationGranted/locationOnboardingComplete
+  // below (unlike TripDetectionRunner) — restoring past trip history has
+  // nothing to do with permission for recording new trips, and a user
+  // should see their history even before granting location access.
+  useTripHistorySync();
 
   // TripDetectionRunner (specifically useTripAutoDetection's
   // BackgroundGeolocation.ready()/.start()) must not run before the user has
