@@ -45,6 +45,19 @@ export const TRIP_AUTO_STOP_INACTIVITY_MS = 5 * 60 * 1000; // 5 min
 // so handling the phone before mounting it — or after tapping Start but
 // before pulling away — is never misclassified as driving.
 export const TRIP_AUTO_START_SPEED_KMH = 1.60934;
+// AsyncStorage key the Android headless task (index.js) queues raw
+// BackgroundGeolocation location/motionchange events into when Android has
+// torn down the JS engine while backgrounded (which it does independently of
+// stopOnTerminate:false — native tracking keeps running, but nothing was
+// listening on the JS side until this queue existed). useTripAutoDetection
+// drains and replays this queue through the same handleLocation logic used
+// for live fixes on its next mount, so a real-time-looking gap in tracking
+// doesn't actually require the user to force-restart the app to "unstick" it.
+export const HEADLESS_LOCATION_QUEUE_KEY = 'headlessLocationQueue';
+// Hard cap on the headless queue so an extended stretch without a real app
+// launch (e.g. the overnight-idle case from real testing) can't grow it
+// unbounded — oldest entries are dropped first once past this.
+export const HEADLESS_LOCATION_QUEUE_MAX = 2000;
 export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
 // Weather doesn't change block-by-block like speed cameras do — re-query
 // HERE only after moving this far since the last check, to keep call volume

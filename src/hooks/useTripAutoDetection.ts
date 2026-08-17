@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundGeolocation, { type Location } from 'react-native-background-geolocation';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { startTrip, endTrip, appendGpsPoint, clearPendingStart, setTracking } from '../store/slices/tripSlice';
 import { navigationRef } from '../navigation/navigationRef';
 import { publishGpsFix } from '../services/gpsSpeedBus';
-import { TRIP_AUTO_START_SPEED_KMH } from '../utils/constants';
+import { TRIP_AUTO_START_SPEED_KMH, HEADLESS_LOCATION_QUEUE_KEY } from '../utils/constants';
 import { haversineMeters } from '../utils/complianceAlertLogic';
 
 // Vehicle is "moving" above this speed; below it counts as stopped. Shared
@@ -314,6 +315,24 @@ export function useTripAutoDetection() {
     );
     removeLocationListener = () => subscription.remove();
 
+    // Replay whatever index.js's headless task queued while this hook wasn't
+    // mounted with a live JS listener (see enableHeadless above) — in
+    // chronological order, through the exact same handleLocation logic a
+    // live fix would go through, so trip start/stop and appended points
+    // reconcile themselves instead of requiring the user to force-restart
+    // the app to "unstick" tracking.
+    AsyncStorage.getItem(HEADLESS_LOCATION_QUEUE_KEY).then((raw) => {
+      if (cancelled || !raw) return;
+      AsyncStorage.removeItem(HEADLESS_LOCATION_QUEUE_KEY);
+      try {
+        const queued = JSON.parse(raw) as Location[];
+        queued.forEach(handleLocation);
+      } catch {
+        // Malformed queue — nothing recoverable, drop it rather than loop
+        // forever failing to parse it.
+      }
+    });
+
     BackgroundGeolocation.ready({
       reset: true,
       geolocation: {
@@ -329,6 +348,12 @@ export function useTripAutoDetection() {
       app: {
         stopOnTerminate: false, // keep tracking if the app is swiped away mid-trip
         startOnBoot: true,      // resume tracking after a device reboot
+        // Android-only: lets the plugin invoke index.js's registered
+        // headless task directly when the JS engine has been torn down
+        // while backgrounded, instead of silently dropping events until a
+        // full app restart brings a JS listener back — see index.js and the
+        // queue-drain below for the other half of this.
+        enableHeadless: true,
         notification: {
           title: 'MAUD Connect',
           text: 'Tracking your trip',
