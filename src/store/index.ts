@@ -1,6 +1,6 @@
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { persistStore, persistReducer, FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER } from 'redux-persist';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { throttledAsyncStorage } from './throttledAsyncStorage';
 import authReducer from './slices/authSlice';
 import vehicleReducer from './slices/vehicleSlice';
 import driverReducer from './slices/driverSlice';
@@ -32,7 +32,13 @@ const rootReducer = combineReducers({
 
 const persistConfig = {
   key: 'root',
-  storage: AsyncStorage,
+  // Throttled, not raw AsyncStorage — see throttledAsyncStorage.ts. Every
+  // dispatch touching a whitelisted slice (trips especially, during active
+  // GPS tracking) otherwise re-serializes and writes the whole combined
+  // 'persist:root' blob, and that cost grows with trip length while write
+  // frequency stays constant — real-drive testing showed this stalling the
+  // JS thread badly enough to freeze the app ~15-25 minutes into a trip.
+  storage: throttledAsyncStorage,
   // expenses/serviceRecords are backend-owned lists refetched per screen visit,
   // not persisted (unlike trips, which need offline durability).
   // auth is deliberately NOT persisted here — the token lives in encrypted
