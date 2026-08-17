@@ -172,6 +172,49 @@ export async function fetchHereRoute(origin: LatLng, destination: LatLng): Promi
   return routes[0] ?? null;
 }
 
+const EARTH_RADIUS_METERS = 6371000;
+
+// Standard great-circle destination-point formula — given a starting point,
+// a heading, and a distance, projects where you'd end up. Used to synthesize
+// a plausible "destination" a fixed distance ahead of the current position
+// along the current heading, purely so fetchHereRoute can be called for a
+// short "virtual route ahead" of an auto-detected trip (no real planned
+// destination exists) — the only thing actually wanted out of it is
+// speedLimitSpans for whatever road is currently being driven, not real
+// turn-by-turn directions to this synthetic point.
+export function destinationPointFrom(origin: LatLng, headingDegrees: number, distanceMeters: number): LatLng {
+  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
+  const headingRad = headingDegrees * (Math.PI / 180);
+  const lat1 = origin.latitude * (Math.PI / 180);
+  const lon1 = origin.longitude * (Math.PI / 180);
+
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance) + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(headingRad),
+  );
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(headingRad) * Math.sin(angularDistance) * Math.cos(lat1),
+    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2),
+  );
+
+  return { latitude: lat2 * (180 / Math.PI), longitude: lon2 * (180 / Math.PI) };
+}
+
+// Requests a short HERE route continuing straight ahead from the current
+// position/heading, purely to obtain speedLimitSpans for whatever road is
+// currently being driven — for trips with no real planned destination (auto-
+// detected trips), which otherwise have no source of live speed-limit data
+// at all. Not meant for guidance: the synthetic destination is just a
+// projection, not a real place, so maneuvers/instructions from this result
+// are meaningless and should be ignored by callers.
+export async function fetchSpeedLimitAheadRoute(
+  origin: LatLng,
+  headingDegrees: number,
+  aheadMeters: number,
+): Promise<HereRouteResult | null> {
+  const destination = destinationPointFrom(origin, headingDegrees, aheadMeters);
+  return fetchHereRoute(origin, destination);
+}
+
 export interface AddressSuggestion {
   id: string;
   label: string;

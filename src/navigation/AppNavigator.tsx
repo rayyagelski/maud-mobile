@@ -17,6 +17,7 @@ import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
 import { useSevereWeatherAlerts } from '../hooks/useSevereWeatherAlerts';
 import { useTurnByTurnGuidance } from '../hooks/useTurnByTurnGuidance';
 import { useSpeedZoneAlerts } from '../hooks/useSpeedZoneAlerts';
+import { useLiveSpeedZoneAlerts } from '../hooks/useLiveSpeedZoneAlerts';
 import { useTrafficMonitor } from '../hooks/useTrafficMonitor';
 import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
@@ -44,6 +45,7 @@ function TripDetectionRunner() {
   useSevereWeatherAlerts();
   useTurnByTurnGuidance();
   useSpeedZoneAlerts();
+  useLiveSpeedZoneAlerts();
   useTrafficMonitor();
   useVgdPointFlush();
   useSyncEngine();

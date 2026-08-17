@@ -59,6 +59,22 @@ export const HEADLESS_LOCATION_QUEUE_KEY = 'headlessLocationQueue';
 // unbounded — oldest entries are dropped first once past this.
 export const HEADLESS_LOCATION_QUEUE_MAX = 2000;
 export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
+// useLiveSpeedZoneAlerts (auto-detected trips, no real planned route) —
+// periodically fetches a short synthetic HERE route continuing straight
+// ahead from current position/heading purely to read its speedLimitSpans.
+// Ahead distance for that synthetic route.
+export const LIVE_SPEED_ZONE_AHEAD_METERS = 2000;
+// Refetch once this far into the current reference route, leaving a buffer
+// of already-fetched road ahead rather than waiting until it runs out.
+export const LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS = 1200;
+// Floor between HERE requests regardless of distance traveled — bounds API
+// cost if GPS noise or a stop-and-go stretch would otherwise trigger
+// refetches too rapidly.
+export const LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS = 30 * 1000;
+// Below this speed, skip fetching — parked/idling/stop-and-go traffic
+// shouldn't burn HERE routing calls, and heading is unreliable at very low
+// speed anyway (the synthetic "ahead" projection needs a real heading).
+export const LIVE_SPEED_ZONE_MIN_SPEED_MS = 4; // ~9 mph
 // Weather doesn't change block-by-block like speed cameras do — re-query
 // HERE only after moving this far since the last check, to keep call volume
 // (and therefore cost) reasonable.
