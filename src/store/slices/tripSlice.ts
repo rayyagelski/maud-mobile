@@ -50,20 +50,28 @@ export const startTrip = createAsyncThunk(
       tripType: TripType;
       transportMode: TransportMode;
       plannedRoute?: PlannedRoute;
+      // The GPS fix that qualified as "moving" and triggered this start
+      // (see TRIP_AUTO_START_SPEED_KMH). Seeding route with it, rather than
+      // starting from an empty route and waiting for the *next* fix, is
+      // what makes the trip's recorded start location the actual point
+      // where the vehicle began moving instead of wherever it had already
+      // driven to by the following GPS update.
+      initialPoint?: GpsPoint;
     },
     { dispatch },
   ) => {
+    const { initialPoint, ...tripParams } = params;
     // trip_reward (App\Controller\API\Rewards\TripRewardController) is still
     // a single write-once POST submitted at trip-end (§0.1) — unchanged.
     // Vehicle Generated Data is a separate destination that DOES need a
     // create-trip call up front; fired in the background below so trip start
     // itself never blocks on network.
     const trip: Trip = {
-      ...params,
+      ...tripParams,
       id: generateId(),
       startTime: Date.now(),
       status: 'active',
-      route: [],
+      route: initialPoint ? [initialPoint] : [],
       events: [],
       vgdTripId: generateUuidV4(),
     };
@@ -123,7 +131,20 @@ export const submitVgdCreateTrip = createAsyncThunk(
         dispatch(markVgdTripCreated(args.trip.id));
         return;
       }
-      if (e.status === undefined) {
+      // 401 is retried alongside true network failures (status undefined) —
+      // not because a stale/invalid session should keep retrying forever,
+      // but because auto-detected trips can start right as the app cold- or
+      // background-relaunches, and useTripAutoDetection's `claims` gate (from
+      // persisted Redux state) can be satisfied slightly before the actual
+      // HTTP client has the bearer token configured (a separate async
+      // loadToken()/configureClient() sequence in AppNavigator). That race
+      // produces a 401 that has nothing to do with the session actually
+      // being invalid, and resolves itself within moments — silently
+      // dropping it here was leaving whole trips never uploaded to VGD.
+      // Every other defined status (a genuine backend rejection) is still
+      // dropped, not retried — same convention as trip_reward/expense
+      // submissions.
+      if (e.status === undefined || e.status === 401) {
         dispatch(enqueueSyncItem({ kind: 'vgd_create_trip', localTripId: args.trip.id, params }));
       }
     }
