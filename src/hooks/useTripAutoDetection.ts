@@ -26,6 +26,18 @@ const MOVING_CONFIRM_MS = 5 * 1000; // 5 sec
 // same "first fix after starting is unreliable" reasoning as above. Doesn't
 // gate auto-end/recording once already tracking, only the initial decision.
 const MAX_START_ACCURACY_M = 20;
+// A brisk walk (~3 mph) easily clears SPEED_START_MS (~1 mph) on its own —
+// real-drive feedback: walking away from a parked car with the phone in hand
+// repeatedly auto-started a trip after only a few yards. BackgroundGeolocation
+// ships its own on-device activity classifier (Location.activity) that speed
+// alone can't provide; gate auto-start on it when confident, rather than
+// raising SPEED_START_MS itself (which is also relied on for the symmetric
+// stop-detection side and for a car crawling out of a driveway).
+const NON_VEHICLE_ACTIVITIES = new Set(['still', 'walking', 'on_foot', 'running', 'on_bicycle']);
+// Below this confidence the classifier itself isn't sure — fall back to the
+// existing speed-only behavior rather than risk blocking a real drive start
+// on a low-confidence "walking" guess (e.g. stop-and-go traffic confusing it).
+const MIN_ACTIVITY_CONFIDENCE = 75;
 // Vehicle must remain below SPEED_STOP_MS for this long before ending the
 // trip — avoids false-ends during traffic lights / slow-moving traffic.
 // 2 min per explicit user-testing feedback (was 45s, undocumented to users
@@ -57,6 +69,16 @@ const PLANNED_ORIGIN_MAX_DRIFT_M = 300;
 // permission was revoked mid-drive, or the OS background-killed just the
 // location updates while the JS process stayed alive).
 const STALE_TRIP_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+// How often the stillness watchdog re-checks stillSinceRef while tracking.
+// STILL_MS itself only used to be evaluated inside the onLocation callback —
+// i.e. only when a new GPS fix actually arrived. If the phone loses signal
+// entirely (walked indoors, underground parking) no more fixes ever arrive,
+// so that check never re-ran and the trip stayed "recording" for however
+// long it took signal to return — up to 15 real minutes in one case, wrecking
+// the trip's average-speed figure. This interval re-checks stillSinceRef's
+// age independent of whether any new fix has arrived, so the 2-minute
+// auto-end is a real wall-clock guarantee, not just "2 minutes of fixes".
+const STILL_CHECK_INTERVAL_MS = 15 * 1000; // 15 sec
 
 export function useTripAutoDetection() {
   const dispatch    = useAppDispatch();
@@ -77,6 +99,22 @@ export function useTripAutoDetection() {
   useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
   useEffect(() => { activeTripRef.current = activeTrip; }, [activeTrip]);
   useEffect(() => { pendingStartRef.current = pendingStart; }, [pendingStart]);
+
+  // Shared by the per-fix STILL_MS check inside handleLocation and the
+  // wall-clock stillness watchdog below — both just need to know "stillness
+  // has been sustained long enough, end the trip now."
+  function endTripDueToStillness() {
+    if (!activeTripRef.current || endingRef.current) return;
+    endingRef.current = true;
+    const tripId = activeTripRef.current.id;
+    dispatch(endTrip(tripId)).then(() => {
+      endingRef.current     = false;
+      stillSinceRef.current = null;
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('TripSummary', { tripId });
+      }
+    });
+  }
 
   // Stale-trip watchdog: redux-persist now persists `trips` (see
   // store/index.ts), so an in-flight activeTrip can be rehydrated after the
@@ -111,6 +149,21 @@ export function useTripAutoDetection() {
     checkStaleTrip();
     const interval = setInterval(checkStaleTrip, STALE_TRIP_CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
+  }, [dispatch]);
+
+  // Stillness watchdog: mirrors the STILL_MS check inside handleLocation
+  // below, but runs on a real wall-clock interval instead of only being
+  // evaluated when a new GPS fix arrives — see STILL_CHECK_INTERVAL_MS.
+  useEffect(() => {
+    const checkStillness = () => {
+      if (!isTrackingRef.current || stillSinceRef.current === null) return;
+      if (Date.now() - stillSinceRef.current < STILL_MS) return;
+      endTripDueToStillness();
+    };
+
+    const interval = setInterval(checkStillness, STILL_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
   useEffect(() => {
@@ -178,6 +231,18 @@ export function useTripAutoDetection() {
               return;
             }
 
+            // Reject a confident non-vehicle activity outright — walking,
+            // running, or cycling at qualifying speed shouldn't even start
+            // the confirm clock. Only gates pure auto-detection: a pending
+            // Route Planner start already represents explicit user intent
+            // and returned above before reaching here.
+            const activity = location.activity;
+            if (activity && activity.confidence >= MIN_ACTIVITY_CONFIDENCE
+              && NON_VEHICLE_ACTIVITIES.has(activity.type)) {
+              movingSinceRef.current = null;
+              return;
+            }
+
             // Start the confirm clock on the first qualifying-speed fix
             // regardless of its accuracy — the first fixes after a cold GPS
             // lock are frequently low-accuracy, and gating the clock itself
@@ -233,16 +298,8 @@ export function useTripAutoDetection() {
           if (speedMs < SPEED_STOP_MS) {
             if (stillSinceRef.current === null) {
               stillSinceRef.current = Date.now();
-            } else if (!endingRef.current && Date.now() - stillSinceRef.current >= STILL_MS) {
-              endingRef.current = true;
-              const tripId = activeTripRef.current.id;
-              dispatch(endTrip(tripId)).then(() => {
-                endingRef.current     = false;
-                stillSinceRef.current = null;
-                if (navigationRef.isReady()) {
-                  navigationRef.navigate('TripSummary', { tripId });
-                }
-              });
+            } else if (Date.now() - stillSinceRef.current >= STILL_MS) {
+              endTripDueToStillness();
             }
           } else {
             // Vehicle is moving again — reset the stillness timer
