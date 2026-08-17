@@ -8,6 +8,11 @@ import { navigationRef } from '../navigation/navigationRef';
 import { publishGpsFix } from '../services/gpsSpeedBus';
 import { TRIP_AUTO_START_SPEED_KMH, HEADLESS_LOCATION_QUEUE_KEY } from '../utils/constants';
 import { haversineMeters } from '../utils/complianceAlertLogic';
+import { isBluetoothGateSatisfied } from '../utils/bluetoothGateLogic';
+import {
+  isBluetoothVehicleDetectionAvailable, getConnectedBluetoothDeviceName,
+  subscribeBluetoothDeviceConnected, subscribeBluetoothDeviceDisconnected,
+} from '../services/bluetooth/bluetoothVehicleDetectionModule';
 
 // Vehicle is "moving" above this speed; below it counts as stopped. Shared
 // with a manual Route Planner start (see pendingStart below) and with
@@ -87,19 +92,50 @@ export function useTripAutoDetection() {
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
   const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
+  const { pairings } = useAppSelector(s => s.bluetoothPairing);
 
   // Mutable refs keep the watchPosition callback always reading current Redux state
   // without restarting the GPS subscription on every state change.
   const isTrackingRef  = useRef(isTracking);
   const activeTripRef  = useRef(activeTrip);
   const pendingStartRef = useRef(pendingStart);
+  const pairingsRef     = useRef(pairings);
   const endingRef      = useRef(false);   // guards against double-dispatch of endTrip
   const stillSinceRef  = useRef<number | null>(null);
   const movingSinceRef = useRef<number | null>(null);
+  // Live BT-connected-device name, independent of useBluetoothVehicleDetection
+  // (that hook only cares about the connect *event*, for vehicle
+  // auto-selection) — this needs to reflect current connection state at any
+  // moment, including "already connected before this hook mounted".
+  const connectedBluetoothDeviceRef = useRef<string | null>(null);
 
   useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
   useEffect(() => { activeTripRef.current = activeTrip; }, [activeTrip]);
   useEffect(() => { pendingStartRef.current = pendingStart; }, [pendingStart]);
+  useEffect(() => { pairingsRef.current = pairings; }, [pairings]);
+
+  // Tracks live BT connection state for the recording-gate check below —
+  // separate effect so it doesn't need to be part of the main location-
+  // subscription effect's dependency array. Subscribes once for the app's
+  // lifetime; getConnectedBluetoothDeviceName() covers "already connected
+  // before this mounted" (e.g. cold-started while already in the car).
+  useEffect(() => {
+    let cancelled = false;
+    getConnectedBluetoothDeviceName().then((name) => {
+      if (!cancelled) connectedBluetoothDeviceRef.current = name;
+    });
+    const unsubConnect = subscribeBluetoothDeviceConnected((name) => {
+      connectedBluetoothDeviceRef.current = name;
+    });
+    const unsubDisconnect = subscribeBluetoothDeviceDisconnected(() => {
+      connectedBluetoothDeviceRef.current = null;
+    });
+    return () => {
+      cancelled = true;
+      unsubConnect();
+      unsubDisconnect();
+    };
+  }, []);
 
   // Shared by the per-fix STILL_MS check inside handleLocation and the
   // wall-clock stillness watchdog below — both just need to know "stillness
@@ -210,6 +246,22 @@ export function useTripAutoDetection() {
         // ── Auto-start ─────────────────────────────────────────────────────
         if (!isTrackingRef.current && !endingRef.current) {
           if (speedMs >= SPEED_START_MS) {
+            // Product requirement: recording (both auto-detect and Route
+            // Planner) requires an actual BT connection to the driver's
+            // paired vehicle, not just speed — but only where that's
+            // actually enforceable (see isBluetoothGateSatisfied: falls back
+            // to speed-only on iOS until its native module is wired into
+            // Xcode, or for a driver who's never paired any vehicle at all).
+            // Placed before the pending/auto-detect branch below since it
+            // applies to both, and before movingSinceRef is touched either
+            // way — the confirm clock only starts once both conditions hold
+            // on the same fix, not before BT connects.
+            if (!isBluetoothGateSatisfied(
+              isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
+            )) {
+              return;
+            }
+
             // A pending start means the user already tapped "Start Trip" in
             // Route Planner — real intent, not ambient motion the app is
             // guessing about. MOVING_CONFIRM_MS's whole purpose is to filter

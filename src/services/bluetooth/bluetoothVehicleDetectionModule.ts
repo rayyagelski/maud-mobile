@@ -18,6 +18,16 @@ const nativeModule = NativeModules.BluetoothVehicleDetection as
 
 const emitter = nativeModule ? new NativeEventEmitter(NativeModules.BluetoothVehicleDetection) : null;
 
+// False until the native module is actually registered — true on Android
+// today; false on iOS until BluetoothVehicleDetection.swift is added to the
+// Xcode project target (a manual step, not something a script/CLI can do).
+// Callers that gate real behavior (e.g. requiring a BT connection to start
+// trip recording) on this must fall back to their pre-BT behavior when
+// false, not treat "unavailable" the same as "confirmed disconnected".
+export function isBluetoothVehicleDetectionAvailable(): boolean {
+  return nativeModule != null;
+}
+
 type DeviceNameListener = (deviceName: string | null) => void;
 
 // Starts (or resumes) listening for the car's Bluetooth connection. Resolves
