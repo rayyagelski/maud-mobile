@@ -241,7 +241,8 @@ export default function TripDetailScreen() {
               <View style={styles.wpInfo}>
                 <Text style={styles.wpMain}>
                   {vgdAnalytics?.startAddress
-                    ?? (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—')}
+                    ?? (vgdEnabled && (vgdLoading || vgdProcessing) ? 'Resolving address…'
+                      : (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—'))}
                 </Text>
               </View>
             </View>
@@ -253,7 +254,8 @@ export default function TripDetailScreen() {
               <View style={styles.wpInfo}>
                 <Text style={styles.wpMain}>
                   {vgdAnalytics?.endAddress
-                    ?? (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—')}
+                    ?? (vgdEnabled && (vgdLoading || vgdProcessing) ? 'Resolving address…'
+                      : (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—'))}
                 </Text>
               </View>
             </View>

@@ -14,7 +14,8 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
-import { haversineDistanceKm, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
+import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
+import { tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -114,14 +115,25 @@ export default function TripSummaryScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlayTripSummaryVoice, reward?.voicePayload?.script]);
 
-  const distanceKm = trip
-    ? trip.route.reduce(
-        (sum, point, i) => (i === 0 ? 0 : sum + haversineDistanceKm(trip.route[i - 1], point)),
-        0,
-      )
-    : reward?.distanceKm ?? 0;
-  const durationSeconds = trip?.endTime ? Math.round((trip.endTime - trip.startTime) / 1000) : 0;
-  const avgSpeedKmh = durationSeconds > 0 ? (distanceKm / durationSeconds) * 3600 : 0;
+  const distanceKm = trip ? tripDistanceKm(trip) : reward?.distanceKm ?? 0;
+  const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
+  const avgSpeedKmh = trip ? tripAvgSpeedKmh(trip) : 0;
+
+  // VGD read-back for real street addresses (A/B) — same source
+  // MyTripScreen/TripDetailScreen already use. Right after a trip ends this
+  // will very likely still be "processing" (vgd_analytics runs
+  // asynchronously post trip-end), so this card is expected to often show a
+  // loading/pending state here rather than an address immediately — that's
+  // normal, not a bug.
+  const vgdEnabled = Boolean(trip?.vgdTripId && trip?.vgdTripCreated);
+  const { details: vgdDetails, isLoading: vgdLoading, isProcessing: vgdProcessing } = useVgdTripDetails(
+    vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '',
+  );
+  const vgdAnalytics = vgdDetails?.analytics;
+  const startLabel = vgdAnalytics?.startAddress
+    ?? (vgdLoading || vgdProcessing ? 'Resolving address…' : '—');
+  const endLabel = vgdAnalytics?.endAddress
+    ?? (vgdLoading || vgdProcessing ? 'Resolving address…' : '—');
 
   const heroTitle = (reward && SUMMARY_TITLES[reward.voicePayload.summaryKey]) ?? 'TRIP COMPLETE';
   const moneySavedLabel =
@@ -208,6 +220,23 @@ export default function TripSummaryScreen() {
             <FlashIcon color="#BBBBBB" size={22} />
             <Text style={styles.statVal}>{formatSpeed(avgSpeedKmh, isImperial)}</Text>
             <Text style={styles.statMeta}>Avg. Speed</Text>
+          </View>
+        </View>
+
+        {/* Route (real VGD-resolved street addresses, not raw coordinates) */}
+        <View style={styles.card}>
+          <View style={styles.wpRow}>
+            <View style={[styles.wpDot, styles.wpDotA]}>
+              <Text style={styles.wpDotText}>A</Text>
+            </View>
+            <Text style={styles.wpText}>{startLabel}</Text>
+          </View>
+          <View style={styles.wpConnector} />
+          <View style={styles.wpRow}>
+            <View style={[styles.wpDot, styles.wpDotB]}>
+              <Text style={styles.wpDotText}>B</Text>
+            </View>
+            <Text style={styles.wpText}>{endLabel}</Text>
           </View>
         </View>
 
@@ -357,6 +386,18 @@ const styles = StyleSheet.create({
   statSep: { width: 1, height: 48, backgroundColor: '#F0F0F0' },
   statVal: { fontSize: 17, fontWeight: '800', color: '#1A1A1A' },
   statMeta: { fontSize: 12, color: '#AAAAAA' },
+
+  // Waypoints (A/B)
+  wpRow: { flexDirection: 'row', alignItems: 'center' },
+  wpDot: {
+    width: 24, height: 24, borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center', marginRight: 10,
+  },
+  wpDotA: { backgroundColor: TEAL },
+  wpDotB: { backgroundColor: '#1A1A1A' },
+  wpDotText: { fontSize: 11, fontWeight: '700', color: 'white' },
+  wpText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
+  wpConnector: { width: 1.5, height: 12, backgroundColor: '#DDD', marginLeft: 11, marginVertical: 4 },
 
   // How you scored
   scoredHeader: {

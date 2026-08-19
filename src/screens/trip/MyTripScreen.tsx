@@ -73,8 +73,15 @@ export default function MyTripScreen() {
   // labels can show resolved addresses instead of always falling back to
   // raw coordinates.
   const vgdEnabled = Boolean(trip?.vgdTripId && trip?.vgdTripCreated);
-  const { details: vgdDetails, events: vgdEvents } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
+  const {
+    details: vgdDetails, events: vgdEvents, isLoading: vgdLoading, isProcessing: vgdProcessing,
+  } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
   const vgdAnalytics = vgdDetails?.analytics;
+  // "Resolving address…" instead of silently falling back straight to raw
+  // coordinates — vgd_analytics processes asynchronously after trip-end, so
+  // this can take a little while, and without a distinct pending state that
+  // looked identical to "will never resolve" (real-drive feedback).
+  const vgdAddressPending = vgdEnabled && (vgdLoading || vgdProcessing);
   // Over-speed-limit markers on the route, from VGD's server-side detection.
   const speedLimitEvents = vgdEvents.filter(e => e.indicator === 'speed_limit');
   // Phone-usage markers — device-local only (useHarshEventTracker's AppState
@@ -187,7 +194,8 @@ export default function MyTripScreen() {
                 <View style={styles.wpInfo}>
                   <Text style={styles.wpMain}>
                     {vgdAnalytics?.startAddress
-                      ?? (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—')}
+                      ?? (vgdAddressPending ? 'Resolving address…'
+                        : (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—'))}
                   </Text>
                 </View>
               </View>
@@ -199,7 +207,8 @@ export default function MyTripScreen() {
                 <View style={styles.wpInfo}>
                   <Text style={styles.wpMain}>
                     {vgdAnalytics?.endAddress
-                      ?? (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—')}
+                      ?? (vgdAddressPending ? 'Resolving address…'
+                        : (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—'))}
                   </Text>
                 </View>
               </View>
