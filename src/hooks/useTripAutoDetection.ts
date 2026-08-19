@@ -85,6 +85,14 @@ const STALE_TRIP_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 // age independent of whether any new fix has arrived, so the 2-minute
 // auto-end is a real wall-clock guarantee, not just "2 minutes of fixes".
 const STILL_CHECK_INTERVAL_MS = 15 * 1000; // 15 sec
+// A qualifying auto-start point captured while waiting on the BT gate (see
+// pendingBluetoothStartRef below) is dropped after this long without BT
+// actually connecting — real-world BT reconnection to a car head unit can
+// legitimately take a couple of minutes, but shouldn't be held onto
+// indefinitely if it's having an off day. Once dropped, the next qualifying
+// streak starts fresh (still gated on BT — this is a staleness bound, not a
+// fallback to speed-only).
+const PENDING_BLUETOOTH_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 
 export function useTripAutoDetection() {
   const dispatch    = useAppDispatch();
@@ -108,6 +116,15 @@ export function useTripAutoDetection() {
   // auto-selection) — this needs to reflect current connection state at any
   // moment, including "already connected before this hook mounted".
   const connectedBluetoothDeviceRef = useRef<string | null>(null);
+  // A qualifying auto-start point (speed+activity+accuracy+confirm-timer all
+  // satisfied) captured while the BT gate wasn't — real-world BT
+  // reconnection to a car head unit can lag well behind these other checks
+  // (up to a couple of minutes), and dispatching startTrip using whatever
+  // fix happens to be current once BT *finally* connects meant the recorded
+  // trip started from wherever the car had already driven to by then, not
+  // the true departure point — wrecking duration/distance/cost/CO2 for the
+  // whole trip. Held here and dispatched the moment BT catches up instead.
+  const pendingBluetoothStartRef = useRef<{ capturedAt: number; dispatchStart: () => void } | null>(null);
 
   useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
   useEffect(() => { activeTripRef.current = activeTrip; }, [activeTrip]);
@@ -129,6 +146,21 @@ export function useTripAutoDetection() {
     });
     const unsubDisconnect = subscribeBluetoothDeviceDisconnected(() => {
       connectedBluetoothDeviceRef.current = null;
+      // BT disconnecting (engine off, or the phone walking out of range) is
+      // a much more reliable "the drive is over" signal than GPS speed when
+      // the vehicle stops somewhere GPS coverage is poor (parking garages,
+      // covered/indoor lots) — real-drive feedback: the phone was carried
+      // indoors and automated recording kept going for ~15 minutes because
+      // no further GPS fixes ever arrived to let the per-fix/watchdog
+      // stillness checks even notice the vehicle had stopped. Only kicks in
+      // if GPS hasn't already started that countdown itself (stillSinceRef
+      // already set), and only nudges the wall-clock watchdog's normal
+      // STILL_MS timer — doesn't end the trip immediately, since a driver
+      // could plausibly disconnect BT (e.g. phone call takes over the audio
+      // route) without actually having stopped.
+      if (isTrackingRef.current && stillSinceRef.current === null) {
+        stillSinceRef.current = Date.now();
+      }
     });
     return () => {
       cancelled = true;
@@ -225,6 +257,23 @@ export function useTripAutoDetection() {
     let removeLocationListener: (() => void) | undefined;
     let cancelled = false;
 
+    // Dispatches immediately if the BT gate is already satisfied; otherwise
+    // holds this point/dispatcher until it is (see pendingBluetoothStartRef
+    // above), rather than starting the trip from wherever the car has driven
+    // to by the time BT finally connects.
+    function startOnceBluetoothReady(dispatchStart: () => void) {
+      if (isBluetoothGateSatisfied(
+        isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
+      )) {
+        pendingBluetoothStartRef.current = null;
+        dispatchStart();
+        return;
+      }
+      if (!pendingBluetoothStartRef.current) {
+        pendingBluetoothStartRef.current = { capturedAt: Date.now(), dispatchStart };
+      }
+    }
+
     const handleLocation = (location: Location) => {
       const { coords } = location;
       // GPS speed is in m/s; missing/negative means unavailable
@@ -243,25 +292,26 @@ export function useTripAutoDetection() {
         timestamp,
       };
 
-        // ── Auto-start ─────────────────────────────────────────────────────
-        if (!isTrackingRef.current && !endingRef.current) {
-          if (speedMs >= SPEED_START_MS) {
-            // Product requirement: recording (both auto-detect and Route
-            // Planner) requires an actual BT connection to the driver's
-            // paired vehicle, not just speed — but only where that's
-            // actually enforceable (see isBluetoothGateSatisfied: falls back
-            // to speed-only on iOS until its native module is wired into
-            // Xcode, or for a driver who's never paired any vehicle at all).
-            // Placed before the pending/auto-detect branch below since it
-            // applies to both, and before movingSinceRef is touched either
-            // way — the confirm clock only starts once both conditions hold
-            // on the same fix, not before BT connects.
-            if (!isBluetoothGateSatisfied(
-              isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
-            )) {
-              return;
-            }
+        // A qualifying point may already be captured and just waiting on BT
+        // to catch up — checked on every fix regardless of current speed,
+        // since BT can finish connecting while the vehicle is idling before
+        // pulling away, not only while already moving.
+        if (!isTrackingRef.current && pendingBluetoothStartRef.current) {
+          const pendingBt = pendingBluetoothStartRef.current;
+          if (Date.now() - pendingBt.capturedAt > PENDING_BLUETOOTH_START_TIMEOUT_MS) {
+            pendingBluetoothStartRef.current = null;
+          } else if (isBluetoothGateSatisfied(
+            isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
+          )) {
+            pendingBluetoothStartRef.current = null;
+            pendingBt.dispatchStart();
+            return;
+          }
+        }
 
+        // ── Auto-start ─────────────────────────────────────────────────────
+        if (!isTrackingRef.current && !endingRef.current && !pendingBluetoothStartRef.current) {
+          if (speedMs >= SPEED_START_MS) {
             // A pending start means the user already tapped "Start Trip" in
             // Route Planner — real intent, not ambient motion the app is
             // guessing about. MOVING_CONFIRM_MS's whole purpose is to filter
@@ -280,7 +330,7 @@ export function useTripAutoDetection() {
                 && haversineMeters(plannedOrigin, gpsPoint) <= PLANNED_ORIGIN_MAX_DRIFT_M
                 ? { ...gpsPoint, latitude: plannedOrigin.latitude, longitude: plannedOrigin.longitude }
                 : gpsPoint;
-              dispatch(startTrip({ ...pending, initialPoint }));
+              startOnceBluetoothReady(() => dispatch(startTrip({ ...pending, initialPoint })));
               return;
             }
 
@@ -320,7 +370,7 @@ export function useTripAutoDetection() {
             stillSinceRef.current = null;
             movingSinceRef.current = null;
 
-            dispatch(startTrip({
+            startOnceBluetoothReady(() => dispatch(startTrip({
               vehicleId,
               driverId,
               // Default to private — auto-detection has no way to know intent,
@@ -331,7 +381,7 @@ export function useTripAutoDetection() {
               tripType: 'private',
               transportMode: 'car',
               initialPoint: gpsPoint,
-            }));
+            })));
             return;
           }
 

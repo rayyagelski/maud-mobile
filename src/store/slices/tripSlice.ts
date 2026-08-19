@@ -179,7 +179,17 @@ export const updateOdometerAfterTrip = createAsyncThunk(
 export const flushVgdPoints = createAsyncThunk(
   'trips/vgdFlushPoints',
   async (
-    args: { tripId: string; isTripEnd: boolean },
+    // endTime is only meaningful (and required) when isTripEnd — passed
+    // explicitly by the caller rather than read from state.activeTrip.endTime
+    // here, because endTrip dispatches this flush *while its own thunk is
+    // still running*, well before its fulfilled reducer actually commits
+    // endTime to Redux. Reading it from state here previously always missed
+    // it and fell back to Date.now() — "whenever this particular flush's
+    // async body happens to execute" (which can lag the true stillness-
+    // detected stop by however long buildContext's weather call takes) —
+    // instead of the real end time, producing a trip_end marker with a
+    // wrong timestamp and a VGD-vs-app trip duration mismatch.
+    args: { tripId: string; isTripEnd: boolean; endTime?: number },
     { getState, dispatch },
   ) => {
     const state = getState() as { trips: TripState };
@@ -208,7 +218,7 @@ export const flushVgdPoints = createAsyncThunk(
 
     if (args.isTripEnd) {
       const fallback = newRoutePoints[newRoutePoints.length - 1] ?? trip.vgdLastSentPoint;
-      points = markTripEnd(points, trip.endTime ?? Date.now(), fallback);
+      points = markTripEnd(points, args.endTime ?? trip.endTime ?? Date.now(), fallback);
     }
 
     if (points.length === 0) return;
@@ -351,7 +361,7 @@ export const endTrip = createAsyncThunk(
       // Still flush a trip_end to VGD even for a too-short-to-score trip —
       // VGD has no equivalent "too short" floor, and this is the only signal
       // that ends the trip server-side (triggers vgd_analytics enrichment).
-      dispatch(flushVgdPoints({ tripId, isTripEnd: true }));
+      dispatch(flushVgdPoints({ tripId, isTripEnd: true, endTime }));
       return { ...trip, endTime, status: 'completed' } as Trip;
     }
 
@@ -375,7 +385,7 @@ export const endTrip = createAsyncThunk(
 
     // Final VGD flush and odometer update — both independent of trip_reward
     // above, dispatched (not awaited) so neither delays trip completion.
-    dispatch(flushVgdPoints({ tripId, isTripEnd: true }));
+    dispatch(flushVgdPoints({ tripId, isTripEnd: true, endTime }));
     dispatch(updateOdometerAfterTrip({ vehicleId: trip.vehicleId, distanceKm }));
 
     try {
