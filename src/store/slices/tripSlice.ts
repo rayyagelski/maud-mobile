@@ -295,13 +295,21 @@ function buildEnergy(vehicle: Vehicle | null | undefined, distanceKm: number): T
 // of trip history, so a reinstall/new device showed a permanently empty
 // history even though VGD (route/analytics) and trip_reward (scoring) both
 // already had it server-side — this was a real, reported gap, not by
-// design. Fail-soft like every other auxiliary/background sync in this
-// app: a failed fetch just leaves existing trips untouched, no error shown.
+// design. A genuinely empty result (200 OK, no trips) is a real success and
+// resolves normally — but a failed *request* (network error, or a 401 from
+// the same auth-token-configuration race submitVgdCreateTrip already works
+// around — useTripHistorySync's `claims` gate can be satisfied from
+// persisted Redux state slightly before the HTTP client actually has a
+// bearer token configured) must reject, not silently masquerade as "no
+// history": the caller only gets one attempt per app session, so a
+// swallowed transient failure here previously meant trip history could
+// never load for that entire session, no matter how long the user stayed
+// logged in.
 const TRIP_HISTORY_SYNC_PAGE_SIZE = 100;
 
 export const syncTripHistoryFromBackend = createAsyncThunk(
   'trips/syncHistory',
-  async (params: { vehicleId: string; driverId: string }) => {
+  async (params: { vehicleId: string; driverId: string }, { rejectWithValue }) => {
     try {
       const [tripsRes, rewardsRes] = await Promise.all([
         vgdApi.listTrips(params.vehicleId, 0, TRIP_HISTORY_SYNC_PAGE_SIZE),
@@ -313,13 +321,9 @@ export const syncTripHistoryFromBackend = createAsyncThunk(
         vgdSummaries: tripsRes.data.trips,
         rewardEntries: rewardsRes.entries,
       };
-    } catch {
-      return {
-        vehicleId: params.vehicleId,
-        driverId: params.driverId,
-        vgdSummaries: [],
-        rewardEntries: [],
-      };
+    } catch (err: unknown) {
+      const e = err as { status?: number };
+      return rejectWithValue({ status: e.status });
     }
   },
 );
