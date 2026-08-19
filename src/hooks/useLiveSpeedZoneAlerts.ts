@@ -7,7 +7,7 @@ import { subscribeGpsFix } from '../services/gpsSpeedBus';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
 import { buildCumulativeRouteDistances, distanceAlongRoute } from '../utils/turnByTurnLogic';
 import {
-  nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, type SpeedZoneComplianceWatch,
+  nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, currentSpanIndex, type SpeedZoneComplianceWatch,
 } from '../utils/speedZoneAlertLogic';
 import { fetchSpeedLimitAheadRoute, type LatLng, type SpeedLimitSpan } from '../services/here/hereRoutingClient';
 import { formatSpeed, generateId } from '../utils/helpers';
@@ -50,6 +50,16 @@ export function useLiveSpeedZoneAlerts(): void {
     let referenceSpans: SpeedLimitSpan[] | null = null;
     let cumulativeRouteDistances: number[] = [];
     let lastAnnouncedSpanStartMeters: number | null = null;
+    // Persists across refetches, unlike lastAnnouncedSpanStartMeters (which
+    // is only meaningful relative to whichever reference route is currently
+    // active). Refetching every ~1.2km/30s while still inside the same
+    // real-world zone was re-triggering the announcement every time, since a
+    // brand new reference route's span offsets never equal the old route's —
+    // real-drive feedback: the same zone announced "at least 15 times" at a
+    // merging T-junction. Carrying the actual limit value forward lets a
+    // fresh reference route recognize "this is the zone I already announced"
+    // even though its offsets are unrelated to the previous route's.
+    let lastAnnouncedSpeedLimitMps: number | null = null;
     let complianceWatch: SpeedZoneComplianceWatch | null = null;
     let lastMatchedIndex: number | null = null;
     let lastFetchAt = 0;
@@ -66,9 +76,18 @@ export function useLiveSpeedZoneAlerts(): void {
           referenceCoords = route.coordinates;
           referenceSpans = route.speedLimitSpans;
           cumulativeRouteDistances = buildCumulativeRouteDistances(route.coordinates);
-          lastAnnouncedSpanStartMeters = null;
           lastMatchedIndex = null;
           distanceAlongReference = 0;
+          // The fetch origin is (by construction) the driver's current
+          // position, i.e. distance 0 along this new reference — if that
+          // position's span carries the same limit already announced under
+          // the old reference, mark it pre-announced here too instead of
+          // treating it as a fresh zone.
+          const originSpanIndex = currentSpanIndex(referenceSpans, 0);
+          const originSpan = originSpanIndex >= 0 ? referenceSpans[originSpanIndex] : null;
+          lastAnnouncedSpanStartMeters = originSpan?.speedLimitMps === lastAnnouncedSpeedLimitMps
+            ? originSpan.distanceFromStartMeters
+            : null;
         }
       } catch {
         // Best-effort — just try again once the next qualifying fix arrives.
@@ -99,6 +118,7 @@ export function useLiveSpeedZoneAlerts(): void {
       const announcement = nextSpeedZoneToAnnounce(referenceSpans, distanceTraveledMeters, lastAnnouncedSpanStartMeters);
       if (announcement) {
         lastAnnouncedSpanStartMeters = announcement.distanceFromStartMeters;
+        lastAnnouncedSpeedLimitMps = announcement.speedLimitMps;
         const limitLabel = formatSpeed(announcement.speedLimitMps * 3.6, isImperialRef.current);
         speakRef.current(
           announcement.isApproaching
