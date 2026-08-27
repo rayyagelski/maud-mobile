@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useAppSelector } from '../hooks/useAppSelector';
@@ -65,5 +66,19 @@ export function useSyncEngine() {
       }
     });
     return unsubscribe;
+  }, [flush]);
+
+  // A queued item (e.g. a createTrip that failed while Doze-throttled
+  // network access in the background) previously only retried on a genuine
+  // NetInfo connectivity *transition* — if the connection technically never
+  // dropped (just got deprioritized while backgrounded), nothing ever
+  // re-triggered a flush, so trips could sit unsent indefinitely even after
+  // the user reopened the app. Foregrounding is a much more reliable signal
+  // that it's worth trying again right now.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') flush();
+    });
+    return () => subscription.remove();
   }, [flush]);
 }

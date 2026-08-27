@@ -75,16 +75,6 @@ const PLANNED_ORIGIN_MAX_DRIFT_M = 300;
 // permission was revoked mid-drive, or the OS background-killed just the
 // location updates while the JS process stayed alive).
 const STALE_TRIP_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 min
-// How often the stillness watchdog re-checks stillSinceRef while tracking.
-// STILL_MS itself only used to be evaluated inside the onLocation callback —
-// i.e. only when a new GPS fix actually arrived. If the phone loses signal
-// entirely (walked indoors, underground parking) no more fixes ever arrive,
-// so that check never re-ran and the trip stayed "recording" for however
-// long it took signal to return — up to 15 real minutes in one case, wrecking
-// the trip's average-speed figure. This interval re-checks stillSinceRef's
-// age independent of whether any new fix has arrived, so the 2-minute
-// auto-end is a real wall-clock guarantee, not just "2 minutes of fixes".
-const STILL_CHECK_INTERVAL_MS = 15 * 1000; // 15 sec
 // A qualifying auto-start point captured while waiting on the BT gate (see
 // pendingBluetoothStartRef below) is dropped after this long without BT
 // actually connecting — real-world BT reconnection to a car head unit can
@@ -221,8 +211,20 @@ export function useTripAutoDetection() {
   }, [dispatch]);
 
   // Stillness watchdog: mirrors the STILL_MS check inside handleLocation
-  // below, but runs on a real wall-clock interval instead of only being
-  // evaluated when a new GPS fix arrives — see STILL_CHECK_INTERVAL_MS.
+  // below, but runs independent of a new GPS fix arriving — see
+  // heartbeatInterval in the .ready() config below.
+  //
+  // A plain JS setInterval used to drive this, but real-drive feedback
+  // ("recording in process" banner stuck for 20 minutes after BT
+  // disconnected in a covered garage, only clearing once the screen was
+  // touched) showed that doesn't actually fire reliably once Android has
+  // backgrounded/throttled the JS thread — nothing was left to wake it up
+  // again, since BT had already disconnected and no more GPS fixes were
+  // arriving either. BackgroundGeolocation's onHeartbeat is backed by the
+  // plugin's own native scheduler (same foreground-service machinery that
+  // already keeps onLocation delivering in the background), so it keeps
+  // firing in exactly the scenario the JS timer couldn't — see
+  // heartbeatInterval in the .ready() config below.
   useEffect(() => {
     const checkStillness = () => {
       if (!isTrackingRef.current || stillSinceRef.current === null) return;
@@ -230,8 +232,8 @@ export function useTripAutoDetection() {
       endTripDueToStillness();
     };
 
-    const interval = setInterval(checkStillness, STILL_CHECK_INTERVAL_MS);
-    return () => clearInterval(interval);
+    const subscription = BackgroundGeolocation.onHeartbeat(checkStillness);
+    return () => subscription.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
@@ -456,6 +458,13 @@ export function useTripAutoDetection() {
         // full app restart brings a JS listener back — see index.js and the
         // queue-drain below for the other half of this.
         enableHeadless: true,
+        // Drives the onHeartbeat-based stillness watchdog above — native
+        // scheduler, not a JS timer, so it keeps firing even once Android
+        // has throttled the JS thread in the background. 60s is Android's
+        // own enforced minimum for this value; the watchdog's own STILL_MS
+        // (2 min) threshold is unaffected, this only controls how often
+        // it's checked.
+        heartbeatInterval: 60,
         notification: {
           title: 'MAUD Connect',
           text: 'Tracking your trip',

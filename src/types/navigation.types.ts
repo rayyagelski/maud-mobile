@@ -37,7 +37,7 @@ export type MainStackParamList = {
   Expenses: undefined;
   AddExpense: { vehicleId: string };
   ServiceHistory: undefined;
-  Invoice: { serviceId: string };
+  Invoice: { serviceId: string; vehicleId: string };
   Odometer: undefined;
   RoutePlanner: undefined;
   TripSummary: { tripId: string };

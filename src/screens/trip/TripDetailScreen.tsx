@@ -170,13 +170,18 @@ export default function TripDetailScreen() {
     isProcessing: vgdProcessing,
   } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
   const vgdAnalytics = vgdDetails?.analytics;
-  const visibleVgdEvents = vgdEvents.filter(e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end');
+  // point is filtered defensively here — legacy VGD trip data (this read
+  // path only started actually returning data recently) can carry events
+  // with a missing/malformed point.
+  const visibleVgdEvents = vgdEvents.filter(
+    e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end' && e.point,
+  );
 
   // A `source: 'vgd'` trip (backfilled from the backend, see
   // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
   // trip_end events, same as MyTripScreen.tsx.
-  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point.gps;
-  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point.gps;
+  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point?.gps;
+  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point?.gps;
   const start = trip?.route[0]
     ?? (vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined);
   const end = trip?.route[trip.route.length - 1]

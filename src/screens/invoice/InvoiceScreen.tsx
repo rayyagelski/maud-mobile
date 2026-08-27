@@ -44,8 +44,7 @@ export default function InvoiceScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const route = useRoute<InvoiceRouteProp>();
   const dispatch = useAppDispatch();
-  const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
-  const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+  const vehicleId = route.params.vehicleId;
   const { selectedRecord, error } = useAppSelector(s => s.serviceRecords);
   // selectedRecord is shared store-wide state that isn't reset between
   // invoices — without this guard, opening invoice B right after invoice A

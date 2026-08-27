@@ -11,15 +11,19 @@ import { useNavigation } from '@react-navigation/native';
 import LocationOffIcon from '../../components/common/LocationOffIcon';
 import SettingsGearIcon from '../../components/common/SettingsGearIcon';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { setLocationOnboardingComplete } from '../../store/slices/settingsSlice';
 
 export default function TurnOnLocationScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const dispatch = useAppDispatch();
 
   function handleOpenSettings() {
     Linking.openSettings();
   }
 
   function handleContinue() {
+    dispatch(setLocationOnboardingComplete(true));
     navigation.replace('MainTabs');
   }
 

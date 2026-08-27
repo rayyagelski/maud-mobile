@@ -15,6 +15,7 @@ export interface ServiceRecord {
   invoiceNumber: string | null;
   customerId: string | null;
   totalCost: number;
+  currencyCode: string;
   completedWorks: CompletedWork[];
   nextDueDate: string | null; // YYYY-MM-DD
   mileageIn: number | null;

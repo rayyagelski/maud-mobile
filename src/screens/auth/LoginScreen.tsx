@@ -23,8 +23,10 @@ export default function LoginScreen() {
   const navigation = useNavigation<AuthNavigationProp>();
   const { isLoading, error } = useAppSelector(s => s.auth);
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // const [email, setEmail] = useState(__DEV__ ? 'elias@holamicasa.com' : '');
+  // const [password, setPassword] = useState(__DEV__ ? 'Ghajon305!!!' : '');
+  const [email, setEmail] = useState(__DEV__ ? 'mhheiss@earthlink.net' : '');
+  const [password, setPassword] = useState(__DEV__ ? '%0107Mh55%' : '');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});

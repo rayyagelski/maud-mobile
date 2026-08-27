@@ -9,8 +9,10 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { CalendarIcon, ChevronIcon } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchServiceRecords } from '../../store/slices/serviceRecordSlice';
 import { vehiclesApi } from '../../api';
+import { kmToMiles } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -80,11 +82,15 @@ export default function ServiceHistoryScreen() {
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { records } = useAppSelector(s => s.serviceRecords);
   const vehicleId = (selectedVehicle ?? vehicles[0])?.id;
+  const isImperial = useIsImperialUnits();
 
   const [conditionOpen, setConditionOpen] = useState(true);
   const [alertsOpen, setAlertsOpen] = useState(true);
   const [pastOpen, setPastOpen] = useState(true);
+  // Always canonical km, matching the backend/VGD schema — converted to
+  // miles only at the display edge below, for imperial-locale customers.
   const [odometer, setOdometer] = useState<number | null>(null);
+  const displayOdometer = odometer != null && isImperial ? kmToMiles(odometer) : odometer;
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -141,9 +147,11 @@ export default function ServiceHistoryScreen() {
             ) : (
               <Text style={styles.infoText}>No upcoming service scheduled.</Text>
             )}
-            {odometer !== null && (
+            {displayOdometer !== null && (
               <Text style={styles.currentKm}>
-                Currently at <Text style={styles.currentKmBold}>{Math.round(odometer).toLocaleString()} km</Text>
+                Currently at <Text style={styles.currentKmBold}>
+                  {Math.round(displayOdometer).toLocaleString()} {isImperial ? 'miles' : 'km'}
+                </Text>
               </Text>
             )}
           </View>
@@ -213,7 +221,7 @@ export default function ServiceHistoryScreen() {
               <TouchableOpacity
                 key={record.id}
                 style={[styles.pastRow, i < sortedRecords.length - 1 && styles.rowBorder]}
-                onPress={() => navigation.navigate('Invoice', { serviceId: String(record.id) })}
+                onPress={() => navigation.navigate('Invoice', { serviceId: String(record.id), vehicleId: String(vehicleId) })}
                 activeOpacity={0.7}
               >
                 <View style={styles.pastInfo}>
@@ -222,7 +230,7 @@ export default function ServiceHistoryScreen() {
                   </Text>
                   <Text style={styles.pastShop}>{record.shop.name}</Text>
                 </View>
-                <Text style={styles.pastCost}>{currencySymbol('EUR')}{record.totalCost.toFixed(2)}</Text>
+                <Text style={styles.pastCost}>{currencySymbol(record.currencyCode)}{record.totalCost.toFixed(2)}</Text>
                 <Text style={styles.pastArrow}>›</Text>
               </TouchableOpacity>
             ))}

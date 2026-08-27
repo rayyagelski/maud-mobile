@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Platform,
   Alert,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -13,10 +14,25 @@ import { request, check, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import BackgroundGeolocation from 'react-native-background-geolocation';
 import LocationPinIcon from '../../components/common/LocationPinIcon';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { setLocationOnboardingComplete } from '../../store/slices/settingsSlice';
 
 export default function LocationPermissionScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
+  const dispatch = useAppDispatch();
   const [isRequesting, setIsRequesting] = useState(false);
+
+  // Android needs a beat to hand focus back to this Activity after the OS
+  // permission dialog dismisses — an Alert.alert() fired in that same tick
+  // can silently fail to render, leaving nothing for the user to tap and
+  // the awaiting promise (and isRequesting) stuck forever.
+  function waitForActivityFocus() {
+    return new Promise<void>((resolve) => {
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(resolve, 350);
+      });
+    });
+  }
 
   // Background location must be requested as a separate, later step on both
   // platforms — the OS won't grant it alongside the initial foreground
@@ -28,6 +44,8 @@ export default function LocationPermissionScreen() {
     const permission = Platform.OS === 'ios'
       ? PERMISSIONS.IOS.LOCATION_ALWAYS
       : PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
+
+    await waitForActivityFocus();
 
     await new Promise<void>((resolve) => {
       Alert.alert(
@@ -59,6 +77,8 @@ export default function LocationPermissionScreen() {
       const alreadyExempt = await BackgroundGeolocation.deviceSettings.isIgnoringBatteryOptimizations();
       if (alreadyExempt) return;
 
+      await waitForActivityFocus();
+
       await new Promise<void>((resolve) => {
         Alert.alert(
           'Keep Trip Tracking Running',
@@ -83,6 +103,8 @@ export default function LocationPermissionScreen() {
       // Check first — if location services are off the OS returns UNAVAILABLE
       const current = await check(permission);
       if (current === RESULTS.UNAVAILABLE) {
+        // Not done yet — TurnOnLocationScreen marks onboarding complete once
+        // the user actually proceeds from there.
         navigation.replace('TurnOnLocation');
         return;
       }
@@ -90,7 +112,7 @@ export default function LocationPermissionScreen() {
       const result = await request(permission);
 
       if (result === RESULTS.BLOCKED) {
-        // Permanently denied — send to settings
+        // Permanently denied — send to settings; same as above, not complete yet.
         navigation.replace('TurnOnLocation');
         return;
       }
@@ -103,12 +125,19 @@ export default function LocationPermissionScreen() {
       // Permission request failed — continue to app
     } finally {
       setIsRequesting(false);
-      // Only replace if still on this screen (not already navigated above)
-      try { navigation.replace('MainTabs'); } catch {}
+      // Only replace if still on this screen (not already navigated above —
+      // that replace() throws here, which we rely on to skip marking
+      // onboarding complete: the user is still on TurnOnLocationScreen at
+      // this point, not actually done yet).
+      try {
+        navigation.replace('MainTabs');
+        dispatch(setLocationOnboardingComplete(true));
+      } catch {}
     }
   }
 
   function handleSkip() {
+    dispatch(setLocationOnboardingComplete(true));
     navigation.replace('MainTabs');
   }
 

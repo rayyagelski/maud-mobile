@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions,
 } from 'react-native';
@@ -12,6 +12,7 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
+import { geocodeAddress, type LatLng } from '../../services/here/hereRoutingClient';
 import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
 } from '../../utils/helpers';
@@ -20,13 +21,6 @@ import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navig
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MAP_HEIGHT = Dimensions.get('window').height * 0.46;
-
-const FALLBACK_MAP_REGION = {
-  latitude: 25.276987,
-  longitude: 55.296249,
-  latitudeDelta: 0.5,
-  longitudeDelta: 0.5,
-};
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -83,7 +77,10 @@ export default function MyTripScreen() {
   // looked identical to "will never resolve" (real-drive feedback).
   const vgdAddressPending = vgdEnabled && (vgdLoading || vgdProcessing);
   // Over-speed-limit markers on the route, from VGD's server-side detection.
-  const speedLimitEvents = vgdEvents.filter(e => e.indicator === 'speed_limit');
+  // point.gps is filtered defensively here — legacy VGD trip data (this
+  // read path only started actually returning data recently) can carry
+  // events with a missing/malformed point.
+  const speedLimitEvents = vgdEvents.filter(e => e.indicator === 'speed_limit' && e.point?.gps);
   // Phone-usage markers — device-local only (useHarshEventTracker's AppState
   // backgrounding proxy, see MIN_PHONE_USAGE_EVENT_SECONDS), since there's no
   // VGD point parameter for phone usage to round-trip it through the server.
@@ -93,23 +90,64 @@ export default function MyTripScreen() {
   // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
   // trip_end events for waypoint pins, so a restored trip still shows A/B
   // markers even without a driven-path polyline.
-  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point.gps;
-  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point.gps;
-  const start = routeCoords[0]
-    ?? (vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined);
-  const end = routeCoords[routeCoords.length - 1]
-    ?? (vgdEndPoint ? { latitude: vgdEndPoint.lat, longitude: vgdEndPoint.lon } : undefined);
+  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point?.gps;
+  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point?.gps;
+  const eventStart = vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined;
+  const eventEnd = vgdEndPoint ? { latitude: vgdEndPoint.lat, longitude: vgdEndPoint.lon } : undefined;
+
+  // Last resort for older trips whose stored VGD events predate reliable
+  // point data (no route, no trip_start/trip_end coordinates either) —
+  // geocode VGD's resolved address strings so restored trips still get A/B
+  // pins instead of no map at all. Never used when routeCoords or the VGD
+  // events already have real coordinates, only when both are empty.
+  const [geocodedStart, setGeocodedStart] = useState<LatLng | null>(null);
+  const [geocodedEnd, setGeocodedEnd] = useState<LatLng | null>(null);
+  const needsStartGeocode = routeCoords.length === 0 && !eventStart && Boolean(vgdAnalytics?.startAddress);
+  const needsEndGeocode = routeCoords.length === 0 && !eventEnd && Boolean(vgdAnalytics?.endAddress);
+
+  useEffect(() => {
+    if (!needsStartGeocode || !vgdAnalytics?.startAddress) return undefined;
+    let cancelled = false;
+    geocodeAddress(vgdAnalytics.startAddress).then((coords) => {
+      if (!cancelled && coords) setGeocodedStart(coords);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [needsStartGeocode, vgdAnalytics?.startAddress]);
+
+  useEffect(() => {
+    if (!needsEndGeocode || !vgdAnalytics?.endAddress) return undefined;
+    let cancelled = false;
+    geocodeAddress(vgdAnalytics.endAddress).then((coords) => {
+      if (!cancelled && coords) setGeocodedEnd(coords);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [needsEndGeocode, vgdAnalytics?.endAddress]);
+
+  const start = routeCoords[0] ?? eventStart ?? geocodedStart ?? undefined;
+  const end = routeCoords[routeCoords.length - 1] ?? eventEnd ?? geocodedEnd ?? undefined;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
 
       {/* ── Map section ── */}
       <View style={styles.mapContainer}>
+        {!start ? (
+          // No route, no VGD trip_start/trip_end coordinates, and either no
+          // resolved address to geocode yet or geocoding hasn't returned —
+          // showing a map centered on some hardcoded fallback region here
+          // would put an unrelated trip on a random city with no indication
+          // it's not real, so skip the map entirely instead.
+          <View style={styles.mapPlaceholder}>
+            <Text style={styles.mapPlaceholderText}>
+              {needsStartGeocode || needsEndGeocode ? 'Locating trip on map…' : 'Map preview unavailable for this trip'}
+            </Text>
+          </View>
+        ) : (
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           provider={PROVIDER_GOOGLE}
-          initialRegion={start ? { ...start, latitudeDelta: 0.2, longitudeDelta: 0.2 } : FALLBACK_MAP_REGION}
+          initialRegion={{ ...start, latitudeDelta: 0.2, longitudeDelta: 0.2 }}
           onMapReady={() => {
             setMapReady(true);
             if (routeCoords.length > 1) {
@@ -167,6 +205,7 @@ export default function MyTripScreen() {
             </Marker>
           ))}
         </MapView>
+        )}
 
         {/* Floating back button */}
         <SafeAreaView edges={['top']} style={styles.mapOverlay} pointerEvents="box-none">
@@ -263,6 +302,8 @@ const styles = StyleSheet.create({
 
   // Map
   mapContainer: { height: MAP_HEIGHT, backgroundColor: '#E8F0E8' },
+  mapPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  mapPlaceholderText: { fontSize: 14, color: '#888', textAlign: 'center' },
   mapOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
   backBtn: {
     marginHorizontal: 16, marginTop: 8,

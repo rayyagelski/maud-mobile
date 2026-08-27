@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import BackgroundGeolocation from 'react-native-background-geolocation';
@@ -63,7 +63,7 @@ export default function SettingsScreen() {
       </SafeAreaView>
       <View style={styles.divider} />
 
-      <View style={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>VOICE</Text>
         <View style={styles.card}>
           <SettingRow
@@ -103,7 +103,7 @@ export default function SettingsScreen() {
             </View>
           </>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

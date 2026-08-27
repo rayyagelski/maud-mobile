@@ -39,7 +39,7 @@ function timeframeDays(label: string): number {
 }
 
 function currencySymbol(code: string): string {
-  return { EUR: '€', USD: '$', GBP: '£' }[code] ?? code;
+  return {  USD: '$', EUR: '€',GBP: '£' }[code] ?? code;
 }
 
 function buildWeeklyBuckets(expenses: Expense[], days: number): number[] {
