@@ -8,6 +8,7 @@ interface HereWeatherResponse {
       skyDesc?: string;
       rainFall?: number;
       precipitation6H?: number;
+      temperature?: string;
     }>;
   }>;
 }
@@ -51,6 +52,59 @@ export async function isRainingAt(location: LatLng): Promise<boolean> {
   return (observation.rainFall ?? 0) > 0
     || mentionsRain(observation.description)
     || mentionsRain(observation.skyDesc);
+}
+
+// Same `observation` product as isRainingAt() — HERE reports ambient
+// temperature in Celsius as a numeric string on the nearest station.
+export async function getTemperatureAt(location: LatLng): Promise<number | null> {
+  const params = new URLSearchParams({
+    products: 'observation',
+    location: `${location.latitude},${location.longitude}`,
+    apiKey: HERE_API_KEY,
+  });
+
+  const response = await fetch(`https://weather.hereapi.com/v3/report?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`HERE weather request failed (${response.status})`);
+  }
+
+  const data: HereWeatherResponse = await response.json();
+  const observation = data.places[0]?.observations[0];
+  if (!observation?.temperature) return null;
+
+  const parsed = parseFloat(observation.temperature);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export interface WeatherConditions {
+  temperatureC: number | null;
+  description: string | null;
+}
+
+// Combines getTemperatureAt()/isRainingAt()'s two separate observation
+// fetches into one call for callers (e.g. destination-weather display) that
+// want both temperature and a human-readable condition together.
+export async function getConditionsAt(location: LatLng): Promise<WeatherConditions | null> {
+  const params = new URLSearchParams({
+    products: 'observation',
+    location: `${location.latitude},${location.longitude}`,
+    apiKey: HERE_API_KEY,
+  });
+
+  const response = await fetch(`https://weather.hereapi.com/v3/report?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`HERE weather request failed (${response.status})`);
+  }
+
+  const data: HereWeatherResponse = await response.json();
+  const observation = data.places[0]?.observations[0];
+  if (!observation) return null;
+
+  const parsed = observation.temperature ? parseFloat(observation.temperature) : NaN;
+  return {
+    temperatureC: Number.isFinite(parsed) ? parsed : null,
+    description: observation.description ?? observation.skyDesc ?? null,
+  };
 }
 
 export interface WeatherAlert {

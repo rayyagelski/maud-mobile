@@ -3,10 +3,20 @@ import { tripsApi, vehiclesApi, vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from '../../
 import type { SubmitTripRewardParams } from '../../api/endpoints/trips';
 import { generateId, generateUuidV4, haversineDistanceKm, MIN_GPS_SEGMENT_KM } from '../../utils/helpers';
 import { getHarshEventCounters } from '../../services/harshEventCounters';
-import { FUEL_BASELINE_MULTIPLIER } from '../../utils/constants';
+import {
+  FUEL_BASELINE_MULTIPLIER,
+  SHORT_TRIP_THRESHOLD_KM,
+  SHORT_TRIP_CONSUMPTION_MULTIPLIER,
+  EV_MILD_WEATHER_MULTIPLIER,
+  EV_SEVERE_WEATHER_MULTIPLIER,
+  EV_MILD_TEMP_LOW_C,
+  EV_MILD_TEMP_HIGH_C,
+  EV_SEVERE_TEMP_LOW_C,
+  EV_SEVERE_TEMP_HIGH_C,
+} from '../../utils/constants';
 import { enqueueSyncItem } from './syncQueueSlice';
 import { updateVehicleOdometer } from './vehicleSlice';
-import { isRainingAt } from '../../services/weather/weatherClient';
+import { isRainingAt, getTemperatureAt } from '../../services/weather/weatherClient';
 import {
   mapDriverRoleToVgd,
   mapTripTypeToVgdPurpose,
@@ -276,11 +286,56 @@ async function buildContext(trip: Trip): Promise<TripContext> {
   };
 }
 
-function buildEnergy(vehicle: Vehicle | null | undefined, distanceKm: number): TripEnergy | undefined {
+// Classifies ambient temperature into the EV energy-draw bands agreed with
+// the user: a "normal" band around room temperature, a "mild" band either
+// side of it (light HVAC/battery-conditioning use), and "severe" heat/cold
+// beyond that (heavy HVAC/battery-conditioning use). null (weather unknown)
+// is treated as "normal" — fail-soft, same convention as isRain elsewhere in
+// this pipeline.
+function evWeatherSeverity(tempCelsius: number | null): 'normal' | 'mild' | 'severe' {
+  if (tempCelsius === null) return 'normal';
+  if (tempCelsius < EV_SEVERE_TEMP_LOW_C || tempCelsius > EV_SEVERE_TEMP_HIGH_C) return 'severe';
+  if (tempCelsius <= EV_MILD_TEMP_LOW_C || tempCelsius >= EV_MILD_TEMP_HIGH_C) return 'mild';
+  return 'normal';
+}
+
+// `flatRate` (distance x the vehicle's average consumption spec) is also
+// what `baseline` is derived from — it stays the fixed "regular" reference
+// throughout. Only `used` (actual estimated consumption for this specific
+// trip) is bumped for conditions that genuinely burn more fuel/energy per km
+// than that average spec assumes (ICE cold-start on short trips, EV
+// HVAC/battery-conditioning draw in mild/severe ambient temperatures) — this
+// correctly suppresses the "saved" figure (baseline - used, see
+// EnergyCalculator on the backend) on trips where those conditions actually
+// applied, rather than inflating both numbers together and always showing
+// the same flat savings regardless of real-world conditions.
+async function buildEnergy(
+  vehicle: Vehicle | null | undefined,
+  distanceKm: number,
+  location: GpsPoint | undefined,
+): Promise<TripEnergy | undefined> {
   if (!vehicle?.fuelType || !vehicle.estimatedConsumption) return undefined;
   const isElectric = vehicle.fuelType === 'electric';
-  const used = (distanceKm / 100) * vehicle.estimatedConsumption;
-  const baseline = used * FUEL_BASELINE_MULTIPLIER;
+  const flatRate = (distanceKm / 100) * vehicle.estimatedConsumption;
+  const baseline = flatRate * FUEL_BASELINE_MULTIPLIER;
+
+  let used = flatRate;
+  if (isElectric) {
+    let tempCelsius: number | null = null;
+    if (location) {
+      try {
+        tempCelsius = await getTemperatureAt(location);
+      } catch {
+        tempCelsius = null;
+      }
+    }
+    const severity = evWeatherSeverity(tempCelsius);
+    if (severity === 'severe') used *= EV_SEVERE_WEATHER_MULTIPLIER;
+    else if (severity === 'mild') used *= EV_MILD_WEATHER_MULTIPLIER;
+  } else if (distanceKm < SHORT_TRIP_THRESHOLD_KM) {
+    used *= SHORT_TRIP_CONSUMPTION_MULTIPLIER;
+  }
+
   return {
     fuelType: vehicle.fuelType,
     ...(isElectric
@@ -372,7 +427,7 @@ export const endTrip = createAsyncThunk(
     const context = await buildContext(trip);
     const counters = getHarshEventCounters();
     const vehicle = state.vehicles.vehicles.find(v => v.id === trip.vehicleId) ?? state.vehicles.selectedVehicle;
-    const energy = buildEnergy(vehicle, distanceKm);
+    const energy = await buildEnergy(vehicle, distanceKm, trip.route[0]);
 
     const completedTrip: Trip = { ...trip, endTime, status: 'completed', context, eventCounters: counters };
 

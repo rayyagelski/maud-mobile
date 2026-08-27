@@ -30,6 +30,8 @@ import {
 import {
   formatDistance, formatDuration, litersToGallons, gramsToLbs, estimateFuelCo2Grams,
 } from '../../utils/helpers';
+import { getConditionsAt, type WeatherConditions } from '../../services/weather/weatherClient';
+import { CloudIcon } from '../../components/icons';
 
 type RouteRecommendation = RouteRecommendationResult;
 
@@ -103,6 +105,7 @@ export default function RoutePlannerScreen() {
   const { selectedDriver } = useAppSelector(s => s.drivers);
   const { activeTrip, isTracking, pendingStart } = useAppSelector(s => s.trips);
   const { rerouteSuggestion } = useAppSelector(s => s.traffic);
+  const { defaultTripType } = useAppSelector(s => s.settings);
 
   // If the user arms a start here then navigates away before the car ever
   // actually moves, the arm must not survive the screen — otherwise it sits
@@ -117,12 +120,6 @@ export default function RoutePlannerScreen() {
       dispatch(clearPendingStart());
     }
   }, [dispatch]);
-
-  // Every trip-start path in the app previously hardcoded 'private' with no
-  // way to change it — TripHistoryScreen already has a Business filter, but
-  // it could never match anything. Default stays private per explicit
-  // real-drive feedback (Private = default), user can switch before starting.
-  const [tripPurpose, setTripPurpose] = useState<'private' | 'business'>('private');
 
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
@@ -139,7 +136,9 @@ export default function RoutePlannerScreen() {
   const [routeRecommendation, setRouteRecommendation] = useState<RouteRecommendation | null>(null);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
+  const [destinationWeather, setDestinationWeather] = useState<WeatherConditions | null>(null);
   const { speak } = useVoicePlayback();
+  const spokenRecommendationRef = useRef<RouteRecommendation | null>(null);
 
   // Draggable bottom sheet — panelHeight is animated on the UI thread via
   // Reanimated (unlike RN core's Animated, this supports animating `height`
@@ -211,6 +210,22 @@ export default function RoutePlannerScreen() {
       .catch(() => { if (!cancelled) setFuelPrice(null); });
     return () => { cancelled = true; };
   }, [fuelPriceVehicleId]);
+
+  // Destination weather — fail-soft like every other auxiliary lookup on this
+  // screen (fuel price, AI recommendation): a failed fetch just leaves the
+  // weather card unrendered, never blocks route planning.
+  const destination = route ? route.coordinates[route.coordinates.length - 1] : null;
+  useEffect(() => {
+    if (!destination) {
+      setDestinationWeather(null);
+      return;
+    }
+    let cancelled = false;
+    getConditionsAt(destination)
+      .then((conditions) => { if (!cancelled) setDestinationWeather(conditions); })
+      .catch(() => { if (!cancelled) setDestinationWeather(null); });
+    return () => { cancelled = true; };
+  }, [destination?.latitude, destination?.longitude]);
 
   // As-you-type address suggestions, debounced and biased near the current
   // location — only fires once there's enough text to search meaningfully.
@@ -351,6 +366,27 @@ export default function RoutePlannerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routes, fuelPrice]);
 
+  // Speaks a new AI recommendation once as soon as it appears, same as
+  // useTrafficMonitor auto-speaking traffic delays — previously this only
+  // spoke on a manual mic tap.
+  useEffect(() => {
+    if (routeRecommendation && spokenRecommendationRef.current !== routeRecommendation) {
+      spokenRecommendationRef.current = routeRecommendation;
+      speak(routeRecommendation.message);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeRecommendation]);
+
+  function handleAcceptRecommendation() {
+    if (!routeRecommendation) return;
+    setSelectedRouteIndex(routeRecommendation.recommendedIndex);
+    setRouteRecommendation(null);
+  }
+
+  function handleCancelRecommendation() {
+    setRouteRecommendation(null);
+  }
+
   async function handleStartEndTrip() {
     if (isTracking && activeTrip) {
       setIsEndingTrip(true);
@@ -379,7 +415,7 @@ export default function RoutePlannerScreen() {
     dispatch(armPendingStart({
       vehicleId,
       driverId: selectedDriver?.id ?? String(claims.userId),
-      tripType: tripPurpose,
+      tripType: defaultTripType,
       transportMode: 'car',
       armedAt: Date.now(),
       // Carries the selected route into Redux so voice turn-by-turn guidance
@@ -597,17 +633,21 @@ export default function RoutePlannerScreen() {
 
         {/* AI recommendation across route alternatives */}
         {routeRecommendation && (
-          <TouchableOpacity
-            style={styles.recommendationCard}
-            activeOpacity={0.85}
-            onPress={() => setSelectedRouteIndex(routeRecommendation.recommendedIndex)}
-          >
+          <View style={styles.recommendationCard}>
             <View style={styles.recommendationHeader}>
               <SparkleIcon color={TEAL} size={16} />
               <Text style={styles.recommendationLabel}>AI RECOMMENDATION</Text>
             </View>
             <Text style={styles.recommendationText}>{routeRecommendation.message}</Text>
-          </TouchableOpacity>
+            <View style={styles.trafficActions}>
+              <TouchableOpacity style={styles.trafficDismissBtn} activeOpacity={0.8} onPress={handleCancelRecommendation}>
+                <Text style={styles.trafficDismissText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.acceptRecommendationBtn} activeOpacity={0.8} onPress={handleAcceptRecommendation}>
+                <Text style={styles.trafficRerouteText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {/* Trip info rows */}
@@ -655,22 +695,22 @@ export default function RoutePlannerScreen() {
           value={tripCostLabel}
         />
 
-        {/* Trip purpose — only changeable before a trip is armed/tracking;
-            once started (manually or auto-detected) it's fixed for that trip. */}
-        {!isTracking && !pendingStart && (
-          <View style={styles.purposeRow}>
-            {(['private', 'business'] as const).map(purpose => (
-              <TouchableOpacity
-                key={purpose}
-                style={[styles.purposePill, tripPurpose === purpose && styles.purposePillActive]}
-                onPress={() => setTripPurpose(purpose)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.purposePillText, tripPurpose === purpose && styles.purposePillTextActive]}>
-                  {purpose === 'private' ? 'Private' : 'Business'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        {/* Destination weather — fail-soft, renders nothing if unavailable */}
+        {destinationWeather && (destinationWeather.temperatureC != null || destinationWeather.description) && (
+          <View style={styles.weatherSection}>
+            <Text style={styles.sectionTitle}>WEATHER AT DESTINATION</Text>
+            <View style={styles.weatherRow}>
+              <CloudIcon color="#5B9BD5" size={22} />
+              <Text style={styles.weatherText}>
+                {destinationWeather.temperatureC != null
+                  ? (isImperial
+                    ? `${Math.round(destinationWeather.temperatureC * 9 / 5 + 32)}°F`
+                    : `${Math.round(destinationWeather.temperatureC)}°C`)
+                  : null}
+                {destinationWeather.temperatureC != null && destinationWeather.description ? ' · ' : null}
+                {destinationWeather.description}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -839,6 +879,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', backgroundColor: '#F47920',
   },
   trafficRerouteText: { fontSize: 13, fontWeight: '700', color: 'white' },
+  acceptRecommendationBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 18,
+    alignItems: 'center', backgroundColor: TEAL,
+  },
 
   // Address suggestions
   suggestionsCard: {
@@ -886,6 +930,16 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: '#888888' },
   statValue: { fontSize: 24, fontWeight: '800', color: '#1A1A1A' },
 
+  // Destination weather
+  weatherSection: { marginTop: 18 },
+  weatherRow: {
+    flexDirection: 'row', alignItems: 'center', columnGap: 10,
+    backgroundColor: 'white', borderRadius: 14, padding: 14, marginTop: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  },
+  weatherText: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+
   // Start Trip button
   startBtn: {
     backgroundColor: TEAL, borderRadius: 28,
@@ -900,15 +954,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#E53935',
     shadowColor: '#E53935',
   },
-
-  purposeRow: {
-    flexDirection: 'row', columnGap: 8, marginTop: 18,
-  },
-  purposePill: {
-    flex: 1, paddingVertical: 12, borderRadius: 20,
-    alignItems: 'center', backgroundColor: '#F0F0F0',
-  },
-  purposePillActive: { backgroundColor: TEAL },
-  purposePillText: { fontSize: 14, fontWeight: '600', color: '#666666' },
-  purposePillTextActive: { color: 'white' },
 });

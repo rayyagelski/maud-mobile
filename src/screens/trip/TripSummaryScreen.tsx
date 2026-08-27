@@ -12,9 +12,11 @@ import {
   PersonIcon, ThumbsUpIcon, ThumbsDownIcon, SparkleIcon, MicIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
+import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import { tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 
@@ -25,6 +27,12 @@ function ratingLabel(score: number): string {
   if (score >= 75) return 'Great';
   if (score >= 60) return 'Good';
   return 'Needs Work';
+}
+
+function scoreBarColor(score: number): string {
+  if (score <= 35) return '#E74C3C';
+  if (score <= 75) return '#F5A623';
+  return '#27AE60';
 }
 
 // ── Score arc ──────────────────────────────────────────────────────────────
@@ -97,6 +105,7 @@ const SUMMARY_TITLES: Record<string, string> = {
 export default function TripSummaryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const route = useRoute<TripSummaryRouteProp>();
+  const dispatch = useAppDispatch();
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
 
   const trip = useAppSelector(s => s.trips.trips.find(t => t.id === route.params.tripId));
@@ -104,6 +113,7 @@ export default function TripSummaryScreen() {
   const isImperial = useIsImperialUnits();
   const { speak, isSpeaking } = useVoicePlayback();
   const autoPlayTripSummaryVoice = useAppSelector(s => s.settings.autoPlayTripSummaryVoice);
+  const monthlyReward = useAppSelector(s => s.rewards.currentMonth);
 
   // Auto-play the recap once per screen visit when the user has opted in
   // (Settings > Voice > "Auto-play trip summary") — otherwise it stays
@@ -114,6 +124,12 @@ export default function TripSummaryScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlayTripSummaryVoice, reward?.voicePayload?.script]);
+
+  // Needed for the "points away from next reward status" card below —
+  // monthly progress isn't part of the trip_reward response itself.
+  useEffect(() => {
+    dispatch(fetchRewardOverview());
+  }, [dispatch]);
 
   const distanceKm = trip ? tripDistanceKm(trip) : reward?.distanceKm ?? 0;
   const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
@@ -141,6 +157,20 @@ export default function TripSummaryScreen() {
       ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
       : '—';
   const co2Label = reward?.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—';
+
+  // Monthly reward-status progress (Bronze/Silver/Gold) — distinct from the
+  // per-trip score points shown in "HOW YOU SCORED" above. monthlyPoints/
+  // thresholds/progress all come from the same monthly aggregate the Rewards
+  // tab shows, not from this single trip's reward result.
+  const nextStatus = monthlyReward?.progress.nextStatus ?? null;
+  const nextStatusLabel = nextStatus ? nextStatus.charAt(0).toUpperCase() + nextStatus.slice(1) : null;
+  const nextStatusThreshold =
+    nextStatus && nextStatus !== 'none' ? monthlyReward?.thresholds[nextStatus] ?? null : null;
+  const monthlyPoints = monthlyReward?.monthlyPoints ?? 0;
+  const pointsToNext = monthlyReward?.progress.pointsToNext ?? null;
+  const statusProgressPct = nextStatusThreshold
+    ? Math.min(100, (monthlyPoints / nextStatusThreshold) * 100)
+    : 100;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -252,15 +282,15 @@ export default function TripSummaryScreen() {
             <View style={styles.card}>
               <ScoreRow icon={<LeafIcon color="#888" size={16} />}
                 label="Eco Driving" rating={ratingLabel(reward.ecoScore)}
-                score={Math.round(reward.ecoScore)} barColor="#F5A623" />
+                score={Math.round(reward.ecoScore)} barColor={scoreBarColor(reward.ecoScore)} />
               <View style={styles.rowDiv} />
               <ScoreRow icon={<PhoneIcon color="#888" size={16} />}
                 label="Phone Usage" rating={ratingLabel(reward.phoneSubscore)}
-                score={Math.round(reward.phoneSubscore)} barColor={TEAL} />
+                score={Math.round(reward.phoneSubscore)} barColor={scoreBarColor(reward.phoneSubscore)} />
               <View style={styles.rowDiv} />
               <ScoreRow icon={<FlashIcon color="#888" size={16} />}
                 label="Overall Safety" rating={ratingLabel(reward.safetyScore)}
-                score={Math.round(reward.safetyScore)} barColor={TEAL} />
+                score={Math.round(reward.safetyScore)} barColor={scoreBarColor(reward.safetyScore)} />
             </View>
 
             {/* Rewards card */}
@@ -271,9 +301,19 @@ export default function TripSummaryScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rewardsTitle}>
-                    Nice Work! You earned {reward.tripPointsEarned} point{reward.tripPointsEarned === 1 ? '' : 's'}
+                    Nice Work! You earned {reward.tripPointsEarned} reward point{reward.tripPointsEarned === 1 ? '' : 's'}
                   </Text>
-                  <Text style={styles.rewardsSub}>Keep it up to unlock bigger rewards over time.</Text>
+                  <Text style={styles.rewardsSub}>
+                    {nextStatusLabel && pointsToNext != null
+                      ? `You are ${pointsToNext} point${pointsToNext === 1 ? '' : 's'} away from ${nextStatusLabel} status.`
+                      : "You've reached the top reward status — great driving!"}
+                  </Text>
+                  <View style={styles.statusBarBg}>
+                    <View style={[styles.statusBarFill, { width: `${statusProgressPct}%` as any }]} />
+                  </View>
+                  {nextStatusThreshold != null && (
+                    <Text style={styles.statusBarLabel}>{monthlyPoints}/{nextStatusThreshold} pts</Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -429,6 +469,9 @@ const styles = StyleSheet.create({
   },
   rewardsTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
   rewardsSub: { fontSize: 12, color: '#888888', lineHeight: 18 },
+  statusBarBg: { height: 7, backgroundColor: '#EEEEEE', borderRadius: 4, overflow: 'hidden', marginTop: 10 },
+  statusBarFill: { height: '100%', borderRadius: 4, backgroundColor: '#27AE60' },
+  statusBarLabel: { fontSize: 11, color: '#888888', marginTop: 4, textAlign: 'right' },
 
   // Feedback
   feedTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },

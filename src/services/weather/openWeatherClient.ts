@@ -4,6 +4,7 @@ import type { LatLng } from '../here/hereRoutingClient';
 
 interface OpenWeatherResponse {
   weather: Array<{ main: string }>;
+  main: { temp: number };
 }
 
 // OpenWeatherMap "Current Weather Data" endpoint, queried once at trip end
@@ -29,4 +30,47 @@ export async function isRainingAt(location: LatLng): Promise<boolean> {
 
   const data: OpenWeatherResponse = await response.json();
   return data.weather.some(w => RAIN_CONDITIONS.has(w.main));
+}
+
+export async function getTemperatureAt(location: LatLng): Promise<number | null> {
+  const params = new URLSearchParams({
+    lat: String(location.latitude),
+    lon: String(location.longitude),
+    appid: OPENWEATHER_API_KEY,
+    units: 'metric',
+  });
+
+  const response = await fetch(`${OPENWEATHER_BASE_URL}/weather?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`OpenWeatherMap request failed (${response.status})`);
+  }
+
+  const data: OpenWeatherResponse = await response.json();
+  return Number.isFinite(data.main?.temp) ? data.main.temp : null;
+}
+
+export interface WeatherConditions {
+  temperatureC: number | null;
+  description: string | null;
+}
+
+// Same single-fetch combination as hereWeatherClient's getConditionsAt().
+export async function getConditionsAt(location: LatLng): Promise<WeatherConditions | null> {
+  const params = new URLSearchParams({
+    lat: String(location.latitude),
+    lon: String(location.longitude),
+    appid: OPENWEATHER_API_KEY,
+    units: 'metric',
+  });
+
+  const response = await fetch(`${OPENWEATHER_BASE_URL}/weather?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`OpenWeatherMap request failed (${response.status})`);
+  }
+
+  const data: OpenWeatherResponse = await response.json();
+  return {
+    temperatureC: Number.isFinite(data.main?.temp) ? data.main.temp : null,
+    description: data.weather[0]?.main ?? null,
+  };
 }

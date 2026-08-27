@@ -19,12 +19,16 @@ export interface SettingsState {
   // reset on logout) since this only reflects whether the OS-permission-flow
   // UI has been shown once, not per-session state.
   locationOnboardingComplete: boolean;
+  // Default trip purpose applied to every new trip — previously hardcoded
+  // per-trip in RoutePlannerScreen with no way to change it globally.
+  defaultTripType: 'private' | 'business';
 }
 
 const initialState: SettingsState = {
   autoPlayTripSummaryVoice: false,
   driveFocusReminderEnabled: true,
   locationOnboardingComplete: false,
+  defaultTripType: 'private',
 };
 
 const settingsSlice = createSlice({
@@ -40,6 +44,9 @@ const settingsSlice = createSlice({
     setLocationOnboardingComplete(state, action: PayloadAction<boolean>) {
       state.locationOnboardingComplete = action.payload;
     },
+    setDefaultTripType(state, action: PayloadAction<'private' | 'business'>) {
+      state.defaultTripType = action.payload;
+    },
   },
 });
 
@@ -47,5 +54,6 @@ export const {
   setAutoPlayTripSummaryVoice,
   setDriveFocusReminderEnabled,
   setLocationOnboardingComplete,
+  setDefaultTripType,
 } = settingsSlice.actions;
 export default settingsSlice.reducer;

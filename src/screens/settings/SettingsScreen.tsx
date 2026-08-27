@@ -6,7 +6,7 @@ import BackgroundGeolocation from 'react-native-background-geolocation';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
-import { setAutoPlayTripSummaryVoice, setDriveFocusReminderEnabled } from '../../store/slices/settingsSlice';
+import { setAutoPlayTripSummaryVoice, setDriveFocusReminderEnabled, setDefaultTripType } from '../../store/slices/settingsSlice';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 const TEAL = '#3ABFBF';
@@ -48,7 +48,7 @@ async function handleOpenPowerSettings() {
 export default function SettingsScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const dispatch = useAppDispatch();
-  const { autoPlayTripSummaryVoice, driveFocusReminderEnabled } = useAppSelector(s => s.settings);
+  const { autoPlayTripSummaryVoice, driveFocusReminderEnabled, defaultTripType } = useAppSelector(s => s.settings);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -82,6 +82,26 @@ export default function SettingsScreen() {
             value={driveFocusReminderEnabled}
             onValueChange={(v) => dispatch(setDriveFocusReminderEnabled(v))}
           />
+        </View>
+
+        <Text style={[styles.sectionTitle, { marginTop: 20 }]}>TRIP</Text>
+        <View style={styles.card}>
+          <Text style={styles.rowTitle}>Default trip type</Text>
+          <Text style={styles.rowSubtitle}>Applied to every new trip unless changed for that trip</Text>
+          <View style={styles.purposeRow}>
+            {(['private', 'business'] as const).map(purpose => (
+              <TouchableOpacity
+                key={purpose}
+                style={[styles.purposePill, defaultTripType === purpose && styles.purposePillActive]}
+                onPress={() => dispatch(setDefaultTripType(purpose))}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.purposePillText, defaultTripType === purpose && styles.purposePillTextActive]}>
+                  {purpose === 'private' ? 'Private' : 'Business'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {Platform.OS === 'android' && (
@@ -130,4 +150,13 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   rowSubtitle: { fontSize: 12, color: '#888', marginTop: 3, lineHeight: 16 },
+
+  purposeRow: { flexDirection: 'row', columnGap: 8, marginTop: 12 },
+  purposePill: {
+    flex: 1, paddingVertical: 12, borderRadius: 20,
+    alignItems: 'center', backgroundColor: '#F0F0F0',
+  },
+  purposePillActive: { backgroundColor: TEAL },
+  purposePillText: { fontSize: 14, fontWeight: '600', color: '#666666' },
+  purposePillTextActive: { color: 'white' },
 });

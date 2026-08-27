@@ -38,6 +38,18 @@ export const SPEEDING_FLAT_THRESHOLD_KMH = 120;
 // Phase 1 approximation for the optional trip "energy" block: no live
 // consumption telemetry, so baseline = actual x this multiplier.
 export const FUEL_BASELINE_MULTIPLIER = 1.1;
+// Cold-start inefficiency: below this distance, an ICE/hybrid engine never
+// reaches optimal operating temperature, burning noticeably more fuel per km.
+export const SHORT_TRIP_THRESHOLD_KM = 4.828; // 3 miles
+export const SHORT_TRIP_CONSUMPTION_MULTIPLIER = 1.35;
+// EV energy draw (HVAC + battery thermal conditioning) rises outside a mild
+// ambient-temperature band, and rises further in genuinely severe heat/cold.
+export const EV_MILD_WEATHER_MULTIPLIER = 1.10;
+export const EV_SEVERE_WEATHER_MULTIPLIER = 1.60;
+export const EV_MILD_TEMP_LOW_C = 10;
+export const EV_MILD_TEMP_HIGH_C = 25;
+export const EV_SEVERE_TEMP_LOW_C = 0;
+export const EV_SEVERE_TEMP_HIGH_C = 32;
 export const TRIP_AUTO_STOP_INACTIVITY_MS = 5 * 60 * 1000; // 5 min
 // 1 mph — the single "is this vehicle actually moving" gate shared by both
 // auto-detect and manual (Route Planner) trip start. Below this, no
