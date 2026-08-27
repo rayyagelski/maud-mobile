@@ -3,24 +3,37 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MedalIcon, LeafIcon, GaugeIcon,
   ShareIcon, GiftIcon,
   StarOutlineIcon, SparkleIcon, ShieldIcon,
+  FuelIcon, CoffeeIcon, EVChargingIcon, GroceryIcon, RestaurantIcon,
+  ArrowRightIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { useCurrencySymbol } from '../../hooks/useCurrencySymbol';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 
 const TEAL = '#3ABFBF';
 const BRONZE_COLOR = '#E07820';
-const SILVER_COLOR = '#9E9E9E';
+const SILVER_COLOR = '#A8B0B8';
 const GOLD_COLOR = '#F9A825';
 const GREY = '#9E9E9E';
+const EARNED_GREEN = '#27AE60';
+const ACCRUED_BLUE = '#3B82F6';
+const REDEEMED_RED = '#E74C3C';
+
+const TIER_CIRCLE_SIZE = 52;
+const TIER_GRADIENTS: Record<'bronze' | 'silver' | 'gold', [string, string]> = {
+  bronze: ['#F3B27E', '#D9691E'],
+  silver: ['#F4F6F8', '#AEB6BD'],
+  gold: ['#FFE18C', '#F9A825'],
+};
 
 const STATUS_ORDER: RewardStatus[] = ['none', 'bronze', 'silver', 'gold'];
 const STATUS_META: Record<RewardStatus, { label: string; color: string }> = {
@@ -96,7 +109,7 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
 
 function TierProgress({ summary }: { summary: MonthlyRewardSummary }) {
   const currentIdx = STATUS_ORDER.indexOf(summary.status);
-  const tiers: { label: string; pts: string; color: string; status: RewardStatus }[] = [
+  const tiers: { label: string; pts: string; color: string; status: 'bronze' | 'silver' | 'gold' }[] = [
     { label: 'Bronze', pts: `${summary.thresholds.bronze}+ pts/month`, color: BRONZE_COLOR, status: 'bronze' },
     { label: 'Silver', pts: `${summary.thresholds.silver}+ pts/month`, color: SILVER_COLOR, status: 'silver' },
     { label: 'Gold', pts: `${summary.thresholds.gold}+ pts/month`, color: GOLD_COLOR, status: 'gold' },
@@ -108,14 +121,23 @@ function TierProgress({ summary }: { summary: MonthlyRewardSummary }) {
         {tiers.map((t, i) => {
           const tierIdx = STATUS_ORDER.indexOf(t.status);
           const isCurrent = tierIdx === currentIdx;
-          const isDone = tierIdx < currentIdx;
           return (
             <React.Fragment key={t.label}>
-              <View style={[
-                styles.tierCircle,
-                { backgroundColor: isDone || isCurrent ? t.color : '#D9DEE3' },
-                isCurrent && styles.tierCircleCurrent,
-              ]}>
+              <View style={[styles.tierCircle, isCurrent && styles.tierCircleCurrent]}>
+                <Svg width={TIER_CIRCLE_SIZE} height={TIER_CIRCLE_SIZE} style={StyleSheet.absoluteFill}>
+                  <Defs>
+                    <RadialGradient id={`tierGrad-${t.status}`} cx="35%" cy="30%" r="75%">
+                      <Stop offset="0" stopColor={TIER_GRADIENTS[t.status][0]} />
+                      <Stop offset="1" stopColor={TIER_GRADIENTS[t.status][1]} />
+                    </RadialGradient>
+                  </Defs>
+                  <Circle
+                    cx={TIER_CIRCLE_SIZE / 2}
+                    cy={TIER_CIRCLE_SIZE / 2}
+                    r={TIER_CIRCLE_SIZE / 2}
+                    fill={`url(#tierGrad-${t.status})`}
+                  />
+                </Svg>
                 <MedalIcon color="white" size={22} />
               </View>
               {i < tiers.length - 1 && (
@@ -173,19 +195,47 @@ function ScoreItem({ Icon, score, label, iconBg }: {
 
 // ── Rewards summary row ────────────────────────────────────────────────────
 
-function SummaryRow({ icon, label, pts, dollars, ptsColor, highlighted }: {
-  icon: React.ReactNode; label: string; pts: string; dollars: string;
-  ptsColor: string; highlighted?: boolean;
+function SummaryRow({ icon, iconBg, label, dollars, dollarColor, highlighted, divider }: {
+  icon: React.ReactNode; iconBg: string; label: string; dollars: string;
+  dollarColor: string; highlighted?: boolean; divider?: boolean;
 }) {
   return (
-    <View style={[styles.summaryRow, highlighted && styles.summaryRowHighlighted]}>
-      {icon}
+    <View style={[styles.summaryRow, divider && styles.rowDivider, highlighted && styles.summaryRowHighlighted]}>
+      <View style={[styles.summaryIconCircle, { backgroundColor: iconBg }]}>
+        {icon}
+      </View>
       <Text style={[styles.summaryLabel, highlighted && { color: TEAL, fontWeight: '700' }]}>
         {label}
       </Text>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.summaryPts, { color: ptsColor }]}>{pts}</Text>
-        <Text style={[styles.summaryDollar, { color: ptsColor }]}>= {dollars}</Text>
+      <Text style={[styles.summaryDollar, { color: dollarColor }]}>{dollars}</Text>
+    </View>
+  );
+}
+
+// ── Redeem points ──────────────────────────────────────────────────────────
+
+const REDEEM_ITEMS: {
+  key: string; Icon: React.ComponentType<{ color?: string; size?: number }>;
+  color: string; value: string; label: string; pts: string;
+}[] = [
+  { key: 'fuel', Icon: FuelIcon, color: '#27AE60', value: '$10.00', label: 'FUEL CARD', pts: '500 PTS' },
+  { key: 'coffee', Icon: CoffeeIcon, color: '#B4703A', value: '20% OFF', label: 'COFFEE', pts: '300 PTS' },
+  { key: 'ev', Icon: EVChargingIcon, color: ACCRUED_BLUE, value: '20% OFF', label: 'EV CHARGING', pts: '400 PTS' },
+  { key: 'grocery', Icon: GroceryIcon, color: GOLD_COLOR, value: '10% OFF', label: 'GROCERY', pts: '350 PTS' },
+  { key: 'restaurant', Icon: RestaurantIcon, color: REDEEMED_RED, value: '15% OFF', label: 'RESTAURANT', pts: '450 PTS' },
+];
+
+function RedeemCard({ Icon, color, value, label, pts }: {
+  Icon: React.ComponentType<{ color?: string; size?: number }>;
+  color: string; value: string; label: string; pts: string;
+}) {
+  return (
+    <View style={styles.redeemCard}>
+      <Icon color={color} size={26} />
+      <Text style={styles.redeemValue}>{value}</Text>
+      <Text style={styles.redeemLabel}>{label}</Text>
+      <View style={styles.redeemPtsPill}>
+        <Text style={styles.redeemPtsText}>{pts}</Text>
       </View>
     </View>
   );
@@ -198,6 +248,7 @@ export default function RewardsScreen() {
   const dispatch = useAppDispatch();
   const { currentMonth, previousMonth } = useAppSelector(s => s.rewards);
   const trips = useAppSelector(s => s.trips.trips);
+  const currencySymbol = useCurrencySymbol();
 
   useEffect(() => {
     dispatch(fetchRewardOverview());
@@ -250,7 +301,10 @@ export default function RewardsScreen() {
     ? Math.round(((currentMonth.monthlyRewardScore - previousMonth.monthlyRewardScore) / previousMonth.monthlyRewardScore) * 100)
     : null;
   const tips = buildTips(currentMonth);
-  const cashRewardLabel = `€${(currentMonth.cashRewardCents / 100).toFixed(2)}`;
+  const earnedLabel = `${currencySymbol}${(currentMonth.cashRewardCents / 100).toFixed(2)}`;
+  const accruedLabel = `${currencySymbol}${((currentMonth.lifetimeEarnedCents ?? 0) / 100).toFixed(2)}`;
+  const redeemedLabel = `${currencySymbol}${((currentMonth.lifetimeRedeemedCents ?? 0) / 100).toFixed(2)}`;
+  const balanceLabel = `${currencySymbol}${((currentMonth.balanceCents ?? 0) / 100).toFixed(2)}`;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
@@ -295,7 +349,7 @@ export default function RewardsScreen() {
         </View>
 
         {/* ── Path to next tier ── */}
-        <SectionHeader icon={<MedalIcon color={TEAL} size={18} />} title="YOUR TIER PROGRESS" />
+        <SectionHeader icon={<MedalIcon color={TEAL} size={18} />} title="YOUR PATH TO GOLD" />
         <TierProgress summary={currentMonth} />
 
         {/* ── Tips ── */}
@@ -342,16 +396,58 @@ export default function RewardsScreen() {
         </View>
 
         {/* ── Rewards summary ── */}
-        <SectionHeader icon={<GiftIcon color={TEAL} size={18} />} title="REWARDS THIS MONTH" />
+        <SectionHeader icon={<GiftIcon color={TEAL} size={18} />} title="REWARDS SUMMARY" />
         <View style={styles.card}>
           <SummaryRow
-            icon={<StarOutlineIcon color={TEAL} size={20} />}
-            label="Points Earned"
-            pts={`+${currentMonth.monthlyPoints} pts`}
-            dollars={cashRewardLabel}
-            ptsColor={TEAL}
+            icon={<StarOutlineIcon color={EARNED_GREEN} size={20} />}
+            iconBg="#E3F5E9"
+            label="Earned This Month"
+            dollars={earnedLabel}
+            dollarColor={EARNED_GREEN}
+            divider
+          />
+          <SummaryRow
+            icon={<SparkleIcon color={ACCRUED_BLUE} size={20} />}
+            iconBg="#E6EEFE"
+            label="Accrued (Lifetime)"
+            dollars={accruedLabel}
+            dollarColor={ACCRUED_BLUE}
+            divider
+          />
+          <SummaryRow
+            icon={<GiftIcon color={REDEEMED_RED} size={20} />}
+            iconBg="#FBE7E5"
+            label="Redeemed"
+            dollars={redeemedLabel}
+            dollarColor={REDEEMED_RED}
+            divider
+          />
+          <SummaryRow
+            icon={<MedalIcon color="white" size={20} />}
+            iconBg={TEAL}
+            label="Balance"
+            dollars={balanceLabel}
+            dollarColor={TEAL}
             highlighted
           />
+        </View>
+
+        {/* ── Redeem points ── */}
+        <SectionHeader icon={<GiftIcon color={TEAL} size={18} />} title="REDEEM YOUR POINTS" />
+        <View style={[styles.card, styles.redeemCardOuter]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.redeemRow}
+            style={styles.redeemScroll}
+          >
+            {REDEEM_ITEMS.map(item => (
+              <RedeemCard key={item.key} Icon={item.Icon} color={item.color} value={item.value} label={item.label} pts={item.pts} />
+            ))}
+          </ScrollView>
+          <View style={styles.redeemArrowBtn}>
+            <ArrowRightIcon color="white" size={18} />
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -451,11 +547,13 @@ const styles = StyleSheet.create({
   },
   tierCircleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   tierCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: TIER_CIRCLE_SIZE,
+    height: TIER_CIRCLE_SIZE,
+    borderRadius: TIER_CIRCLE_SIZE / 2,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
   },
   tierCircleCurrent: {
     borderWidth: 3,
@@ -503,9 +601,36 @@ const styles = StyleSheet.create({
   scoreLabel: { fontSize: 12, color: '#888', marginTop: 4 },
 
   // ── Summary rows
-  summaryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, columnGap: 10 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, columnGap: 12 },
   summaryRowHighlighted: { backgroundColor: '#EFF9F9', borderRadius: 10, paddingHorizontal: 10, marginHorizontal: -4 },
+  summaryIconCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   summaryLabel: { flex: 1, fontSize: 14, color: '#1A1A1A' },
-  summaryPts: { fontSize: 14, fontWeight: '700' },
-  summaryDollar: { fontSize: 12, marginTop: 2 },
+  summaryDollar: { fontSize: 15, fontWeight: '700' },
+
+  // ── Redeem points
+  redeemCardOuter: { flexDirection: 'row', alignItems: 'center', columnGap: 10, padding: 12 },
+  redeemScroll: { flex: 1 },
+  redeemRow: { flexDirection: 'row', columnGap: 10 },
+  redeemCard: {
+    width: 108,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#EDEDED',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    rowGap: 6,
+  },
+  redeemValue: { fontSize: 15, fontWeight: '800', color: '#1A1A1A' },
+  redeemLabel: { fontSize: 10, fontWeight: '700', color: '#888', letterSpacing: 0.3 },
+  redeemPtsPill: { backgroundColor: '#EAF7F5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginTop: 2 },
+  redeemPtsText: { fontSize: 11, fontWeight: '700', color: TEAL },
+  redeemArrowBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: TEAL,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });

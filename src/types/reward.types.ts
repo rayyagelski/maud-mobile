@@ -14,6 +14,9 @@ export interface MonthlyRewardSummary {
   goldStreakMonths: number;
   streakBonusCents: number;
   totalRewardCents: number;
+  lifetimeEarnedCents: number;
+  lifetimeRedeemedCents: number;
+  balanceCents: number;
   thresholds: { bronze: number; silver: number; gold: number };
   progress: { nextStatus: RewardStatus | null; pointsToNext: number | null };
   phoneBlocksGold: boolean;

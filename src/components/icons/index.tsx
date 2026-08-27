@@ -167,6 +167,14 @@ export function ArrowUpIcon({ color = 'white', size = 24 }: { color?: string; si
   );
 }
 
+export function ArrowRightIcon({ color = 'white', size = 24 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12h14M12 5l7 7-7 7" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 export function MicIcon({ color = '#888', size = 24 }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -283,6 +291,34 @@ export function CoffeeIcon({ color = '#3ABFBF', size = 28 }: { color?: string; s
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function EVChargingIcon({ color = '#3ABFBF', size = 28 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 22V6a2 2 0 012-2h6a2 2 0 012 2v16M5 22h10M5 22H3M15 22h2" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M11 8l-3 5h3l-1 5 4-6h-3l1-4z" fill={color} stroke={color} strokeWidth={0.6} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function GroceryIcon({ color = '#3ABFBF', size = 28 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M3 4h2l2.4 12.2a2 2 0 002 1.8h8.4a2 2 0 002-1.8L21 8H6" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx="9" cy="21" r="1.4" stroke={color} strokeWidth={1.6} />
+      <Circle cx="17" cy="21" r="1.4" stroke={color} strokeWidth={1.6} />
+    </Svg>
+  );
+}
+
+export function RestaurantIcon({ color = '#3ABFBF', size = 28 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 2v8a2 2 0 002 2h0a2 2 0 002-2V2M6 12v10M4 2v6M8 2v6" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M17 2c-2 0-3 2.5-3 5.5S16 12 17 12v10" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
