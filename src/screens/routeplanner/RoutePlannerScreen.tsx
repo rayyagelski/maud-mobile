@@ -55,6 +55,16 @@ const FALLBACK_REGION = {
   longitudeDelta: 0.025,
 };
 
+// Simple warmth qualifier alongside the raw condition description (e.g.
+// "Cloudy/ Warm"), since the weather API only returns a sky condition, not
+// a hot/cold judgement.
+function warmthLabel(temperatureC: number | null): string | null {
+  if (temperatureC == null) return null;
+  if (temperatureC >= 20) return 'Warm';
+  if (temperatureC >= 10) return 'Mild';
+  return 'Cold';
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function TimeBubble({ label, style, accent }: {
@@ -139,6 +149,7 @@ export default function RoutePlannerScreen() {
   const [destinationWeather, setDestinationWeather] = useState<WeatherConditions | null>(null);
   const { speak } = useVoicePlayback();
   const spokenRecommendationRef = useRef<RouteRecommendation | null>(null);
+  const lastRecommendationRef = useRef<RouteRecommendation | null>(null);
 
   // Draggable bottom sheet — panelHeight is animated on the UI thread via
   // Reanimated (unlike RN core's Animated, this supports animating `height`
@@ -294,6 +305,14 @@ export default function RoutePlannerScreen() {
   const isElectric = vehicle?.fuelType === 'electric';
   const distanceKm = route ? route.distanceMeters / 1000 : null;
 
+  // Estimated arrival date/time at the destination, for the weather card
+  // ("Thu 08") — the forecast shown is for whenever the driver actually
+  // gets there, not right now.
+  const arrivalDateLabel = route
+    ? new Date(Date.now() + route.durationSeconds * 1000)
+      .toLocaleDateString(undefined, { weekday: 'short', day: '2-digit' })
+    : '';
+
   // Estimated fuel/energy used for the planned route — same (distance/100) *
   // consumption calc as before, just now unit-aware for display.
   const fuelOrEnergyUsed =
@@ -343,9 +362,13 @@ export default function RoutePlannerScreen() {
   // AI recommendation across all fetched route options — fires once routes
   // and (if available) a fuel price are known. Fail-soft: a failed/declined
   // recommendation just means nothing renders, routes still work normally.
+  // Kept in lastRecommendationRef even after the card is Cancelled/dismissed,
+  // so tapping a route on the map (below) can bring the same AI opinion back
+  // up rather than losing it after a single dismissal.
   useEffect(() => {
     if (routes.length < 2) {
       setRouteRecommendation(null);
+      lastRecommendationRef.current = null;
       return;
     }
     let cancelled = false;
@@ -360,7 +383,11 @@ export default function RoutePlannerScreen() {
       };
     });
     routesApi.getRecommendation(options)
-      .then((result) => { if (!cancelled) setRouteRecommendation(result); })
+      .then((result) => {
+        if (cancelled) return;
+        lastRecommendationRef.current = result;
+        setRouteRecommendation(result);
+      })
       .catch(() => { if (!cancelled) setRouteRecommendation(null); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,10 +408,52 @@ export default function RoutePlannerScreen() {
     if (!routeRecommendation) return;
     setSelectedRouteIndex(routeRecommendation.recommendedIndex);
     setRouteRecommendation(null);
+    // Accepted — nothing left to re-surface on further route taps.
+    lastRecommendationRef.current = null;
   }
 
   function handleCancelRecommendation() {
     setRouteRecommendation(null);
+  }
+
+  // Builds a message specific to the route just tapped vs the AI-recommended
+  // one — reusing the time/cost figures already computed for every route
+  // option rather than re-calling the AI endpoint on every tap.
+  function buildSwitchBackMessage(selectedIndex: number, recommendedIndex: number): string {
+    const target = routes[recommendedIndex];
+    const current = routes[selectedIndex];
+    const timeSavedSeconds = current.durationSeconds - target.durationSeconds;
+    const targetCost = estimateTripCostForDistance(target.distanceMeters / 1000);
+    const currentCost = estimateTripCostForDistance(current.distanceMeters / 1000);
+    const costSaved = targetCost != null && currentCost != null ? currentCost - targetCost : null;
+    const currencyCode = fuelPrice?.currencyCode ?? '';
+
+    const savings: string[] = [];
+    if (timeSavedSeconds > 0) savings.push(formatDuration(timeSavedSeconds));
+    if (costSaved != null && costSaved > 0) savings.push(`${costSaved.toFixed(2)} ${currencyCode}`.trim());
+
+    return savings.length > 0
+      ? `Switching back to the recommended route saves you ${savings.join(' and ')}. Would you like to switch?`
+      : 'The recommended route is still the better overall option. Would you like to switch back?';
+  }
+
+  // Tapping any route on the map brings the AI popup back up — re-announced
+  // and with its content refreshed for the route just tapped — rather than
+  // leaving it hidden after a single dismissal or stuck on stale numbers
+  // from whichever route it was first computed against.
+  function handleSelectRouteOnMap(index: number) {
+    setSelectedRouteIndex(index);
+    const recommendedIndex = lastRecommendationRef.current?.recommendedIndex;
+    if (recommendedIndex == null) return;
+    if (index === recommendedIndex) {
+      // Already on the recommended route — nothing to suggest.
+      setRouteRecommendation(null);
+      return;
+    }
+    const updated = { recommendedIndex, message: buildSwitchBackMessage(index, recommendedIndex) };
+    lastRecommendationRef.current = updated;
+    spokenRecommendationRef.current = null;
+    setRouteRecommendation(updated);
   }
 
   async function handleStartEndTrip() {
@@ -487,7 +556,7 @@ export default function RoutePlannerScreen() {
                 strokeWidth={4}
                 lineCap="round"
                 tappable
-                onPress={() => setSelectedRouteIndex(index)}
+                onPress={() => handleSelectRouteOnMap(index)}
               />
             )
           ))}
@@ -497,6 +566,8 @@ export default function RoutePlannerScreen() {
               strokeColor="#3B8BEB"
               strokeWidth={5}
               lineCap="round"
+              tappable
+              onPress={() => handleSelectRouteOnMap(selectedRouteIndex)}
             />
           )}
           {route && route.coordinates.length > 0 && (
@@ -537,6 +608,27 @@ export default function RoutePlannerScreen() {
             <MicIcon color={routeRecommendation ? TEAL : '#CCCCCC'} size={20} />
           </TouchableOpacity>
         </View>
+
+        {/* AI recommendation across route alternatives — floats over the map,
+            below the nav header, matching the design; re-evaluated/cleared
+            below whenever the selected route changes. */}
+        {routeRecommendation && (
+          <View style={[styles.aiRecommendationOverlay, { top: insets.top + 78 }]}>
+            <View style={styles.recommendationHeader}>
+              <SparkleIcon color={TEAL} size={16} />
+              <Text style={styles.recommendationLabel}>AI RECOMMENDATION</Text>
+            </View>
+            <Text style={styles.recommendationText}>{routeRecommendation.message}</Text>
+            <View style={styles.aiRecommendationActions}>
+              <TouchableOpacity style={styles.aiCancelBtn} activeOpacity={0.8} onPress={handleCancelRecommendation}>
+                <Text style={styles.aiCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.aiAcceptBtn} activeOpacity={0.8} onPress={handleAcceptRecommendation}>
+                <Text style={styles.aiAcceptText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Time bubbles (decorative) */}
         {route && (
@@ -631,25 +723,6 @@ export default function RoutePlannerScreen() {
           </View>
         )}
 
-        {/* AI recommendation across route alternatives */}
-        {routeRecommendation && (
-          <View style={styles.recommendationCard}>
-            <View style={styles.recommendationHeader}>
-              <SparkleIcon color={TEAL} size={16} />
-              <Text style={styles.recommendationLabel}>AI RECOMMENDATION</Text>
-            </View>
-            <Text style={styles.recommendationText}>{routeRecommendation.message}</Text>
-            <View style={styles.trafficActions}>
-              <TouchableOpacity style={styles.trafficDismissBtn} activeOpacity={0.8} onPress={handleCancelRecommendation}>
-                <Text style={styles.trafficDismissText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.acceptRecommendationBtn} activeOpacity={0.8} onPress={handleAcceptRecommendation}>
-                <Text style={styles.trafficRerouteText}>Accept</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
         {/* Trip info rows */}
         <View style={styles.infoSection}>
           <InfoRow
@@ -698,18 +771,28 @@ export default function RoutePlannerScreen() {
         {/* Destination weather — fail-soft, renders nothing if unavailable */}
         {destinationWeather && (destinationWeather.temperatureC != null || destinationWeather.description) && (
           <View style={styles.weatherSection}>
-            <Text style={styles.sectionTitle}>WEATHER AT DESTINATION</Text>
-            <View style={styles.weatherRow}>
-              <CloudIcon color="#5B9BD5" size={22} />
-              <Text style={styles.weatherText}>
-                {destinationWeather.temperatureC != null
-                  ? (isImperial
-                    ? `${Math.round(destinationWeather.temperatureC * 9 / 5 + 32)}°F`
-                    : `${Math.round(destinationWeather.temperatureC)}°C`)
-                  : null}
-                {destinationWeather.temperatureC != null && destinationWeather.description ? ' · ' : null}
-                {destinationWeather.description}
-              </Text>
+            <Text style={styles.sectionTitle}>WEATHER</Text>
+            <View style={styles.weatherCard}>
+              <View style={styles.weatherTopRow}>
+                <Text style={styles.weatherDate}>{arrivalDateLabel}</Text>
+                {destinationWeather.temperatureC != null && (
+                  <Text style={styles.weatherTemp}>
+                    {isImperial
+                      ? Math.round(destinationWeather.temperatureC * 9 / 5 + 32)
+                      : Math.round(destinationWeather.temperatureC)}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.weatherBottomRow}>
+                <Text style={styles.weatherCity} numberOfLines={1}>{destinationQuery || 'Destination'}</Text>
+                <View style={styles.weatherConditionGroup}>
+                  <CloudIcon color="#5B9BD5" size={20} />
+                  <Text style={styles.weatherCondition}>
+                    {[destinationWeather.description, warmthLabel(destinationWeather.temperatureC)]
+                      .filter(Boolean).join('/ ')}
+                  </Text>
+                </View>
+              </View>
             </View>
           </View>
         )}
@@ -850,15 +933,28 @@ const styles = StyleSheet.create({
   routeValue: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', flex: 1 },
   routeInput: { flex: 1, fontSize: 14, color: '#1A1A1A', padding: 0 },
 
-  // AI route recommendation
-  recommendationCard: {
-    backgroundColor: '#E6F9F7', borderRadius: 16,
-    padding: 14, marginBottom: 14,
-    borderWidth: 1, borderColor: '#CCEEEA',
-  },
+  // AI route recommendation — floats over the map (see aiRecommendationOverlay)
   recommendationHeader: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginBottom: 6 },
   recommendationLabel: { fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 0.4 },
   recommendationText: { fontSize: 13, color: '#1A1A1A', lineHeight: 18 },
+  aiRecommendationOverlay: {
+    position: 'absolute', left: 16, right: 16, zIndex: 15,
+    backgroundColor: 'white', borderRadius: 16, padding: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18, shadowRadius: 10, elevation: 8,
+  },
+  aiRecommendationActions: { flexDirection: 'row', columnGap: 10, marginTop: 12 },
+  aiCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 18,
+    alignItems: 'center', backgroundColor: 'white',
+    borderWidth: 1, borderColor: '#E53935',
+  },
+  aiCancelText: { fontSize: 13, fontWeight: '700', color: '#E53935' },
+  aiAcceptBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 18,
+    alignItems: 'center', backgroundColor: TEAL,
+  },
+  aiAcceptText: { fontSize: 13, fontWeight: '700', color: 'white' },
 
   // Live traffic-backup reroute prompt
   trafficCard: {
@@ -879,10 +975,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', backgroundColor: '#F47920',
   },
   trafficRerouteText: { fontSize: 13, fontWeight: '700', color: 'white' },
-  acceptRecommendationBtn: {
-    flex: 1, paddingVertical: 10, borderRadius: 18,
-    alignItems: 'center', backgroundColor: TEAL,
-  },
 
   // Address suggestions
   suggestionsCard: {
@@ -932,13 +1024,21 @@ const styles = StyleSheet.create({
 
   // Destination weather
   weatherSection: { marginTop: 18 },
-  weatherRow: {
-    flexDirection: 'row', alignItems: 'center', columnGap: 10,
-    backgroundColor: 'white', borderRadius: 14, padding: 14, marginTop: 10,
+  weatherCard: {
+    backgroundColor: 'white', borderRadius: 16, padding: 16, marginTop: 10,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
   },
-  weatherText: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  weatherTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  weatherDate: { fontSize: 14, color: '#888888' },
+  weatherTemp: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+  weatherBottomRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 6, columnGap: 10,
+  },
+  weatherCity: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', flexShrink: 1 },
+  weatherConditionGroup: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
+  weatherCondition: { fontSize: 14, color: '#666666' },
 
   // Start Trip button
   startBtn: {
