@@ -22,7 +22,7 @@ import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { endTrip, armPendingStart, clearPendingStart, setPlannedRouteOnActiveTrip } from '../../store/slices/tripSlice';
 import { dismissRerouteSuggestion, clearRerouteSuggestion } from '../../store/slices/trafficSlice';
 import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
-import type { FuelPriceResponse } from '../../types/vehicle.types';
+import type { FuelPriceResponse, OwnershipCostRateResponse } from '../../types/vehicle.types';
 import {
   fetchHereRoutes, geocodeAddress, suggestAddresses,
   type LatLng, type HereRouteResult, type AddressSuggestion,
@@ -146,6 +146,7 @@ export default function RoutePlannerScreen() {
   const [routeRecommendation, setRouteRecommendation] = useState<RouteRecommendation | null>(null);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
+  const [ownershipCostRate, setOwnershipCostRate] = useState<OwnershipCostRateResponse | null>(null);
   const [destinationWeather, setDestinationWeather] = useState<WeatherConditions | null>(null);
   const { speak } = useVoicePlayback();
   const spokenRecommendationRef = useRef<RouteRecommendation | null>(null);
@@ -219,6 +220,21 @@ export default function RoutePlannerScreen() {
     vehiclesApi.getFuelPrice(fuelPriceVehicleId)
       .then((res) => { if (!cancelled) setFuelPrice(res.data); })
       .catch(() => { if (!cancelled) setFuelPrice(null); });
+    return () => { cancelled = true; };
+  }, [fuelPriceVehicleId]);
+
+  // Insurance/Tax/Leasing/Financing, as a per-minute rate — combined with
+  // fuel cost below to make the Trip Cost estimate an actual trip cost
+  // rather than fuel cost alone. Same fail-soft convention as fuelPrice.
+  useEffect(() => {
+    if (!fuelPriceVehicleId) {
+      setOwnershipCostRate(null);
+      return;
+    }
+    let cancelled = false;
+    vehiclesApi.getOwnershipCostRate(fuelPriceVehicleId)
+      .then((res) => { if (!cancelled) setOwnershipCostRate(res.data); })
+      .catch(() => { if (!cancelled) setOwnershipCostRate(null); });
     return () => { cancelled = true; };
   }, [fuelPriceVehicleId]);
 
@@ -320,14 +336,32 @@ export default function RoutePlannerScreen() {
       ? (distanceKm / 100) * vehicle.estimatedConsumption
       : null;
 
-  // Same fuel-cost formula as tripCostAmount below, factored out so it can
-  // be computed per-route (for the AI recommendation, which needs every
+  // Same cost formula as tripCostAmount below, factored out so it can be
+  // computed per-route (for the AI recommendation, which needs every
   // option's cost, not just the selected one) without duplicating the logic.
-  function estimateTripCostForDistance(km: number): number | null {
+  // Combines fuel/energy cost with prorated ownership cost (Insurance/Tax/
+  // Leasing/Financing) and prorated maintenance/repair cost, all operational
+  // costs of the trip — each is independently optional (e.g. a vehicle with
+  // no Insurance/Tax on file still gets a fuel(+maintenance)-only estimate
+  // rather than losing the figure entirely).
+  function estimateFuelCostForDistance(km: number): number | null {
     if (!vehicle?.estimatedConsumption || !fuelPrice) return null;
     const used = (km / 100) * vehicle.estimatedConsumption;
     const price = isElectric ? fuelPrice.electricityPricePerKwh : fuelPrice.fuelPricePerLiter;
     return price != null ? used * price : null;
+  }
+
+  function estimateTripCostForRoute(km: number, durationSeconds: number): number | null {
+    const durationMinutes = durationSeconds / 60;
+    const fuelCost = estimateFuelCostForDistance(km);
+    const ownershipCost = ownershipCostRate?.ownershipCostPerMinute != null
+      ? ownershipCostRate.ownershipCostPerMinute * durationMinutes
+      : null;
+    const maintenanceCost = ownershipCostRate != null
+      ? ownershipCostRate.maintenanceCostPerMinute * durationMinutes
+      : null;
+    if (fuelCost == null && ownershipCost == null && maintenanceCost == null) return null;
+    return (fuelCost ?? 0) + (ownershipCost ?? 0) + (maintenanceCost ?? 0);
   }
   const consumptionLabel = fuelOrEnergyUsed == null
     ? '—'
@@ -348,15 +382,17 @@ export default function RoutePlannerScreen() {
       ? `${gramsToLbs(co2Grams).toFixed(1)} lb`
       : `${(co2Grams / 1000).toFixed(1)} kg`;
 
-  // Trip cost estimate — fuel/energy cost only (distance × consumption ×
-  // price). Deliberately not full parity with the web app's "Driving
-  // Analysis" Total Cost (which also includes insurance/lease/tax/
-  // maintenance) — that data isn't exposed to mobile. Same "omit rather than
-  // fabricate" convention: no label at all until both consumption and a real
-  // price are known.
-  const tripCostAmount = distanceKm != null ? estimateTripCostForDistance(distanceKm) : null;
+  // Trip cost estimate — fuel/energy cost plus prorated ownership cost
+  // (Insurance/Tax/Leasing/Financing), matching TripDetailScreen's
+  // TotalCostCalculator methodology for those two components. Repair/
+  // maintenance is excluded (see estimateTripCostForRoute's doc comment).
+  // Same "omit rather than fabricate" convention: no label at all until at
+  // least one of fuel or ownership cost is known.
+  const tripCostAmount = route && distanceKm != null
+    ? estimateTripCostForRoute(distanceKm, route.durationSeconds)
+    : null;
   const tripCostLabel = tripCostAmount != null
-    ? `${tripCostAmount.toFixed(2)} ${fuelPrice?.currencyCode ?? ''}`.trim()
+    ? `${tripCostAmount.toFixed(2)} ${fuelPrice?.currencyCode ?? ownershipCostRate?.currencyCode ?? ''}`.trim()
     : '—';
 
   // AI recommendation across all fetched route options — fires once routes
@@ -378,8 +414,8 @@ export default function RoutePlannerScreen() {
         index,
         distanceKm: km,
         durationSeconds: r.durationSeconds,
-        cost: estimateTripCostForDistance(km),
-        currencyCode: fuelPrice?.currencyCode ?? null,
+        cost: estimateTripCostForRoute(km, r.durationSeconds),
+        currencyCode: fuelPrice?.currencyCode ?? ownershipCostRate?.currencyCode ?? null,
       };
     });
     routesApi.getRecommendation(options)
@@ -391,7 +427,7 @@ export default function RoutePlannerScreen() {
       .catch(() => { if (!cancelled) setRouteRecommendation(null); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes, fuelPrice]);
+  }, [routes, fuelPrice, ownershipCostRate]);
 
   // Speaks a new AI recommendation once as soon as it appears, same as
   // useTrafficMonitor auto-speaking traffic delays — previously this only
@@ -423,10 +459,10 @@ export default function RoutePlannerScreen() {
     const target = routes[recommendedIndex];
     const current = routes[selectedIndex];
     const timeSavedSeconds = current.durationSeconds - target.durationSeconds;
-    const targetCost = estimateTripCostForDistance(target.distanceMeters / 1000);
-    const currentCost = estimateTripCostForDistance(current.distanceMeters / 1000);
+    const targetCost = estimateTripCostForRoute(target.distanceMeters / 1000, target.durationSeconds);
+    const currentCost = estimateTripCostForRoute(current.distanceMeters / 1000, current.durationSeconds);
     const costSaved = targetCost != null && currentCost != null ? currentCost - targetCost : null;
-    const currencyCode = fuelPrice?.currencyCode ?? '';
+    const currencyCode = fuelPrice?.currencyCode ?? ownershipCostRate?.currencyCode ?? '';
 
     const savings: string[] = [];
     if (timeSavedSeconds > 0) savings.push(formatDuration(timeSavedSeconds));

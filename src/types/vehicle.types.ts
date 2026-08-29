@@ -34,6 +34,20 @@ export interface TripCostResponse {
   currencyCode: string;
 }
 
+// Matches App\Handler\API\Vehicle\GetVehicleOwnershipCostRateHandler's
+// response — Insurance/Tax/Leasing/Financing cost and maintenance/repair
+// cost, each as a per-minute rate rather than a cost over an elapsed window,
+// since a not-yet-driven route has no start/end time. Multiply either by an
+// estimated trip duration (minutes) to get that route's estimated cost.
+// maintenanceCostPerMinute is a spread of the vehicle's trailing-12-months
+// service/repair invoices, so unlike ownershipCostPerMinute it's always a
+// real number (0 when there's no service history), never null.
+export interface OwnershipCostRateResponse {
+  ownershipCostPerMinute: number | null;
+  maintenanceCostPerMinute: number;
+  currencyCode: string;
+}
+
 export interface VehicleState {
   vehicles: Vehicle[];
   selectedVehicle: Vehicle | null;

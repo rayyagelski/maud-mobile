@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Callout, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, DollarIcon,
+  MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, FuelIcon, CloudIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
@@ -61,7 +61,6 @@ export default function MyTripScreen() {
   const distanceKm = trip ? tripDistanceKm(trip) : 0;
   const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
   const avgSpeedKmh = trip ? tripAvgSpeedKmh(trip) : 0;
-  const reward = trip?.reward;
 
   // Same VGD read-back TripDetailScreen uses, so this screen's waypoint
   // labels can show resolved addresses instead of always falling back to
@@ -85,6 +84,21 @@ export default function MyTripScreen() {
   // backgrounding proxy, see MIN_PHONE_USAGE_EVENT_SECONDS), since there's no
   // VGD point parameter for phone usage to round-trip it through the server.
   const phoneUsageEvents = trip?.events.filter(e => e.type === 'phone_usage') ?? [];
+
+  const fmtTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const fmtSpeedMs = (metersPerSecond: number) => formatSpeed(metersPerSecond * 3.6, isImperial);
+
+  // Total CO2 for the trip (VGD's co2emissions is g/km — scale by distance).
+  const co2ImpactKg = vgdAnalytics?.co2emissions != null && distanceKm > 0
+    ? (vgdAnalytics.co2emissions * distanceKm) / 1000
+    : null;
+  // Whichever consumption figure VGD actually has for this vehicle (mobile
+  // only sends one of fuel/battery point parameters per vehicle type).
+  const consumptionPct = vgdAnalytics?.fuelConsumption ?? vgdAnalytics?.electricityConsumption ?? null;
+  const endWeather = vgdAnalytics?.endWeather;
+  const weatherCondition = endWeather
+    ? [endWeather.skyInfo, endWeather.temperatureDesc].filter(Boolean).join('/ ')
+    : null;
 
   // A `source: 'vgd'` trip (backfilled from the backend, see
   // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
@@ -192,6 +206,21 @@ export default function MyTripScreen() {
               tracksViewChanges={false}
             >
               <View style={styles.eventDot} />
+              <Callout tooltip={false}>
+                <View style={styles.calloutBox}>
+                  <Text style={styles.calloutTitle}>Over Speed Limit</Text>
+                  {event.point.parameters.speedLimit != null && (
+                    <Text style={styles.calloutRow}>Speed Limit: {fmtSpeedMs(event.point.parameters.speedLimit)}</Text>
+                  )}
+                  {event.point.parameters.speed != null && (
+                    <Text style={styles.calloutRow}>Your Speed: {fmtSpeedMs(event.point.parameters.speed)}</Text>
+                  )}
+                  <Text style={styles.calloutMeta}>
+                    {fmtTime(event.point.time * 1000)}
+                    {event.point.parameters.address ? `, ${event.point.parameters.address}` : ''}
+                  </Text>
+                </View>
+              </Callout>
             </Marker>
           ))}
           {mapReady && phoneUsageEvents.map((event, i) => (
@@ -202,6 +231,16 @@ export default function MyTripScreen() {
               tracksViewChanges={false}
             >
               <View style={styles.eventDot} />
+              <Callout tooltip={false}>
+                <View style={styles.calloutBox}>
+                  <Text style={styles.calloutTitle}>Phone Usage</Text>
+                  <Text style={styles.calloutMeta}>
+                    {event.value != null
+                      ? `${fmtTime(event.timestamp - event.value * 1000)} - ${fmtTime(event.timestamp)}`
+                      : fmtTime(event.timestamp)}
+                  </Text>
+                </View>
+              </Callout>
             </Marker>
           ))}
         </MapView>
@@ -216,7 +255,7 @@ export default function MyTripScreen() {
       </View>
 
       {/* ── Bottom scrollable panel ── */}
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {!trip ? (
           <View style={styles.card}>
@@ -259,30 +298,54 @@ export default function MyTripScreen() {
               <PerfRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} />
             </View>
 
-            {/* Cost & Impact */}
-            {reward && (
+            {/* Cost & Consumption — trip-level VGD figures */}
+            {vgdEnabled && (
               <>
-                <Text style={styles.sectionLabel}>COST & IMPACT</Text>
+                <Text style={styles.sectionLabel}>COST & CONSUMPTION</Text>
                 <View style={styles.costRow}>
                   <View style={styles.costCard}>
                     <View style={styles.costCardHeader}>
                       <LeafIcon color="#999" size={16} />
-                      <Text style={styles.costCardLabel}> CO₂ Avoided</Text>
+                      <Text style={styles.costCardLabel}> CO₂ Emissions</Text>
                     </View>
                     <Text style={styles.costValue}>
-                      {reward.co2AvoidedGrams != null ? `${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
+                      {co2ImpactKg != null ? `${co2ImpactKg.toFixed(1)} kg` : '—'}
                     </Text>
                   </View>
                   <View style={styles.costCard}>
                     <View style={styles.costCardHeader}>
-                      <DollarIcon color="#999" size={16} />
-                      <Text style={styles.costCardLabel}> Money Saved</Text>
+                      <FuelIcon color="#999" size={16} />
+                      <Text style={styles.costCardLabel}> Consumption</Text>
                     </View>
                     <Text style={styles.costValue}>
-                      {reward.moneySavedCents != null && reward.currencyCode
-                        ? `${(reward.moneySavedCents / 100).toFixed(2)} ${reward.currencyCode}`
-                        : '—'}
+                      {consumptionPct != null ? `${consumptionPct.toFixed(1)}%` : '—'}
                     </Text>
+                  </View>
+                </View>
+              </>
+            )}
+
+            {/* Weather at trip end (destination) */}
+            {endWeather && (endWeather.temperature || weatherCondition) && (
+              <>
+                <Text style={styles.sectionLabel}>WEATHER</Text>
+                <View style={styles.weatherCard}>
+                  <View style={styles.weatherTopRow}>
+                    <Text style={styles.weatherDate}>
+                      {trip.endTime ? new Date(trip.endTime).toLocaleDateString() : ''}
+                    </Text>
+                    {endWeather.temperature ? (
+                      <Text style={styles.weatherTemp}>{endWeather.temperature}</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.weatherBottomRow}>
+                    <Text style={styles.weatherCity} numberOfLines={0}>
+                      {vgdAnalytics?.endAddress ?? 'Destination'}
+                    </Text>
+                    <View style={styles.weatherConditionGroup}>
+                      <CloudIcon color="#5B9BD5" size={20} />
+                      {weatherCondition ? <Text style={styles.weatherCondition}>{weatherCondition}</Text> : null}
+                    </View>
                   </View>
                 </View>
               </>
@@ -337,6 +400,7 @@ const styles = StyleSheet.create({
   },
 
   // Bottom scroll
+  scrollContainer: { flex: 1 },
   scroll: { padding: 16, paddingBottom: 36 },
 
   card: {
@@ -370,7 +434,7 @@ const styles = StyleSheet.create({
   // Section label
   sectionLabel: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', letterSpacing: 0.4, marginBottom: 10 },
 
-  // Cost & Impact
+  // Cost & Consumption
   costRow: { flexDirection: 'row', columnGap: 12, marginBottom: 16 },
   costCard: {
     flex: 1, backgroundColor: 'white', borderRadius: 18, padding: 16,
@@ -380,6 +444,29 @@ const styles = StyleSheet.create({
   costCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   costCardLabel: { fontSize: 12, color: '#888' },
   costValue: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+
+  // Weather (trip end / destination)
+  weatherCard: {
+    backgroundColor: 'white', borderRadius: 18, padding: 16, marginBottom: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+  },
+  weatherTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  weatherDate: { fontSize: 14, color: '#888888' },
+  weatherTemp: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
+  weatherBottomRow: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    marginTop: 6, columnGap: 10,
+  },
+  weatherCity: { flex: 1, fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  weatherConditionGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', columnGap: 6 },
+  weatherCondition: { fontSize: 14, color: '#666666' },
+
+  // Event marker popups (speed limit / phone usage)
+  calloutBox: { minWidth: 180, padding: 4 },
+  calloutTitle: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  calloutRow: { fontSize: 12, color: '#333333', marginBottom: 2 },
+  calloutMeta: { fontSize: 11, color: '#888888', marginTop: 2 },
 
   emptyText: { fontSize: 14, color: '#999', textAlign: 'center', padding: 24 },
 });

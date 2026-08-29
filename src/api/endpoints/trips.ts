@@ -42,6 +42,11 @@ interface TripRewardResponseDto {
   trip_points_earned: number;
   phone_subscore: number;
   distance_km: number;
+  fuel_type: string | null;
+  fuel_used_liters: number | null;
+  fuel_baseline_liters: number | null;
+  kwh_used: number | null;
+  kwh_baseline: number | null;
   co2_avoided_grams: number | null;
   money_saved_cents: number | null;
   currency_code: string | null;
@@ -104,6 +109,11 @@ function fromResponseDto(dto: TripRewardResponseDto): TripRewardResult {
     tripPointsEarned: dto.trip_points_earned,
     phoneSubscore: dto.phone_subscore,
     distanceKm: dto.distance_km,
+    fuelType: dto.fuel_type,
+    fuelUsedLiters: dto.fuel_used_liters,
+    fuelBaselineLiters: dto.fuel_baseline_liters,
+    kwhUsed: dto.kwh_used,
+    kwhBaseline: dto.kwh_baseline,
     co2AvoidedGrams: dto.co2_avoided_grams,
     moneySavedCents: dto.money_saved_cents,
     currencyCode: dto.currency_code,
@@ -150,5 +160,32 @@ export const tripsApi = {
       })),
       total: res.data.stats.total,
     };
+  },
+
+  // POST /api/v1/trips/reward/vgd/{tripId} — backfills a real score for a
+  // trip that exists in VGD but was never submitted through submitTripReward
+  // (e.g. recorded by a dongle/older app, or backend-seeded test data). The
+  // backend derives context/events from VGD's own server-side data
+  // (VgdRewardDerivation) and persists it exactly like a normal reward, so
+  // it then shows up via listRewards on the next sync too — this call is
+  // just what triggers that derivation to happen at all. Returns null (not
+  // an error) for the expected "not processed yet" case (vgd_analytics
+  // hasn't finished this trip) — same convention as useVgdTripDetails
+  // treating a 404 as pending rather than failed.
+  backfillRewardFromVgd: async (
+    vehicleUuid: string, vgdTripId: string,
+  ): Promise<TripRewardHistoryEntry['reward'] | null> => {
+    try {
+      const res = await client.post<TripRewardResponseDto>(
+        `/trips/reward/vgd/${vgdTripId}`,
+        null,
+        { params: { vehicle_uuid: vehicleUuid } },
+      );
+      return fromResponseDto(res.data);
+    } catch (err: unknown) {
+      const status = (err as { status?: number } | undefined)?.status;
+      if (status === 425) return null;
+      throw err;
+    }
   },
 };

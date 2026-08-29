@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
-import { syncTripHistoryFromBackend } from '../store/slices/tripSlice';
+import { syncTripHistoryFromBackend, backfillVgdTripReward } from '../store/slices/tripSlice';
 
 // Same backoff budget/shape as useVgdTripDetails.ts's RETRY_DELAYS_MS — a
 // failed attempt here is most often the same kind of transient thing that
@@ -28,6 +28,7 @@ export function useTripHistorySync(): void {
   const { claims } = useAppSelector(s => s.auth);
   const { selectedVehicle, vehicles } = useAppSelector(s => s.vehicles);
   const { selectedDriver } = useAppSelector(s => s.drivers);
+  const trips = useAppSelector(s => s.trips.trips);
 
   // 'done' only once a fetch actually succeeds — a rejected attempt (see
   // syncTripHistoryFromBackend's rejectWithValue) retries with backoff
@@ -37,6 +38,10 @@ export function useTripHistorySync(): void {
   // trip history for the whole session under the previous fire-once logic.
   const syncStateRef = useRef<'pending' | 'done'>('pending');
   const retryIndexRef = useRef(0);
+  // Mirrors syncStateRef into render-visible state purely to re-trigger the
+  // reward-backfill effect below once history sync actually completes —
+  // the sync effect itself still gates on the ref, unaffected by this.
+  const [historySynced, setHistorySynced] = useState(false);
 
   useEffect(() => {
     if (syncStateRef.current === 'done' || !claims) return;
@@ -55,6 +60,7 @@ export function useTripHistorySync(): void {
 
       if (syncTripHistoryFromBackend.fulfilled.match(result)) {
         syncStateRef.current = 'done';
+        setHistorySynced(true);
         return;
       }
 
@@ -76,4 +82,27 @@ export function useTripHistorySync(): void {
       if (timer) clearTimeout(timer);
     };
   }, [claims, selectedVehicle, vehicles, selectedDriver, dispatch]);
+
+  // Second pass, once per trip per session: backfill a real score (see
+  // backfillVgdTripReward) for every VGD-restored trip that came back from
+  // the sync above with no `.reward` — a trip that exists in VGD but was
+  // never submitted through the normal reward flow (dongle/older-app trips,
+  // backend-seeded test data). attemptedRef prevents re-dispatching for a
+  // trip whose backfill genuinely came back empty (425 "not processed yet")
+  // — that trip just stays unscored for the rest of this session, a later
+  // session's sync retries it fresh instead of hammering the endpoint.
+  const attemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!historySynced) return;
+    trips
+      .filter(t => t.vgdTripId && t.vgdTripCreated && !t.reward && !attemptedRef.current.has(t.id))
+      .forEach((t) => {
+        attemptedRef.current.add(t.id);
+        dispatch(backfillVgdTripReward({
+          localTripId: t.id,
+          vehicleUuid: t.vehicleId,
+          vgdTripId: t.vgdTripId as string,
+        }));
+      });
+  }, [historySynced, trips, dispatch]);
 }

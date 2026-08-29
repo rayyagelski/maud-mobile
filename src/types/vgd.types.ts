@@ -17,6 +17,12 @@ export interface VgdPointParameters {
   fuel?: number;
   batteryState?: number;
   battery?: number;
+  // HERE `functionalClass` (1-5), only populated server-side by
+  // vgd_analytics' HERE route-matching enrichment on `road_type`/`speed_limit`
+  // indicator events — see App\Service\VehicleGeneratedData\Renderer\
+  // RoadTypeRenderer.php for the backend's own 1-5 -> description mapping.
+  roadType?: number | null;
+  speedLimit?: number | null; // m/s
 }
 
 export interface VgdPoint {

@@ -9,6 +9,7 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MountainIcon, HourglassIcon, GaugeIcon,
   LeafIcon, DollarIcon, PinIcon, CloudIcon, WarningTriangleIcon,
+  FlashIcon, StarOutlineIcon, LightbulbIcon, ChevronIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
@@ -139,6 +140,80 @@ const enSt = StyleSheet.create({
   sub: { fontSize: 11, color: '#AAAAAA', marginTop: 3 },
 });
 
+// ── Eco savings (this trip vs. baseline) ────────────────────────────────────
+
+function SavingsStat({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
+  return (
+    <View style={ecoSt.stat}>
+      {icon}
+      <Text style={ecoSt.statValue}>{value}</Text>
+      <Text style={ecoSt.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// Mirrors EcoScoreScreen's BaselineBars, scoped to a single trip's reward
+// (kwh* for EVs, fuel*Liters for combustion — a trip only ever populates one
+// pair, see tripSlice's computeTripEnergy). Tapping the bar opens EcoScore,
+// which is where "Baseline" is actually explained (per product's note that
+// the label here should defer to the Eco Score description).
+function TripBaselineBar({ baseline, used, onPress }: { baseline: number; used: number; onPress: () => void }) {
+  if (baseline <= 0) return null;
+  const usedPct = Math.min(100, Math.round((used / baseline) * 100));
+  const percentBetter = Math.round(((baseline - used) / baseline) * 100);
+  const better = percentBetter >= 0;
+  const barColor = better ? TEAL : '#E5484D';
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+      <Text style={ecoSt.baselineLabel}>
+        <Text style={ecoSt.baselineLabelStrong}>Baseline </Text>
+        (regular drivers)
+      </Text>
+      <View style={ecoSt.track}>
+        <View style={[ecoSt.fill, ecoSt.fillGrey]} />
+      </View>
+      <View style={ecoSt.barRow}>
+        <View style={[ecoSt.track, ecoSt.barRowTrack]}>
+          <View style={[ecoSt.fill, { width: `${usedPct}%` as any, backgroundColor: barColor }]} />
+        </View>
+        <ChevronIcon open={false} color="#AAAAAA" size={16} />
+      </View>
+      <Text style={ecoSt.baselineCaption}>Your Driving and Environmental Impact</Text>
+    </TouchableOpacity>
+  );
+}
+const ecoSt = StyleSheet.create({
+  baselineLabel: { fontSize: 13, color: '#888', marginBottom: 8 },
+  baselineLabelStrong: { fontWeight: '700', color: '#1A1A1A' },
+  track: { height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: '#F0F0F0', marginBottom: 8 },
+  fill: { height: '100%', borderRadius: 5 },
+  fillGrey: { width: '100%', backgroundColor: '#D9D9D9' },
+  barRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
+  barRowTrack: { flex: 1, marginBottom: 0 },
+  baselineCaption: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginTop: 10, marginBottom: 16 },
+  statsRow: {
+    flexDirection: 'row', alignItems: 'stretch',
+    borderWidth: 1, borderColor: '#EEEEEE', borderRadius: 14,
+    paddingVertical: 14,
+  },
+  stat: { flex: 1, alignItems: 'center', rowGap: 6 },
+  statValue: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+  statLabel: { fontSize: 11, color: '#888' },
+  statDivider: { width: 1, backgroundColor: '#EEEEEE' },
+  behaviorCaption: { fontSize: 13, color: '#777', marginTop: 14, lineHeight: 18 },
+  insightCard: {
+    flexDirection: 'row', alignItems: 'flex-start', columnGap: 12,
+    backgroundColor: '#EFF9F9', borderRadius: 14, padding: 14, marginTop: 16,
+  },
+  insightIconBox: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: TEAL,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  insightBody: { flex: 1 },
+  insightTitle: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  insightText: { fontSize: 12, color: '#555', lineHeight: 17 },
+});
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function TripDetailScreen() {
@@ -156,9 +231,23 @@ export default function TripDetailScreen() {
 
   const reward = trip?.reward;
 
+  // A trip only ever populates one baseline pair — kwh* for EVs, fuel*Liters
+  // for combustion vehicles (see EcoScoreScreen's baselineComparison, same
+  // assumption here but for a single trip instead of an aggregate).
+  const isElectricBaseline = reward?.kwhBaseline != null && reward?.kwhUsed != null;
+  const isFuelBaseline = !isElectricBaseline && reward?.fuelBaselineLiters != null && reward?.fuelUsedLiters != null;
+  const baselineVal = isElectricBaseline ? reward!.kwhBaseline! : isFuelBaseline ? reward!.fuelBaselineLiters! : 0;
+  const usedVal = isElectricBaseline ? reward!.kwhUsed! : isFuelBaseline ? reward!.fuelUsedLiters! : 0;
+  const savedUnit = isElectricBaseline ? 'kWh' : 'L';
+  const savedAmount = baselineVal - usedVal;
+
   const harshBrakeCount = trip?.events.filter(e => e.type === 'harsh_brake').length ?? 0;
   const harshAccelCount = trip?.events.filter(e => e.type === 'harsh_accel').length ?? 0;
   const harshCornerCount = trip?.events.filter(e => e.type === 'harsh_corner').length ?? 0;
+  const totalHarshEvents = harshBrakeCount + harshAccelCount + harshCornerCount;
+  const behaviorCaption = totalHarshEvents === 0
+    ? 'Smooth acceleration and steady speed improved efficiency.'
+    : `${totalHarshEvents} harsh driving event${totalHarshEvents === 1 ? '' : 's'} this trip reduced your efficiency.`;
 
   // Vehicle Generated Data read-back — only for trips that actually made it
   // into VGD (older trips predating this feature have no vgdTripId at all).
@@ -323,12 +412,55 @@ export default function TripDetailScreen() {
           </>
         )}
 
-        {reward?.aiNarrativeTip && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>AI DRIVING TIP</Text>
-            <Text style={styles.tipText}>{reward.aiNarrativeTip}</Text>
+        {/* Eco savings — this trip's baseline comparison + kWh/CO₂/points,
+            same convention as EcoScoreScreen's aggregate baseline card.
+            Shown unconditionally (not gated on `reward`) so trips that
+            haven't been scored yet — e.g. VGD-backfilled trips with no
+            matched reward entry, see tripHistorySync.ts — still show the
+            section with placeholders instead of it vanishing entirely. */}
+        <Text style={styles.sectionTitle}>ECO SAVINGS · THIS TRIP</Text>
+        <View style={styles.card}>
+          {baselineVal > 0 && (
+            <TripBaselineBar
+              baseline={baselineVal}
+              used={usedVal}
+              onPress={() => navigation.navigate('EcoScore')}
+            />
+          )}
+          <View style={ecoSt.statsRow}>
+            <SavingsStat
+              icon={<FlashIcon color="#888" size={20} />}
+              value={baselineVal > 0 ? `${savedAmount >= 0 ? '-' : '+'}${Math.abs(savedAmount).toFixed(1)} ${savedUnit}` : '—'}
+              label={savedUnit}
+            />
+            <View style={ecoSt.statDivider} />
+            <SavingsStat
+              icon={<LeafIcon color="#888" size={20} />}
+              value={reward?.co2AvoidedGrams != null ? `-${(reward.co2AvoidedGrams / 1000).toFixed(1)} kg` : '—'}
+              label="CO₂"
+            />
+            <View style={ecoSt.statDivider} />
+            <SavingsStat
+              icon={<StarOutlineIcon color="#888" size={20} />}
+              value={reward ? `+${reward.tripPointsEarned}` : '—'}
+              label="Pts"
+            />
           </View>
-        )}
+          <Text style={ecoSt.behaviorCaption}>
+            {reward ? behaviorCaption : 'This trip hasn’t been scored yet — check back once it finishes processing.'}
+          </Text>
+          {reward?.aiNarrativeTip && (
+            <View style={ecoSt.insightCard}>
+              <View style={ecoSt.insightIconBox}>
+                <LightbulbIcon color="white" size={18} />
+              </View>
+              <View style={ecoSt.insightBody}>
+                <Text style={ecoSt.insightTitle}>MAUD Insight</Text>
+                <Text style={ecoSt.insightText}>{reward.aiNarrativeTip}</Text>
+              </View>
+            </View>
+          )}
+        </View>
 
         {/* Vehicle Generated Data — server-processed detail (addresses,
             weather, road-type/speed-limit/harsh-event enrichment), read back

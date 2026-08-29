@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -12,8 +12,10 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { fetchExpenses, fetchExpenseSummary } from '../../store/slices/expenseSlice';
+import { vehiclesApi } from '../../api';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Expense, ExpenseSummaryCategory } from '../../types/expense.types';
+import type { FuelPriceResponse } from '../../types/vehicle.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -42,10 +44,18 @@ function currencySymbol(code: string): string {
   return {  USD: '$', EUR: '€',GBP: '£' }[code] ?? code;
 }
 
-function buildWeeklyBuckets(expenses: Expense[], days: number): number[] {
+// `expenses` only ever holds manually-logged Fuel/Other rows — Leasing,
+// Insurance, Tax and Service are derived server-side from real vehicle
+// records with no per-day breakdown available to the client. Since
+// leasing/insurance/tax accrue at a flat daily rate by construction (see
+// ExpenseSummaryHandler), seeding every bucket with that rate keeps the
+// chart honest (flat baseline where costs really are flat) while manual
+// entries still show up as real bumps on their actual date.
+function buildWeeklyBuckets(expenses: Expense[], days: number, derivedDailyRate: number): number[] {
   const weeks = Math.min(8, Math.max(1, Math.ceil(days / 7)));
+  const daysPerBucket = days / weeks;
   const now = Date.now();
-  const totals = new Array(weeks).fill(0);
+  const totals = new Array(weeks).fill(derivedDailyRate * daysPerBucket);
   for (const expense of expenses) {
     const ageDays = (now - new Date(expense.expenseDate).getTime()) / (24 * 60 * 60 * 1000);
     const bucketIndex = weeks - 1 - Math.floor(ageDays / 7);
@@ -141,11 +151,35 @@ const chartSt = StyleSheet.create({
 
 // ── Cost item card ─────────────────────────────────────────────────────────
 
-function CostItemCard({ category, amount, maxAmount, currencyCode }: {
-  category: ExpenseSummaryCategory; amount: number; maxAmount: number; currencyCode: string;
+// Below this, a change is treated as noise/rounding rather than a real trend
+// — avoids "0.4% vs previous period" reading as a meaningful signal.
+const TREND_THRESHOLD_PCT = 2;
+
+function trendLabel(amount: number, previousAmount: number | undefined): { text: string; color: string } {
+  if (amount <= 0 && (!previousAmount || previousAmount <= 0)) {
+    return { text: 'No data yet', color: '#BBBBBB' };
+  }
+  if (!previousAmount || previousAmount <= 0) {
+    return { text: 'Stable', color: '#999' };
+  }
+  const changePct = ((amount - previousAmount) / previousAmount) * 100;
+  if (Math.abs(changePct) < TREND_THRESHOLD_PCT) {
+    return { text: 'Stable', color: '#999' };
+  }
+  const isIncrease = changePct > 0;
+  return {
+    text: `${isIncrease ? '↗' : '↘'} ${Math.abs(Math.round(changePct))}% vs previous period`,
+    color: isIncrease ? '#E8734A' : '#3ABFBF',
+  };
+}
+
+function CostItemCard({ category, amount, previousAmount, maxAmount, currencyCode }: {
+  category: ExpenseSummaryCategory; amount: number; previousAmount: number | undefined;
+  maxAmount: number; currencyCode: string;
 }) {
   const meta = CATEGORY_META[category];
   const barPct = maxAmount > 0 ? Math.round((amount / maxAmount) * 100) : 0;
+  const trend = trendLabel(amount, previousAmount);
   return (
     <View style={styles.costCard}>
       <View style={styles.costTop}>
@@ -154,6 +188,7 @@ function CostItemCard({ category, amount, maxAmount, currencyCode }: {
             <ItemIcon iconKey={meta.iconKey} />
             <Text style={styles.costLabel}>{meta.label}</Text>
           </View>
+          <Text style={[styles.costTrend, { color: trend.color }]}>{trend.text}</Text>
         </View>
         <View style={styles.costRight}>
           <Text style={styles.costAmount}>{currencySymbol(currencyCode)}{amount.toFixed(2)}</Text>
@@ -204,6 +239,8 @@ export default function ExpensesScreen() {
   const [activeTab, setActiveTab] = useState<'Analytics' | 'Prediction'>('Analytics');
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [fuelPrice, setFuelPrice] = useState<FuelPriceResponse | null>(null);
+  const [customFuelPrice, setCustomFuelPrice] = useState('');
 
   const days = timeframeDays(selectedTime);
 
@@ -213,19 +250,52 @@ export default function ExpensesScreen() {
     dispatch(fetchExpenseSummary({ vehicleId, days }));
   }, [vehicleId, days, dispatch]);
 
+  useEffect(() => {
+    if (!vehicleId) return;
+    vehiclesApi.getFuelPrice(vehicleId).then(res => setFuelPrice(res.data)).catch(() => setFuelPrice(null));
+  }, [vehicleId]);
+
+  const isElectric = fuelPrice?.electricityPricePerKwh != null;
+  const defaultFuelUnitPrice = isElectric ? fuelPrice?.electricityPricePerKwh : fuelPrice?.fuelPricePerLiter;
+  const fuelUnitLabel = isElectric ? 'Price per kWh' : 'Price per Liter';
+
   function selectTime(t: string) {
     setSelectedTime(t);
     setDropdownOpen(false);
   }
 
-  const dataset = activeTab === 'Analytics' ? summary?.actual : summary?.predicted;
-  const total = activeTab === 'Analytics' ? summary?.totalActual ?? 0 : summary?.totalPredicted ?? 0;
+  // Prediction's fuel/energy figure is a trailing-average projection from
+  // the backend (it has no forward fuel-price contract to read, unlike
+  // leasing/insurance/tax) — scaling it by (user price / current default
+  // price) lets the user answer "what if fuel costs X instead" without
+  // needing a new backend endpoint for it.
+  const parsedCustomPrice = parseFloat(customFuelPrice.replace(',', '.'));
+  const fuelPriceRatio = (
+    activeTab === 'Prediction'
+    && Number.isFinite(parsedCustomPrice) && parsedCustomPrice > 0
+    && defaultFuelUnitPrice != null && defaultFuelUnitPrice > 0
+  ) ? parsedCustomPrice / defaultFuelUnitPrice : 1;
+
+  const rawDataset = activeTab === 'Analytics' ? summary?.actual : summary?.predicted;
+  const dataset = useMemo(() => {
+    if (!rawDataset || fuelPriceRatio === 1 || rawDataset.fuel == null) return rawDataset;
+    return { ...rawDataset, fuel: rawDataset.fuel * fuelPriceRatio };
+  }, [rawDataset, fuelPriceRatio]);
+  const total = useMemo(
+    () => Object.values(dataset ?? {}).reduce((sum, v) => sum + v, 0),
+    [dataset],
+  );
   const currencyCode = summary?.currencyCode ?? 'EUR';
   const monthlyProjected = (total / Math.max(1, days)) * 30;
   const annualProjected = monthlyProjected * 12;
   const perDay = total / Math.max(1, days);
   const maxCategoryAmount = Math.max(1, ...Object.values(dataset ?? {}));
-  const weeklyBars = useMemo(() => buildWeeklyBuckets(expenses, days), [expenses, days]);
+  const manualCategoriesTotal = (dataset?.fuel ?? 0) + (dataset?.other ?? 0);
+  const derivedDailyRate = Math.max(0, total - manualCategoriesTotal) / Math.max(1, days);
+  const weeklyBars = useMemo(
+    () => buildWeeklyBuckets(expenses, days, derivedDailyRate),
+    [expenses, days, derivedDailyRate],
+  );
   const sortedExpenses = useMemo(
     () => [...expenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate)),
     [expenses],
@@ -309,6 +379,26 @@ export default function ExpensesScreen() {
           )}
         </View>
 
+        {/* Prediction-only: let the user override the fuel/electricity unit
+            price used to project the Fuel/Energy line, defaulting to the
+            vehicle's real current price fetched from the backend. */}
+        {activeTab === 'Prediction' && (
+          <View style={styles.priceCard}>
+            <Text style={styles.priceLabel}>{fuelUnitLabel}</Text>
+            <View style={styles.priceInputRow}>
+              <Text style={styles.priceCurrency}>{currencySymbol(currencyCode)}</Text>
+              <TextInput
+                style={styles.priceInput}
+                keyboardType="decimal-pad"
+                placeholder={defaultFuelUnitPrice != null ? defaultFuelUnitPrice.toFixed(3) : '0.00'}
+                placeholderTextColor="#AAAAAA"
+                value={customFuelPrice}
+                onChangeText={setCustomFuelPrice}
+              />
+            </View>
+          </View>
+        )}
+
         {/* Vehicle Operating Costs card */}
         <View style={styles.card}>
           <View style={styles.costsHeader}>
@@ -334,11 +424,16 @@ export default function ExpensesScreen() {
 
         {/* Cost Breakdown */}
         <Text style={styles.sectionTitle}>COST BREAKDOWN</Text>
-        {CATEGORY_ORDER.filter(cat => (dataset?.[cat] ?? 0) > 0).map(cat => (
+        {/* The 5 core categories always render (even at 0, e.g. "No data
+            yet") so a real zero reads as tracked-but-empty rather than
+            silently vanishing — only the catch-all 'other' category hides
+            itself when unused, since it's optional by nature. */}
+        {CATEGORY_ORDER.filter(cat => cat !== 'other' || (dataset?.[cat] ?? 0) > 0).map(cat => (
           <CostItemCard
             key={cat}
             category={cat}
             amount={dataset?.[cat] ?? 0}
+            previousAmount={activeTab === 'Analytics' ? summary?.previousActual?.[cat] : undefined}
             maxAmount={maxCategoryAmount}
             currencyCode={currencyCode}
           />
@@ -422,6 +517,20 @@ const styles = StyleSheet.create({
   dropdownText: { fontSize: 14, color: '#333', fontWeight: '500' },
   dropdownTextActive: { color: TEAL, fontWeight: '700' },
 
+  // Prediction fuel/electricity price override
+  priceCard: {
+    backgroundColor: 'white', borderRadius: 18, padding: 16, marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+  },
+  priceLabel: { fontSize: 13, color: '#888', marginBottom: 8 },
+  priceInputRow: {
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0',
+    borderRadius: 12, paddingHorizontal: 14,
+  },
+  priceCurrency: { fontSize: 16, color: '#888', marginRight: 6 },
+  priceInput: { flex: 1, fontSize: 16, color: '#1A1A1A', paddingVertical: 12 },
+
   // Card base
   card: {
     backgroundColor: 'white', borderRadius: 18, padding: 16, marginBottom: 20,
@@ -457,6 +566,7 @@ const styles = StyleSheet.create({
   costLeft: { flex: 1, paddingRight: 12 },
   costLabelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   costLabel: { fontSize: 14, color: '#444', marginLeft: 8 },
+  costTrend: { fontSize: 11, fontWeight: '600', marginLeft: 26, marginTop: 2 },
   costRight: { alignItems: 'flex-end' },
   costAmount: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
 

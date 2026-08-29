@@ -68,6 +68,27 @@ export function tripAvgSpeedKmh(trip: Trip): number {
   return (tripDistanceKm(trip) / durationSeconds) * 3600;
 }
 
+// `t.context` (isNight/isAfterMidnight) is only ever populated for a
+// locally-recorded trip (submitted alongside trip_reward, see tripSlice.ts's
+// buildContext) — a VGD-backfilled trip (source: 'vgd') never has it, even
+// though startTime itself is always known (from VGD's own analytics). Unlike
+// isRain/highwayShare, day/night is pure date math with no dependency on
+// route points or a weather lookup, so it can be derived identically for any
+// trip regardless of source — same >=20||<6 local-hour threshold as
+// buildContext, so a restored trip is bucketed exactly as it would have been
+// had the local recording never been lost.
+export function tripIsNight(trip: Trip): boolean {
+  if (trip.context) return trip.context.isNight;
+  const hour = new Date(trip.startTime).getHours();
+  return hour >= 20 || hour < 6;
+}
+
+export function tripIsAfterMidnight(trip: Trip): boolean {
+  if (trip.context) return trip.context.isAfterMidnight;
+  const hour = new Date(trip.startTime).getHours();
+  return hour >= 0 && hour < 4;
+}
+
 export function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);

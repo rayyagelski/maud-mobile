@@ -20,7 +20,7 @@ export default function WelcomeScreen() {
       <Image
         source={require('../../assets/images/splash_bg.png')}
         style={styles.bg}
-        resizeMode="cover"
+        resizeMode="stretch"
       />
 
       {/* Circular arrow button — matches design position */}

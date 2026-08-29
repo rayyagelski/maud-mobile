@@ -7,18 +7,85 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  GearIcon, FlashIcon, PhoneIcon, ArrowUpIcon, PinIcon,
+  FlashIcon, PhoneIcon, ArrowUpIcon, PinIcon,
   RefreshIcon, MoonIcon, DropletIcon, CalendarIcon,
-  ChevronIcon, TrendUpIcon,
+  ChevronIcon, TrendUpIcon, RouteIcon, FlagIcon, BuildingIcon, HomeIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useVgdRoadTypeBreakdown } from '../../hooks/useVgdRoadTypeBreakdown';
+import { useVgdBehaviorAggregate } from '../../hooks/useVgdBehaviorAggregate';
+import { tripDistanceKm, tripDurationSeconds, tripIsNight, tripIsAfterMidnight } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip } from '../../types/trip.types';
 
 const TEAL = '#3ABFBF';
+// "Good" tier uses the app's own turquoise, not grass-green — kept as a
+// separate name from TEAL since it means something semantically distinct
+// (best-tier severity color), even though the value is identical today.
+const GOOD = TEAL;
+const LIME = '#A9D94C';
+const ORANGE = '#F5A623';
+const RED = '#E5484D';
+
+const KM_TO_MILES = 0.621371;
 
 const TIMEFRAMES = ['7 Days', '14 Days', '28 Days'];
 const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
+
+// v1 rate thresholds, as specified by product (not calibrated against real
+// MAUD trip data yet). "poor" is the rate at which the behavior's subscore
+// hits 0 — everything below scales linearly toward 100 at rate=0. Speeding is
+// a % of drive time; the rest are counts (or seconds, for phone) per 100
+// miles driven. For non-US/metric users this should ideally be computed per
+// 100 km internally rather than converting the mile-based threshold, but v1
+// applies the same per-100mi threshold universally.
+const BEHAVIOR_POOR_RATE = {
+  speedingPctOfDriveTime: 8,
+  phoneSecondsPer100Mi: 45,
+  harshBrakePer100Mi: 4,
+  harshAccelPer100Mi: 4,
+  harshCornerPer100Mi: 3,
+} as const;
+
+// Generic context severity multipliers applied to each trip's contribution
+// before it's aggregated into a rate — a simplified, uniform-across-behaviors
+// stand-in for the compound/interaction multipliers (e.g. phone+speeding+
+// highway+rain+night compounding together) that really belong server-side,
+// computed per-event against HERE road attributes. Not implemented here.
+const CONTEXT_MULTIPLIERS = {
+  night: 1.10,
+  rain: 1.15,
+  highway: 1.10,
+  afterMidnight: 1.20,
+} as const;
+
+function tripContextMultiplier(trip: Trip): number {
+  const ctx = trip.context;
+  let m = 1;
+  // isNight/isAfterMidnight are pure date math (tripIsNight/tripIsAfterMidnight
+  // fall back to computing from startTime), so they apply to every trip
+  // regardless of source. isRain/highwayShare have no VGD-derivable
+  // equivalent (no stored weather for most already-elapsed trips, no route
+  // points to compute a highway share from) — stay local-trip-only rather
+  // than being guessed.
+  if (tripIsNight(trip)) m *= CONTEXT_MULTIPLIERS.night;
+  if (ctx?.isRain) m *= CONTEXT_MULTIPLIERS.rain;
+  if (ctx && ctx.highwayShare >= 0.5) m *= CONTEXT_MULTIPLIERS.highway;
+  if (tripIsAfterMidnight(trip)) m *= CONTEXT_MULTIPLIERS.afterMidnight;
+  return m;
+}
+
+// Lower-is-better subscore: 100 at rate=0, 0 at rate>=poorRate, linear between.
+function behaviorScore(rate: number, poorRate: number): number {
+  return Math.max(0, Math.min(100, Math.round(100 * (1 - rate / poorRate))));
+}
+
+function scoreColor(score: number): string {
+  if (score >= 85) return GOOD;
+  if (score >= 70) return LIME;
+  if (score >= 50) return ORANGE;
+  return RED;
+}
 
 function timeframeDays(label: string): number {
   return parseInt(label, 10) || 7;
@@ -92,8 +159,10 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
 
 // ── Behavior row (with progress bar) ──────────────────────────────────────
 
-function BehaviorRow({ icon, label, count, barPct, barColor = TEAL, last = false }: {
-  icon: React.ReactNode; label: string; count: number;
+function BehaviorRow({
+  icon, label, count, unit = '', percent, barPct, barColor = TEAL, last = false,
+}: {
+  icon: React.ReactNode; label: string; count: number; unit?: string; percent?: number;
   barPct: number; barColor?: string; last?: boolean;
 }) {
   return (
@@ -101,7 +170,8 @@ function BehaviorRow({ icon, label, count, barPct, barColor = TEAL, last = false
       <View style={styles.bTop}>
         <View style={styles.bIconBox}>{icon}</View>
         <Text style={styles.bLabel}>{label}</Text>
-        <Text style={styles.bCount}>{count}</Text>
+        <Text style={styles.bCount}>{count}{unit}</Text>
+        {percent !== undefined && <Text style={styles.bPercent}>{percent}%</Text>}
       </View>
       <View style={styles.bBarBg}>
         <View style={[styles.bBarFill, { width: `${barPct}%` as any, backgroundColor: barColor }]} />
@@ -150,39 +220,91 @@ export default function DriverScoreScreen() {
     [current],
   );
 
-  const counters = useMemo(
+  // Context-weighted exposure totals — each trip's raw counters are scaled by
+  // its own night/rain/highway/after-midnight multiplier before being summed,
+  // so two identical harsh-braking counts don't score the same if one
+  // happened on a calm daytime commute and the other at night in the rain.
+  const exposure = useMemo(
     () =>
       current.reduce(
         (acc, t) => {
           const c = t.eventCounters;
           if (c) {
-            acc.speedingSeconds += c.speedingSeconds;
-            acc.phoneTextSeconds += c.phoneTextSeconds;
-            acc.harshBrakeCount += c.harshBrakeCount;
-            acc.harshAccelCount += c.harshAccelCount;
-            acc.harshCornerCount += c.harshCornerCount;
+            const m = tripContextMultiplier(t);
+            acc.speedingSeconds += c.speedingSeconds * m;
+            acc.phoneTextSeconds += c.phoneTextSeconds * m;
+            acc.harshBrakeCount += c.harshBrakeCount * m;
+            acc.harshAccelCount += c.harshAccelCount * m;
+            acc.harshCornerCount += c.harshCornerCount * m;
           }
+          acc.driveSeconds += tripDurationSeconds(t);
+          acc.miles += tripDistanceKm(t) * KM_TO_MILES;
           return acc;
         },
-        { speedingSeconds: 0, phoneTextSeconds: 0, harshBrakeCount: 0, harshAccelCount: 0, harshCornerCount: 0 },
+        {
+          speedingSeconds: 0, phoneTextSeconds: 0, harshBrakeCount: 0,
+          harshAccelCount: 0, harshCornerCount: 0, driveSeconds: 0, miles: 0,
+        },
       ),
     [current],
   );
-  const speedingCount = Math.round(counters.speedingSeconds / 60); // minutes
-  const phoneUsageCount = Math.round(counters.phoneTextSeconds / 60); // minutes
-  const maxBehaviorCount = Math.max(
-    1, speedingCount, phoneUsageCount,
-    counters.harshBrakeCount, counters.harshAccelCount, counters.harshCornerCount,
-  );
 
+  // Real harsh-event counts backfilled from VGD for trips that have no local
+  // eventCounters (source: 'vgd', e.g. the testing account's backend-only
+  // drives — see useVgdBehaviorAggregate). Unlike the local reduce above,
+  // this is a single cross-trip aggregate (one VGD events call per trip, not
+  // per-trip-then-summed), so it's added unweighted rather than run back
+  // through tripContextMultiplier per trip — a deliberate simplification,
+  // same spirit as CONTEXT_MULTIPLIERS' own "uniform stand-in" note above.
+  // VGD has no speeding-seconds/phone-usage-seconds equivalent, so those two
+  // stay local-only.
+  const vgdBehavior = useVgdBehaviorAggregate(current);
+  const exposureWithVgd = useMemo(() => ({
+    ...exposure,
+    harshBrakeCount: exposure.harshBrakeCount + vgdBehavior.harshBrakeCount,
+    harshAccelCount: exposure.harshAccelCount + vgdBehavior.harshAccelCount,
+    harshCornerCount: exposure.harshCornerCount + vgdBehavior.harshCornerCount,
+  }), [exposure, vgdBehavior]);
+
+  const per100Mi = exposureWithVgd.miles > 0 ? exposureWithVgd.miles / 100 : null;
+  const speedingRate = exposureWithVgd.driveSeconds > 0
+    ? (exposureWithVgd.speedingSeconds / exposureWithVgd.driveSeconds) * 100 : 0;
+  const phoneRate = per100Mi ? exposureWithVgd.phoneTextSeconds / per100Mi : 0;
+  const harshBrakeRate = per100Mi ? exposureWithVgd.harshBrakeCount / per100Mi : 0;
+  const harshAccelRate = per100Mi ? exposureWithVgd.harshAccelCount / per100Mi : 0;
+  const harshCornerRate = per100Mi ? exposureWithVgd.harshCornerCount / per100Mi : 0;
+
+  const speedingScore = behaviorScore(speedingRate, BEHAVIOR_POOR_RATE.speedingPctOfDriveTime);
+  const phoneScore = behaviorScore(phoneRate, BEHAVIOR_POOR_RATE.phoneSecondsPer100Mi);
+  const harshBrakeScore = behaviorScore(harshBrakeRate, BEHAVIOR_POOR_RATE.harshBrakePer100Mi);
+  const harshAccelScore = behaviorScore(harshAccelRate, BEHAVIOR_POOR_RATE.harshAccelPer100Mi);
+  const harshCornerScore = behaviorScore(harshCornerRate, BEHAVIOR_POOR_RATE.harshCornerPer100Mi);
+
+  // isRain has no VGD-derivable fallback (see tripContextMultiplier), so
+  // rain-trip counting stays local-context-only — but night detection
+  // (tripIsNight) works for every trip via startTime, so a VGD-restored trip
+  // is no longer invisible to the Night/Rain-Night rows either.
   const rainTrips = current.filter(t => t.context?.isRain).length;
-  const nightTrips = current.filter(t => t.context?.isNight).length;
-  const rainAndNightTrips = current.filter(t => t.context?.isRain && t.context?.isNight).length;
+  const nightTrips = current.filter(t => tripIsNight(t)).length;
+  const rainAndNightTrips = current.filter(t => t.context?.isRain && tripIsNight(t)).length;
   const weekendTrips = current.filter(t => {
     const day = new Date(t.startTime).getDay();
     return day === 0 || day === 6;
   }).length;
-  const maxInsightCount = Math.max(1, rainTrips, nightTrips, rainAndNightTrips, weekendTrips);
+  // Bar length + label are each row's share of the sum of all four rows
+  // (matches product's "11 Trips = 100%" reading), not relative to whichever
+  // row happens to be largest.
+  const totalInsightTrips = Math.max(1, rainTrips + nightTrips + rainAndNightTrips + weekendTrips);
+  const insightPct = (n: number) => Math.round((n / totalInsightTrips) * 100);
+
+  // Real road-type-change counts, read back from VGD (see
+  // useVgdRoadTypeBreakdown) — one events call per VGD-synced trip in the
+  // selected period, aggregated by HERE functional-class bucket.
+  const roadTypes = useVgdRoadTypeBreakdown(current);
+  const totalRoadTypeChanges = Math.max(
+    1, roadTypes.highway + roadTypes.majorRoad + roadTypes.urban + roadTypes.residential,
+  );
+  const roadTypePct = (n: number) => Math.round((n / totalRoadTypeChanges) * 100);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -196,9 +318,7 @@ export default function DriverScoreScreen() {
             <BackArrowIcon size={22} color="#1A1A1A" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Driver Score</Text>
-          <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <GearIcon color="#AAAAAA" size={22} />
-          </TouchableOpacity>
+          <View style={styles.headerSpacer} />
         </View>
       </SafeAreaView>
       <View style={styles.divider} />
@@ -219,8 +339,10 @@ export default function DriverScoreScreen() {
               <Text style={styles.ptsMonth}>+{totalPoints} pts this period</Text>
               {trendPct !== null && (
                 <View style={styles.trendRow}>
-                  <TrendUpIcon color={TEAL} size={14} />
-                  <Text style={styles.trendText}>  {trendPct >= 0 ? '+' : ''}{trendPct}% vs previous period</Text>
+                  <TrendUpIcon color={trendPct >= 0 ? GOOD : ORANGE} size={14} />
+                  <Text style={[styles.trendText, { color: trendPct >= 0 ? GOOD : ORANGE }]}>
+                    {'  '}{trendPct >= 0 ? '+' : ''}{trendPct}% vs previous period
+                  </Text>
                 </View>
               )}
               <MiniBarChart values={barValues} />
@@ -268,32 +390,63 @@ export default function DriverScoreScreen() {
           </View>
         )}
 
-        {/* Driving Behavior */}
+        {/* Driving Behavior — 0-100 subscores (not reward points), context-
+            weighted by night/rain/highway/after-midnight exposure. Bar color
+            and length both reflect the score, not the raw event count. */}
         <SectionHeader title="Driving Behavior" subtitle={`${current.length} trips`} />
         <View style={styles.card}>
           <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-            label="Speeding (min)" count={speedingCount} barPct={(speedingCount / maxBehaviorCount) * 100} barColor="#F5A623" />
+            label="Speeding" count={speedingScore} unit=" / 100" barPct={speedingScore}
+            barColor={scoreColor(speedingScore)} />
           <BehaviorRow icon={<PhoneIcon color="#888" size={16} />}
-            label="Phone Usage (min)" count={phoneUsageCount} barPct={(phoneUsageCount / maxBehaviorCount) * 100} />
+            label="Phone Usage" count={phoneScore} unit=" / 100" barPct={phoneScore}
+            barColor={scoreColor(phoneScore)} />
           <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-            label="Harsh Braking" count={counters.harshBrakeCount} barPct={(counters.harshBrakeCount / maxBehaviorCount) * 100} />
+            label="Harsh Braking" count={harshBrakeScore} unit=" / 100" barPct={harshBrakeScore}
+            barColor={scoreColor(harshBrakeScore)} />
           <BehaviorRow icon={<ArrowUpIcon color="#888" size={16} />}
-            label="Harsh Acceleration" count={counters.harshAccelCount} barPct={(counters.harshAccelCount / maxBehaviorCount) * 100} />
+            label="Harsh Acceleration" count={harshAccelScore} unit=" / 100" barPct={harshAccelScore}
+            barColor={scoreColor(harshAccelScore)} />
           <BehaviorRow icon={<RefreshIcon color="#888" size={16} />}
-            label="Cornering" count={counters.harshCornerCount} barPct={(counters.harshCornerCount / maxBehaviorCount) * 100} last />
+            label="Cornering" count={harshCornerScore} unit=" / 100" barPct={harshCornerScore}
+            barColor={scoreColor(harshCornerScore)} last />
         </View>
 
-        {/* Trip Insights */}
-        <SectionHeader title="Trip Insights" />
+        {/* Trip Insights — each bar/percent is this row's share of the sum
+            of all four rows for the selected period. */}
+        <SectionHeader title="Trip Insights" subtitle={`${totalInsightTrips} trips`} />
         <View style={styles.card}>
           <BehaviorRow icon={<PinIcon color="#888" size={16} />}
-            label="Rain Trips" count={rainTrips} barPct={(rainTrips / maxInsightCount) * 100} />
+            label="Rain Trips" count={rainTrips} percent={insightPct(rainTrips)} barPct={insightPct(rainTrips)} />
           <BehaviorRow icon={<MoonIcon color="#888" size={16} />}
-            label="Night Trips" count={nightTrips} barPct={(nightTrips / maxInsightCount) * 100} />
+            label="Night Trips" count={nightTrips} percent={insightPct(nightTrips)} barPct={insightPct(nightTrips)} />
           <BehaviorRow icon={<DropletIcon color="#888" size={16} />}
-            label="Rain/Night Trips" count={rainAndNightTrips} barPct={(rainAndNightTrips / maxInsightCount) * 100} />
+            label="Rain/Night Trips" count={rainAndNightTrips} percent={insightPct(rainAndNightTrips)} barPct={insightPct(rainAndNightTrips)} />
           <BehaviorRow icon={<CalendarIcon color="#888" size={16} />}
-            label="Weekend Trips" count={weekendTrips} barPct={(weekendTrips / maxInsightCount) * 100} last />
+            label="Weekend Trips" count={weekendTrips} percent={insightPct(weekendTrips)} barPct={insightPct(weekendTrips)} last />
+        </View>
+
+        {/* Road Type Changes — real VGD-sourced road-type-change events.
+            Each bar/percent is this row's share of the total road-type
+            changes for the selected period. */}
+        <SectionHeader title="Road Type Changes" subtitle={!roadTypes.isLoading && roadTypes.hasVgdTrips ? `${totalRoadTypeChanges} changes` : undefined} />
+        <View style={styles.card}>
+          {roadTypes.isLoading ? (
+            <Text style={styles.noDataText}>Loading road-type data…</Text>
+          ) : !roadTypes.hasVgdTrips ? (
+            <Text style={styles.noDataText}>No VGD-synced trips in this range yet.</Text>
+          ) : (
+            <>
+              <BehaviorRow icon={<RouteIcon color="#888" size={16} />}
+                label="Highway" count={roadTypes.highway} percent={roadTypePct(roadTypes.highway)} barPct={roadTypePct(roadTypes.highway)} />
+              <BehaviorRow icon={<FlagIcon color="#888" size={16} />}
+                label="Major Road" count={roadTypes.majorRoad} percent={roadTypePct(roadTypes.majorRoad)} barPct={roadTypePct(roadTypes.majorRoad)} />
+              <BehaviorRow icon={<BuildingIcon color="#888" size={16} />}
+                label="Urban Road" count={roadTypes.urban} percent={roadTypePct(roadTypes.urban)} barPct={roadTypePct(roadTypes.urban)} />
+              <BehaviorRow icon={<HomeIcon color="#888" />}
+                label="Residential" count={roadTypes.residential} percent={roadTypePct(roadTypes.residential)} barPct={roadTypePct(roadTypes.residential)} last />
+            </>
+          )}
         </View>
 
       </ScrollView>
@@ -311,7 +464,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
   },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
+  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
+  headerSpacer: { width: 22 },
   divider: { height: 1, backgroundColor: '#EEEEEE' },
 
   scroll: { padding: 16, paddingBottom: 32 },
@@ -393,6 +547,7 @@ const styles = StyleSheet.create({
   },
   bLabel: { flex: 1, fontSize: 14, color: '#333333' },
   bCount: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginRight: 8 },
+  bPercent: { fontSize: 12, fontWeight: '600', color: '#888888' },
   bBarBg: { height: 6, backgroundColor: '#EEEEEE', borderRadius: 3, overflow: 'hidden' },
   bBarFill: { height: '100%', borderRadius: 3 },
 });

@@ -10,15 +10,39 @@ import {
   LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon, DollarIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
+import { useVgdEndAddresses } from '../../hooks/useVgdEndAddresses';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip } from '../../types/trip.types';
 
 const TEAL = '#3ABFBF';
+const RED = '#E5484D';
 
 const TIMEFRAMES = ['7 Days', '14 Days', '28 Days'];
 const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
-const TREND_TABS = ['Eco Score', 'Savings', 'Points'] as const;
+const TREND_TABS = ['Eco Score', 'Savings $', 'Savings (Co2)'] as const;
 type TrendTab = (typeof TREND_TABS)[number];
+
+// A trip only carries usable baseline data when the mobile client actually
+// computed and submitted an energy block for it (see tripSlice's
+// computeTripEnergy) — older trips, or ones for a vehicle with no known
+// fuel type, have neither pair populated. Assumes a single vehicle's trips
+// are consistently either fuel- or electricity-based, never a mix.
+function baselineComparison(trips: Trip[]): { baselineSum: number; usedSum: number } {
+  let baselineSum = 0;
+  let usedSum = 0;
+  trips.forEach((t) => {
+    const r = t.reward;
+    if (!r) return;
+    if (r.fuelBaselineLiters != null && r.fuelUsedLiters != null) {
+      baselineSum += r.fuelBaselineLiters;
+      usedSum += r.fuelUsedLiters;
+    } else if (r.kwhBaseline != null && r.kwhUsed != null) {
+      baselineSum += r.kwhBaseline;
+      usedSum += r.kwhUsed;
+    }
+  });
+  return { baselineSum, usedSum };
+}
 
 function timeframeDays(label: string): number {
   return parseInt(label, 10) || 7;
@@ -120,6 +144,41 @@ function RewardCol({ icon, value, label }: { icon: React.ReactNode; value: strin
   );
 }
 
+// ── Baseline comparison ─────────────────────────────────────────────────────
+
+function BaselineBars({ baselineSum, usedSum }: { baselineSum: number; usedSum: number }) {
+  if (baselineSum <= 0) {
+    return <Text style={baselineSt.noData}>Not enough data yet for this period.</Text>;
+  }
+  const usedPct = Math.min(150, Math.round((usedSum / baselineSum) * 100));
+  const percentBetter = Math.round(((baselineSum - usedSum) / baselineSum) * 100);
+  const better = percentBetter >= 0;
+  const barColor = better ? TEAL : RED;
+
+  return (
+    <View>
+      <Text style={baselineSt.label}>Baseline</Text>
+      <View style={baselineSt.track}>
+        <View style={[baselineSt.fill, baselineSt.fillGrey]} />
+      </View>
+      <View style={baselineSt.track}>
+        <View style={[baselineSt.fill, { width: `${Math.min(100, usedPct)}%` as any, backgroundColor: barColor }]} />
+      </View>
+      <Text style={baselineSt.summary}>
+        You drove {Math.abs(percentBetter)}% {better ? 'more' : 'less'} efficient than regular drivers.
+      </Text>
+    </View>
+  );
+}
+const baselineSt = StyleSheet.create({
+  label: { fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 8 },
+  track: { height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: '#F0F0F0', marginBottom: 8 },
+  fill: { height: '100%', borderRadius: 5 },
+  fillGrey: { width: '100%', backgroundColor: '#D9D9D9' },
+  summary: { fontSize: 13, color: '#333', marginTop: 4, lineHeight: 19 },
+  noData: { fontSize: 12, color: '#AAAAAA' },
+});
+
 // ── Main screen ────────────────────────────────────────────────────────────
 
 export default function EcoScoreScreen() {
@@ -158,6 +217,16 @@ export default function EcoScoreScreen() {
 
   const scoredTrips = useMemo(() => current.filter(t => t.reward), [current]);
 
+  const { baselineSum, usedSum } = useMemo(() => baselineComparison(scoredTrips), [scoredTrips]);
+
+  // Every completed trip in range, not just scored ones — a VGD-backfilled
+  // trip (source: 'vgd') that never went through the mobile reward-submission
+  // flow has no `.reward` at all (TripRewardController never reads VGD, see
+  // its own doc comment), but its date/distance/city are still real data
+  // that shouldn't be hidden just because no score exists yet for it.
+  const detailTrips = useMemo(() => current.slice(-10).reverse(), [current]);
+  const endAddressCities = useVgdEndAddresses(detailTrips);
+
   const miniBarValues = useMemo(
     () => scoredTrips.slice(-13).map(t => Math.max(8, Math.round(t.reward?.ecoScore ?? 0))),
     [scoredTrips],
@@ -166,9 +235,9 @@ export default function EcoScoreScreen() {
   const trendValues = useMemo(() => {
     const trips = scoredTrips.slice(-14);
     if (trendTab === 'Eco Score') return trips.map(t => t.reward?.ecoScore ?? 0);
-    if (trendTab === 'Points') {
-      const max = Math.max(1, ...trips.map(t => t.reward?.tripPointsEarned ?? 0));
-      return trips.map(t => ((t.reward?.tripPointsEarned ?? 0) / max) * 100);
+    if (trendTab === 'Savings (Co2)') {
+      const max = Math.max(1, ...trips.map(t => t.reward?.co2AvoidedGrams ?? 0));
+      return trips.map(t => ((t.reward?.co2AvoidedGrams ?? 0) / max) * 100);
     }
     const max = Math.max(1, ...trips.map(t => t.reward?.moneySavedCents ?? 0));
     return trips.map(t => ((t.reward?.moneySavedCents ?? 0) / max) * 100);
@@ -188,6 +257,12 @@ export default function EcoScoreScreen() {
       <View style={styles.divider} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Overview label */}
+        <View style={styles.overviewLabel}>
+          <LeafIcon color={TEAL} size={18} />
+          <Text style={styles.overviewText}>  Eco Score - Overview</Text>
+        </View>
 
         {/* Score card */}
         <View style={styles.card}>
@@ -260,6 +335,8 @@ export default function EcoScoreScreen() {
             <View style={styles.rewardsDivider} />
             <RewardCol icon={<StarOutlineIcon color="#888" size={20} />} value={`+${totalPoints}`} label="Eco Points" />
           </View>
+          <View style={styles.baselineDivider} />
+          <BaselineBars baselineSum={baselineSum} usedSum={usedSum} />
         </View>
 
         {/* Eco Savings Trend */}
@@ -283,7 +360,7 @@ export default function EcoScoreScreen() {
         {/* Details per day/trip */}
         <Text style={styles.sectionTitle}>DETAILS PER TRIP</Text>
         <View style={styles.card}>
-          {scoredTrips.slice(-10).reverse().map((trip, i, arr) => (
+          {detailTrips.map((trip, i, arr) => (
             <TouchableOpacity
               key={trip.id}
               style={[styles.detailRow, i < arr.length - 1 && styles.detailRowBorder]}
@@ -294,12 +371,20 @@ export default function EcoScoreScreen() {
               <Text style={styles.detailTime}>
                 {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
-              <Text style={styles.detailPts}>+{trip.reward?.tripPointsEarned ?? 0}</Text>
+              <Text style={styles.detailCity} numberOfLines={1}>{endAddressCities[trip.id] ?? '—'}</Text>
+              <Text style={[styles.detailPts, !trip.reward && styles.detailPtsMuted]}>
+                {trip.reward ? `+${trip.reward.tripPointsEarned}` : '—'}
+              </Text>
               <Text style={styles.detailArrow}>›</Text>
             </TouchableOpacity>
           ))}
-          {scoredTrips.length === 0 && (
-            <Text style={styles.emptyText}>No scored trips yet in this range.</Text>
+          {detailTrips.length === 0 && (
+            <Text style={styles.emptyText}>No trips yet in this range.</Text>
+          )}
+          {detailTrips.length > 0 && scoredTrips.length === 0 && (
+            <Text style={styles.emptyText}>
+              {detailTrips.length} trip{detailTrips.length === 1 ? '' : 's'} recorded, none scored yet.
+            </Text>
           )}
         </View>
 
@@ -330,6 +415,10 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
+
+  // Overview label
+  overviewLabel: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  overviewText: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
 
   // Score card
   scoreRow: { flexDirection: 'row', alignItems: 'center' },
@@ -372,6 +461,7 @@ const styles = StyleSheet.create({
   rewardsDivider: { width: 1, backgroundColor: '#EEEEEE', marginVertical: 4 },
   rewardValue: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginTop: 8, marginBottom: 4 },
   rewardLabel: { fontSize: 11, color: '#888', textAlign: 'center' },
+  baselineDivider: { height: 1, backgroundColor: '#EEEEEE', marginVertical: 16 },
 
   // Trend tabs
   tabRow: { flexDirection: 'row', columnGap: 8, marginBottom: 4 },
@@ -386,9 +476,11 @@ const styles = StyleSheet.create({
   // Detail rows
   detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
   detailRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  detailDate: { fontSize: 13, color: '#888', width: 90 },
-  detailTime: { flex: 1, fontSize: 13, color: '#333' },
+  detailDate: { fontSize: 13, color: '#888', width: 80 },
+  detailTime: { width: 64, fontSize: 13, color: '#333' },
+  detailCity: { flex: 1, fontSize: 13, color: '#333', marginRight: 8 },
   detailPts: { fontSize: 13, fontWeight: '700', color: TEAL, marginRight: 8 },
+  detailPtsMuted: { color: '#AAAAAA', fontWeight: '600' },
   detailArrow: { fontSize: 16, color: '#CCCCCC' },
   emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 12 },
 });

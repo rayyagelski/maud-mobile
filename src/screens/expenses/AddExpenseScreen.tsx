@@ -13,11 +13,11 @@ import type { ExpenseCategory } from '../../types/expense.types';
 const TEAL = '#3ABFBF';
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
+// Leasing/Insurance/Tax/Service are no longer manually logged here — the
+// Expenses screen now derives those for real from the vehicle's own
+// Leasing/Financing/Insurance/Registration/ServiceAndRepair records.
 const CATEGORIES: { value: ExpenseCategory; label: string }[] = [
   { value: 'fuel', label: 'Fuel / Energy' },
-  { value: 'leasing', label: 'Leasing / Finance' },
-  { value: 'insurance', label: 'Insurance' },
-  { value: 'tax', label: 'Tax' },
   { value: 'other', label: 'Other' },
 ];
 

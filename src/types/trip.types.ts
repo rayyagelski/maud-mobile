@@ -84,6 +84,11 @@ export interface TripRewardResult {
   tripPointsEarned: number;
   phoneSubscore: number;
   distanceKm: number;
+  fuelType: string | null;
+  fuelUsedLiters: number | null;
+  fuelBaselineLiters: number | null;
+  kwhUsed: number | null;
+  kwhBaseline: number | null;
   co2AvoidedGrams: number | null;
   moneySavedCents: number | null;
   currencyCode: string | null;

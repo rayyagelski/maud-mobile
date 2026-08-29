@@ -1,5 +1,7 @@
 import client from '../client';
-import type { Vehicle, FuelType, OdometerResponse, FuelPriceResponse, TripCostResponse } from '../../types/vehicle.types';
+import type {
+  Vehicle, FuelType, OdometerResponse, FuelPriceResponse, TripCostResponse, OwnershipCostRateResponse,
+} from '../../types/vehicle.types';
 
 // Actual shape of GET /vehicles (App\Serializer\API\VehicleListNormalizer) —
 // does not match the mobile Vehicle type 1:1, so it's mapped below.
@@ -54,6 +56,12 @@ export const vehiclesApi = {
 
   getFuelPrice: (vehicleId: string) =>
     client.get<FuelPriceResponse>(`/vehicles/${vehicleId}/fuel-price`),
+
+  // Insurance/Tax/Leasing/Financing as a per-minute rate — used for a
+  // pre-trip cost estimate (Route Planner), where there's no elapsed
+  // [startTime, endTime] to plug into getTripCost's TotalCostCalculator.
+  getOwnershipCostRate: (vehicleId: string) =>
+    client.get<OwnershipCostRateResponse>(`/vehicles/${vehicleId}/ownership-cost-rate`),
 
   // Reuses the same server-side Insurance/Tax/Leasing/Financing + Repair/
   // Maintenance + Fuel/Electricity formula (TotalCostCalculator) the web

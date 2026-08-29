@@ -383,6 +383,22 @@ export const syncTripHistoryFromBackend = createAsyncThunk(
   },
 );
 
+// Backfills a real score for one VGD-restored trip that has no `.reward`
+// (see useTripHistorySync's post-sync backfill pass) — dispatched once per
+// such trip, not batched, since the backend endpoint itself is per-trip
+// (mirrors submitTripReward's own one-trip-per-call shape).
+export const backfillVgdTripReward = createAsyncThunk(
+  'trips/backfillVgdReward',
+  async (params: { localTripId: string; vehicleUuid: string; vgdTripId: string }, { rejectWithValue }) => {
+    try {
+      const reward = await tripsApi.backfillRewardFromVgd(params.vehicleUuid, params.vgdTripId);
+      return { localTripId: params.localTripId, reward };
+    } catch (err: unknown) {
+      return rejectWithValue(err);
+    }
+  },
+);
+
 export const endTrip = createAsyncThunk(
   'trips/end',
   async (
@@ -597,6 +613,14 @@ const tripSlice = createSlice({
           action.payload.vehicleId,
           action.payload.driverId,
         );
+      })
+      .addCase(backfillVgdTripReward.fulfilled, (state, action) => {
+        // reward is null for the expected "not processed yet" case (see
+        // tripsApi.backfillRewardFromVgd) — nothing to store yet, a later
+        // app session's sync will retry this same trip.
+        if (!action.payload.reward) return;
+        const trip = state.trips.find(t => t.id === action.payload.localTripId);
+        if (trip) trip.reward = action.payload.reward;
       });
   },
 });

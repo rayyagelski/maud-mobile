@@ -244,7 +244,7 @@ export default function TripHistoryScreen() {
         <Text style={styles.sectionTitle}>COST & IMPACT</Text>
         <View style={styles.costRow}>
           <CostCard
-            icon={<Text style={styles.euroIcon}>{stats.currencyCode ? currencySymbol(stats.currencyCode) : '€'}</Text>}
+            icon={<Text style={styles.euroIcon}>{stats.currencyCode ? currencySymbol(stats.currencyCode) : '$'}</Text>}
             label="Total Savings"
             value={stats.currencyCode ? `${(stats.totalSavedCents / 100).toFixed(2)} ${stats.currencyCode}` : '—'}
           />
