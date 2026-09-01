@@ -28,7 +28,7 @@ import {
   type LatLng, type HereRouteResult, type AddressSuggestion,
 } from '../../services/here/hereRoutingClient';
 import {
-  formatDistance, formatDuration, litersToGallons, gramsToLbs, estimateFuelCo2Grams,
+  formatDistance, formatDuration, litersToGallons, gramsToLbs, estimateFuelCo2Grams, gallonLitersForCountry,
 } from '../../utils/helpers';
 import { getConditionsAt, type WeatherConditions } from '../../services/weather/weatherClient';
 import { CloudIcon } from '../../components/icons';
@@ -233,7 +233,14 @@ export default function RoutePlannerScreen() {
     }
     let cancelled = false;
     vehiclesApi.getOwnershipCostRate(fuelPriceVehicleId)
-      .then((res) => { if (!cancelled) setOwnershipCostRate(res.data); })
+      .then((res) => {
+        if (cancelled) return;
+        setOwnershipCostRate(res.data);
+        // Temporary diagnostic — an implausibly high Trip Cost estimate is
+        // easier to trace with the per-component rates visible than with
+        // just the combined total. Safe to remove once verified.
+        console.log('[RoutePlanner] ownership cost rate breakdown (per minute):', res.data);
+      })
       .catch(() => { if (!cancelled) setOwnershipCostRate(null); });
     return () => { cancelled = true; };
   }, [fuelPriceVehicleId]);
@@ -368,7 +375,7 @@ export default function RoutePlannerScreen() {
     : isElectric
       ? `${fuelOrEnergyUsed.toFixed(1)} kWh` // no US-specific EV energy unit; kWh is used in both locales
       : isImperial
-        ? `${litersToGallons(fuelOrEnergyUsed).toFixed(1)} gal`
+        ? `${litersToGallons(fuelOrEnergyUsed, gallonLitersForCountry(fuelPrice?.countryCode)).toFixed(1)} gal`
         : `${fuelOrEnergyUsed.toFixed(1)} L`;
 
   // CO2 estimate — only for combustion fuel types (see estimateFuelCo2Grams'
@@ -383,11 +390,10 @@ export default function RoutePlannerScreen() {
       : `${(co2Grams / 1000).toFixed(1)} kg`;
 
   // Trip cost estimate — fuel/energy cost plus prorated ownership cost
-  // (Insurance/Tax/Leasing/Financing), matching TripDetailScreen's
-  // TotalCostCalculator methodology for those two components. Repair/
-  // maintenance is excluded (see estimateTripCostForRoute's doc comment).
+  // (Insurance/Tax/Leasing/Financing) and prorated maintenance cost, matching
+  // TripDetailScreen's TotalCostCalculator methodology for those components.
   // Same "omit rather than fabricate" convention: no label at all until at
-  // least one of fuel or ownership cost is known.
+  // least one component is known.
   const tripCostAmount = route && distanceKm != null
     ? estimateTripCostForRoute(distanceKm, route.durationSeconds)
     : null;

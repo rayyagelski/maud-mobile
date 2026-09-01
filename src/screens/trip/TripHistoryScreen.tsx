@@ -12,6 +12,7 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
+import { useVgdEndAddresses } from '../../hooks/useVgdEndAddresses';
 import {
   formatDuration, formatDistance, formatSpeed, tripDistanceKm, tripDurationSeconds,
 } from '../../utils/helpers';
@@ -120,6 +121,8 @@ export default function TripHistoryScreen() {
       .filter(t => tripType === 'All' || t.tripType === TRIP_TYPE_MAP[tripType])
       .sort((a, b) => b.startTime - a.startTime);
   }, [allTrips, selectedTime, tripType]);
+
+  const endAddressCities = useVgdEndAddresses(filteredTrips);
 
   const stats = useMemo(() => {
     const durations = filteredTrips.map(tripDurationSeconds);
@@ -281,10 +284,15 @@ export default function TripHistoryScreen() {
               <Text style={styles.historyDate}>
                 {new Date(trip.startTime).toLocaleDateString()}
               </Text>
-              <Text style={styles.historyTime}>
-                {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                {' • '}{formatDistance(tripDistanceKm(trip), isImperial)}
-              </Text>
+              <View style={styles.historyMain}>
+                <Text style={styles.historyTime} numberOfLines={1}>
+                  {new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {endAddressCities[trip.id] ? `, ${endAddressCities[trip.id]}` : ''}
+                </Text>
+                <Text style={styles.historyDistance}>
+                  {formatDistance(tripDistanceKm(trip), isImperial)}
+                </Text>
+              </View>
               <Text style={styles.historyArrow}>›</Text>
             </TouchableOpacity>
           ))}
@@ -400,7 +408,9 @@ const styles = StyleSheet.create({
   historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
   historyRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
   historyDate: { fontSize: 13, color: '#888', width: 90 },
+  historyMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   historyTime: { flex: 1, fontSize: 13, color: '#333' },
+  historyDistance: { fontSize: 13, color: '#333', textAlign: 'right', marginRight: 12 },
   historyArrow: { fontSize: 16, color: '#CCCCCC' },
   emptyText: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 12 },
 });

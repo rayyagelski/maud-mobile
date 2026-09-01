@@ -7,7 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon, DollarIcon,
+  LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon, DollarIcon, FlashIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useVgdEndAddresses } from '../../hooks/useVgdEndAddresses';
@@ -146,7 +146,12 @@ function RewardCol({ icon, value, label }: { icon: React.ReactNode; value: strin
 
 // ── Baseline comparison ─────────────────────────────────────────────────────
 
-function BaselineBars({ baselineSum, usedSum }: { baselineSum: number; usedSum: number }) {
+function BaselineBars({
+  baselineSum, usedSum, isElectric, timeframeLabel, trendImproving,
+}: {
+  baselineSum: number; usedSum: number; isElectric: boolean;
+  timeframeLabel: string; trendImproving: boolean | null;
+}) {
   if (baselineSum <= 0) {
     return <Text style={baselineSt.noData}>Not enough data yet for this period.</Text>;
   }
@@ -154,28 +159,68 @@ function BaselineBars({ baselineSum, usedSum }: { baselineSum: number; usedSum: 
   const percentBetter = Math.round(((baselineSum - usedSum) / baselineSum) * 100);
   const better = percentBetter >= 0;
   const barColor = better ? TEAL : RED;
+  const cohort = isElectric ? 'similar EV drivers' : 'similar drivers';
 
   return (
     <View>
-      <Text style={baselineSt.label}>Baseline</Text>
+      <View style={baselineSt.titleRow}>
+        <Text style={baselineSt.title}>Baseline</Text>
+        <Text style={baselineSt.subtitle}>
+          {'  '}({isElectric ? 'similar EVs' : 'similar vehicles'} / conditions)
+        </Text>
+      </View>
       <View style={baselineSt.track}>
         <View style={[baselineSt.fill, baselineSt.fillGrey]} />
       </View>
-      <View style={baselineSt.track}>
-        <View style={[baselineSt.fill, { width: `${Math.min(100, usedPct)}%` as any, backgroundColor: barColor }]} />
+      <View style={baselineSt.usedRow}>
+        <View style={[baselineSt.track, baselineSt.usedTrack]}>
+          <View style={[baselineSt.fill, { width: `${Math.min(100, usedPct)}%` as any, backgroundColor: barColor }]} />
+        </View>
+        <Text style={baselineSt.chevron}>›</Text>
       </View>
-      <Text style={baselineSt.summary}>
-        You drove {Math.abs(percentBetter)}% {better ? 'more' : 'less'} efficient than regular drivers.
-      </Text>
+      <Text style={baselineSt.caption}>Your Driving{isElectric ? ' + Charging' : ''}</Text>
+      <View style={[baselineSt.quoteBox, !better && baselineSt.quoteBoxWorse]}>
+        <Text style={baselineSt.quoteText}>
+          You drove{isElectric ? ' + charged' : ''} {better ? 'more' : 'less'} efficiently than{' '}
+          <Text style={baselineSt.quoteBold}>{Math.abs(percentBetter)}%</Text> of {cohort}.
+        </Text>
+      </View>
+      <View style={baselineSt.footerRow}>
+        <Text style={baselineSt.footerText}>Last {timeframeLabel}</Text>
+        {trendImproving !== null && (
+          <View style={baselineSt.trendRow}>
+            <Text style={[baselineSt.trendFooterText, { color: trendImproving ? TEAL : RED }]}>
+              {trendImproving ? 'improving' : 'declining'}
+            </Text>
+            <TrendUpIcon
+              color={trendImproving ? TEAL : RED}
+              size={12}
+            />
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 const baselineSt = StyleSheet.create({
-  label: { fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 8 },
-  track: { height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: '#F0F0F0', marginBottom: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 },
+  title: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+  subtitle: { fontSize: 12, color: '#888' },
+  track: { height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: '#F0F0F0' },
+  usedRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4, marginTop: 8, marginBottom: 8 },
+  usedTrack: { flex: 1 },
   fill: { height: '100%', borderRadius: 5 },
   fillGrey: { width: '100%', backgroundColor: '#D9D9D9' },
-  summary: { fontSize: 13, color: '#333', marginTop: 4, lineHeight: 19 },
+  chevron: { fontSize: 18, color: TEAL, fontWeight: '700' },
+  caption: { fontSize: 13, color: '#888', marginBottom: 12 },
+  quoteBox: { backgroundColor: '#E6F7F7', borderRadius: 14, padding: 16, marginBottom: 12 },
+  quoteBoxWorse: { backgroundColor: '#FCEAEA' },
+  quoteText: { fontSize: 14, color: '#1A1A1A', textAlign: 'center', lineHeight: 21 },
+  quoteBold: { fontWeight: '800' },
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  footerText: { fontSize: 12, color: '#888' },
+  trendRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  trendFooterText: { fontSize: 12, fontWeight: '700' },
   noData: { fontSize: 12, color: '#AAAAAA' },
 });
 
@@ -216,8 +261,26 @@ export default function EcoScoreScreen() {
   const currencyCode = savedTrips[0]?.reward?.currencyCode ?? null;
 
   const scoredTrips = useMemo(() => current.filter(t => t.reward), [current]);
+  const prevScoredTrips = useMemo(() => previous.filter(t => t.reward), [previous]);
 
   const { baselineSum, usedSum } = useMemo(() => baselineComparison(scoredTrips), [scoredTrips]);
+  const { baselineSum: prevBaselineSum, usedSum: prevUsedSum } = useMemo(
+    () => baselineComparison(prevScoredTrips),
+    [prevScoredTrips],
+  );
+  const percentBetter = baselineSum > 0 ? Math.round(((baselineSum - usedSum) / baselineSum) * 100) : null;
+  const prevPercentBetter = prevBaselineSum > 0
+    ? Math.round(((prevBaselineSum - prevUsedSum) / prevBaselineSum) * 100)
+    : null;
+  const baselineTrendImproving = percentBetter !== null && prevPercentBetter !== null
+    ? percentBetter >= prevPercentBetter
+    : null;
+
+  const isElectric = scoredTrips.some(t => t.reward?.fuelType === 'electric');
+  // No currency data yet (fuel/electricity price wasn't available when the
+  // trip was scored) — fall back to the raw energy saved so the tile isn't
+  // just blank, same underlying baselineSum/usedSum the Baseline card uses.
+  const energySavedRaw = baselineSum - usedSum;
 
   // Every completed trip in range, not just scored ones — a VGD-backfilled
   // trip (source: 'vgd') that never went through the mobile reward-submission
@@ -324,8 +387,16 @@ export default function EcoScoreScreen() {
         <View style={styles.card}>
           <View style={styles.rewardsRow}>
             <RewardCol
-              icon={<DollarIcon color="#888" size={20} />}
-              value={currencyCode ? `${(totalSavedCents / 100).toFixed(2)} ${currencyCode}` : '—'}
+              icon={currencyCode
+                ? <DollarIcon color="#888" size={20} />
+                : isElectric ? <FlashIcon color="#888" size={20} /> : <DollarIcon color="#888" size={20} />}
+              value={
+                currencyCode
+                  ? `${(totalSavedCents / 100).toFixed(2)} ${currencyCode}`
+                  : energySavedRaw > 0
+                    ? `${energySavedRaw.toFixed(1)} ${isElectric ? 'kWh' : 'L'}`
+                    : '—'
+              }
               label="Saved" />
             <View style={styles.rewardsDivider} />
             <RewardCol
@@ -336,7 +407,13 @@ export default function EcoScoreScreen() {
             <RewardCol icon={<StarOutlineIcon color="#888" size={20} />} value={`+${totalPoints}`} label="Eco Points" />
           </View>
           <View style={styles.baselineDivider} />
-          <BaselineBars baselineSum={baselineSum} usedSum={usedSum} />
+          <BaselineBars
+            baselineSum={baselineSum}
+            usedSum={usedSum}
+            isElectric={isElectric}
+            timeframeLabel={selectedTime}
+            trendImproving={baselineTrendImproving}
+          />
         </View>
 
         {/* Eco Savings Trend */}

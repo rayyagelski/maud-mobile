@@ -11,8 +11,10 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchExpenses, fetchExpenseSummary } from '../../store/slices/expenseSlice';
 import { vehiclesApi } from '../../api';
+import { pricePerLiterToPricePerGallon, pricePerGallonToPricePerLiter, gallonLitersForCountry } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Expense, ExpenseSummaryCategory } from '../../types/expense.types';
 import type { FuelPriceResponse } from '../../types/vehicle.types';
@@ -255,9 +257,22 @@ export default function ExpensesScreen() {
     vehiclesApi.getFuelPrice(vehicleId).then(res => setFuelPrice(res.data)).catch(() => setFuelPrice(null));
   }, [vehicleId]);
 
+  const isImperial = useIsImperialUnits();
   const isElectric = fuelPrice?.electricityPricePerKwh != null;
-  const defaultFuelUnitPrice = isElectric ? fuelPrice?.electricityPricePerKwh : fuelPrice?.fuelPricePerLiter;
-  const fuelUnitLabel = isElectric ? 'Price per kWh' : 'Price per Liter';
+  // US and UK gallons differ by ~20% — the backend now tells us which
+  // country this customer is in so the right one is used, rather than
+  // assuming US for every `hasImperialUnits` account.
+  const gallonLiters = gallonLitersForCountry(fuelPrice?.countryCode);
+  // Backend always returns fuel price per liter — electricity has no
+  // gallon-equivalent unit, so only the fuel (non-electric) branch converts
+  // for display/entry under a US/UK (imperial) account.
+  const defaultFuelUnitPricePerLiter = isElectric ? undefined : fuelPrice?.fuelPricePerLiter;
+  const defaultFuelUnitPrice = isElectric
+    ? fuelPrice?.electricityPricePerKwh
+    : (defaultFuelUnitPricePerLiter != null && isImperial
+      ? pricePerLiterToPricePerGallon(defaultFuelUnitPricePerLiter, gallonLiters)
+      : defaultFuelUnitPricePerLiter);
+  const fuelUnitLabel = isElectric ? 'Price per kWh' : (isImperial ? 'Price per Gallon' : 'Price per Liter');
 
   function selectTime(t: string) {
     setSelectedTime(t);
@@ -268,13 +283,20 @@ export default function ExpensesScreen() {
   // the backend (it has no forward fuel-price contract to read, unlike
   // leasing/insurance/tax) — scaling it by (user price / current default
   // price) lets the user answer "what if fuel costs X instead" without
-  // needing a new backend endpoint for it.
-  const parsedCustomPrice = parseFloat(customFuelPrice.replace(',', '.'));
+  // needing a new backend endpoint for it. The ratio must be computed in a
+  // single consistent unit — both figures are normalized to per-liter (or
+  // per-kWh for electric) here, since the user enters per-gallon under an
+  // imperial account but the backend default is always per-liter.
+  const parsedCustomPriceEntered = parseFloat(customFuelPrice.replace(',', '.'));
+  const parsedCustomPricePerLiter = (!isElectric && isImperial && Number.isFinite(parsedCustomPriceEntered))
+    ? pricePerGallonToPricePerLiter(parsedCustomPriceEntered, gallonLiters)
+    : parsedCustomPriceEntered;
+  const defaultUnitPricePerLiterOrKwh = isElectric ? fuelPrice?.electricityPricePerKwh : defaultFuelUnitPricePerLiter;
   const fuelPriceRatio = (
     activeTab === 'Prediction'
-    && Number.isFinite(parsedCustomPrice) && parsedCustomPrice > 0
-    && defaultFuelUnitPrice != null && defaultFuelUnitPrice > 0
-  ) ? parsedCustomPrice / defaultFuelUnitPrice : 1;
+    && Number.isFinite(parsedCustomPricePerLiter) && parsedCustomPricePerLiter > 0
+    && defaultUnitPricePerLiterOrKwh != null && defaultUnitPricePerLiterOrKwh > 0
+  ) ? parsedCustomPricePerLiter / defaultUnitPricePerLiterOrKwh : 1;
 
   const rawDataset = activeTab === 'Analytics' ? summary?.actual : summary?.predicted;
   const dataset = useMemo(() => {
@@ -285,7 +307,7 @@ export default function ExpensesScreen() {
     () => Object.values(dataset ?? {}).reduce((sum, v) => sum + v, 0),
     [dataset],
   );
-  const currencyCode = summary?.currencyCode ?? 'EUR';
+  const currencyCode = summary?.currencyCode ?? '$';
   const monthlyProjected = (total / Math.max(1, days)) * 30;
   const annualProjected = monthlyProjected * 12;
   const perDay = total / Math.max(1, days);

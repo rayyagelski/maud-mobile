@@ -3,13 +3,14 @@ import { vgdApi } from '../api';
 import type { Trip } from '../types/trip.types';
 
 // HERE reverse-geocoded addresses (see useVgdTripDetails) are typically
-// "Street, City, State ZIP, Country" — the city is reliably the second
-// segment from the end for both US and most international formats. Not a
-// real address parser, just a best-effort label for the Eco Score list.
+// "Street, City, State ZIP, Country" — the city is reliably the third
+// segment from the end once a street and state/zip are present, and the
+// first segment for shorter "City, Country" style addresses. Not a real
+// address parser, just a best-effort label for the Eco Score list.
 function cityFromAddress(address: string): string {
   const parts = address.split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length < 2) return parts[0] ?? address;
-  return parts[parts.length - 2];
+  if (parts.length < 3) return parts[0] ?? address;
+  return parts[parts.length - 3];
 }
 
 // Looks up each visible trip's VGD destination city — one getTripDetails

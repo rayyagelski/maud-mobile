@@ -23,6 +23,11 @@ export interface VgdPointParameters {
   // RoadTypeRenderer.php for the backend's own 1-5 -> description mapping.
   roadType?: number | null;
   speedLimit?: number | null; // m/s
+  // Only present on speed_limit-indicator events — total time spent above
+  // the posted limit for the whole violation, computed server-side
+  // (vgd_analytics' speedLimitPointsFilter.js), not sent by the mobile app.
+  // Mirrors App\DTO\VehicleGeneratedData\TripEventParameters::$minutes.
+  minutes?: number | null;
 }
 
 export interface VgdPoint {
@@ -129,9 +134,22 @@ export type VgdTripEventIndicator =
   | 'trip_start'
   | 'trip_end';
 
+// Flat shape, verified directly against vgd_query's real HTTP response
+// (GET /v1/trips/{id}/events, curled straight off the running prod
+// container, 2026-08-30) — gps/time/parameters sit at the top level
+// alongside `indicator`, there is no nested `point` wrapper. An earlier
+// version of this type (and every hook/screen built against it) assumed a
+// `point: {gps, time, parameters}` shape that never actually existed in the
+// API response, which silently zeroed out every reader of it (Road Type
+// Changes, trip waypoint pins, speed-limit/phone-usage map markers) since
+// `event.point` was always undefined — see useVgdRoadTypeBreakdown and
+// friends for the fix.
 export interface VgdTripEvent {
   indicator: VgdTripEventIndicator;
-  point: VgdPoint & { parameters: VgdPointParameters & { address?: string | null } };
+  gps: { lat: number; lon: number };
+  time: number; // whole-second unix timestamp
+  parameters: VgdPointParameters & { address?: string | null };
+  tripId: string;
 }
 
 export interface VgdTripEventsResponse {

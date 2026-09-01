@@ -68,7 +68,7 @@ export function useVgdRoadTypeBreakdown(trips: Trip[]): VgdRoadTypeBreakdown {
         if (result.status !== 'fulfilled') return;
         result.value.data.events.forEach((event) => {
           if (event.indicator !== 'road_type') return;
-          const fc = event.point?.parameters?.roadType;
+          const fc = event.parameters?.roadType;
           if (fc == null) return;
           const category = categoryForFunctionalClass(fc);
           if (category) next[category] += 1;

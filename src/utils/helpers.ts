@@ -98,8 +98,22 @@ export function formatDuration(seconds: number): string {
 
 const METERS_PER_MILE = 1609.344;
 const FEET_PER_METER = 3.28084;
-const LITERS_PER_GALLON = 3.785411784;
+const LITERS_PER_GALLON = 3.785411784; // US gallon — see US_GALLON_LITERS/UK_GALLON_LITERS below
 const GRAMS_PER_LB = 453.59237;
+
+// US and UK gallons differ by ~20% (US 3.785411784L vs UK/imperial
+// 4.54609L) despite both countries sharing the app's single
+// `hasImperialUnits` JWT claim. Price-per-gallon conversions need to pick
+// the right one — see gallonLitersForCountry.
+export const US_GALLON_LITERS = LITERS_PER_GALLON;
+export const UK_GALLON_LITERS = 4.54609;
+
+// Which gallon size applies for a given customer country. Defaults to the US
+// gallon for anyone else with `hasImperialUnits` set (i.e. US), since that's
+// the only other country this app currently treats as imperial.
+export function gallonLitersForCountry(countryCode: string | null | undefined): number {
+  return countryCode === 'GB' ? UK_GALLON_LITERS : US_GALLON_LITERS;
+}
 
 // Conversions match the exact formulas in the reward-model spec doc (mirrors
 // the backend's own US/EU unit-handling section), not approximations.
@@ -111,8 +125,16 @@ export function milesToKm(miles: number): number {
   return (miles * METERS_PER_MILE) / 1000;
 }
 
-export function litersToGallons(liters: number): number {
-  return liters / LITERS_PER_GALLON;
+export function litersToGallons(liters: number, gallonLiters: number = US_GALLON_LITERS): number {
+  return liters / gallonLiters;
+}
+
+export function pricePerLiterToPricePerGallon(pricePerLiter: number, gallonLiters: number = US_GALLON_LITERS): number {
+  return pricePerLiter * gallonLiters;
+}
+
+export function pricePerGallonToPricePerLiter(pricePerGallon: number, gallonLiters: number = US_GALLON_LITERS): number {
+  return pricePerGallon / gallonLiters;
 }
 
 export function gramsToLbs(grams: number): number {

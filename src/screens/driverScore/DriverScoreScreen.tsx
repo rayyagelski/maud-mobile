@@ -266,6 +266,38 @@ export default function DriverScoreScreen() {
     harshCornerCount: exposure.harshCornerCount + vgdBehavior.harshCornerCount,
   }), [exposure, vgdBehavior]);
 
+  // Real, unweighted totals for the selected period — what the UI actually
+  // displays per row (see BehaviorRow below). Deliberately separate from
+  // `exposure`/`exposureWithVgd` above: those are night/rain/highway-
+  // weighted specifically for the 0-100 score math (a real event can count
+  // as "more" than one toward the score), which would misrepresent an
+  // "absolute number of events" display — a genuine 15 cornering events must
+  // read as 15, not as some multiplied-up figure.
+  const rawCounts = useMemo(
+    () =>
+      current.reduce(
+        (acc, t) => {
+          const c = t.eventCounters;
+          if (c) {
+            acc.speedingSeconds += c.speedingSeconds;
+            acc.phoneTextSeconds += c.phoneTextSeconds;
+            acc.harshBrakeCount += c.harshBrakeCount;
+            acc.harshAccelCount += c.harshAccelCount;
+            acc.harshCornerCount += c.harshCornerCount;
+          }
+          return acc;
+        },
+        { speedingSeconds: 0, phoneTextSeconds: 0, harshBrakeCount: 0, harshAccelCount: 0, harshCornerCount: 0 },
+      ),
+    [current],
+  );
+  const rawCountsWithVgd = useMemo(() => ({
+    ...rawCounts,
+    harshBrakeCount: rawCounts.harshBrakeCount + vgdBehavior.harshBrakeCount,
+    harshAccelCount: rawCounts.harshAccelCount + vgdBehavior.harshAccelCount,
+    harshCornerCount: rawCounts.harshCornerCount + vgdBehavior.harshCornerCount,
+  }), [rawCounts, vgdBehavior]);
+
   const per100Mi = exposureWithVgd.miles > 0 ? exposureWithVgd.miles / 100 : null;
   const speedingRate = exposureWithVgd.driveSeconds > 0
     ? (exposureWithVgd.speedingSeconds / exposureWithVgd.driveSeconds) * 100 : 0;
@@ -390,26 +422,39 @@ export default function DriverScoreScreen() {
           </View>
         )}
 
-        {/* Driving Behavior — 0-100 subscores (not reward points), context-
-            weighted by night/rain/highway/after-midnight exposure. Bar color
-            and length both reflect the score, not the raw event count. */}
+        {/* Driving Behavior — real absolute event counts (not reward points,
+            not the 0-100 penalty score) for the selected period. The bar's
+            length/color still reflects the underlying context-weighted
+            score (speedingScore etc.) as a severity indicator, but the
+            number shown is the genuine count — see rawCountsWithVgd above. */}
         <SectionHeader title="Driving Behavior" subtitle={`${current.length} trips`} />
         <View style={styles.card}>
-          <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-            label="Speeding" count={speedingScore} unit=" / 100" barPct={speedingScore}
-            barColor={scoreColor(speedingScore)} />
-          <BehaviorRow icon={<PhoneIcon color="#888" size={16} />}
-            label="Phone Usage" count={phoneScore} unit=" / 100" barPct={phoneScore}
-            barColor={scoreColor(phoneScore)} />
-          <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-            label="Harsh Braking" count={harshBrakeScore} unit=" / 100" barPct={harshBrakeScore}
-            barColor={scoreColor(harshBrakeScore)} />
-          <BehaviorRow icon={<ArrowUpIcon color="#888" size={16} />}
-            label="Harsh Acceleration" count={harshAccelScore} unit=" / 100" barPct={harshAccelScore}
-            barColor={scoreColor(harshAccelScore)} />
-          <BehaviorRow icon={<RefreshIcon color="#888" size={16} />}
-            label="Cornering" count={harshCornerScore} unit=" / 100" barPct={harshCornerScore}
-            barColor={scoreColor(harshCornerScore)} last />
+          {vgdBehavior.isLoading ? (
+            // Render once, with the final VGD-merged numbers already in, rather
+            // than flashing local-only counts first and jumping a few seconds
+            // later — see useVgdBehaviorAggregate. Only blocks rendering when
+            // there's actually something to fetch (vgdOnlyTrips.length > 0);
+            // an account with no VGD-only trips never sees this at all.
+            <Text style={styles.noDataText}>Loading driving behavior…</Text>
+          ) : (
+            <>
+              <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
+                label="Speeding" count={Math.round(rawCountsWithVgd.speedingSeconds / 60)} unit=" min" barPct={speedingScore}
+                barColor={scoreColor(speedingScore)} />
+              <BehaviorRow icon={<PhoneIcon color="#888" size={16} />}
+                label="Phone Usage" count={Math.round(rawCountsWithVgd.phoneTextSeconds / 60)} unit=" min" barPct={phoneScore}
+                barColor={scoreColor(phoneScore)} />
+              <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
+                label="Harsh Braking" count={rawCountsWithVgd.harshBrakeCount} unit=" events" barPct={harshBrakeScore}
+                barColor={scoreColor(harshBrakeScore)} />
+              <BehaviorRow icon={<ArrowUpIcon color="#888" size={16} />}
+                label="Harsh Acceleration" count={rawCountsWithVgd.harshAccelCount} unit=" events" barPct={harshAccelScore}
+                barColor={scoreColor(harshAccelScore)} />
+              <BehaviorRow icon={<RefreshIcon color="#888" size={16} />}
+                label="Cornering" count={rawCountsWithVgd.harshCornerCount} unit=" events" barPct={harshCornerScore}
+                barColor={scoreColor(harshCornerScore)} last />
+            </>
+          )}
         </View>
 
         {/* Trip Insights — each bar/percent is this row's share of the sum

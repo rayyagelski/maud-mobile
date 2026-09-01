@@ -27,6 +27,10 @@ export interface FuelPriceResponse {
   fuelPricePerLiter: number | null;
   electricityPricePerKwh: number | null;
   currencyCode: string;
+  // ISO country code (e.g. 'US', 'GB') — needed to pick the right gallon
+  // size (US vs UK differ by ~20%) since both share the same
+  // `hasImperialUnits` JWT claim.
+  countryCode: string;
 }
 
 export interface TripCostResponse {
@@ -42,8 +46,15 @@ export interface TripCostResponse {
 // maintenanceCostPerMinute is a spread of the vehicle's trailing-12-months
 // service/repair invoices, so unlike ownershipCostPerMinute it's always a
 // real number (0 when there's no service history), never null.
+// insurance/tax/leasing/financingCostPerMinute are ownershipCostPerMinute's
+// own breakdown — included so an implausible estimate can be traced to one
+// specific misconfigured record instead of showing up as one opaque total.
 export interface OwnershipCostRateResponse {
   ownershipCostPerMinute: number | null;
+  insuranceCostPerMinute: number | null;
+  taxCostPerMinute: number | null;
+  leasingCostPerMinute: number | null;
+  financingCostPerMinute: number | null;
   maintenanceCostPerMinute: number;
   currencyCode: string;
 }

@@ -8,7 +8,7 @@ import Svg, { Circle, G } from 'react-native-svg';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MountainIcon, HourglassIcon, GaugeIcon,
-  LeafIcon, DollarIcon, PinIcon, CloudIcon, WarningTriangleIcon,
+  LeafIcon, DollarIcon,
   FlashIcon, StarOutlineIcon, LightbulbIcon, ChevronIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
@@ -19,18 +19,7 @@ import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
 } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
-import type { VgdTripEventIndicator } from '../../types/vgd.types';
 import type { TripCostResponse } from '../../types/vehicle.types';
-
-const EVENT_INDICATOR_LABELS: Record<VgdTripEventIndicator, string> = {
-  hard_braking: 'Hard braking',
-  acceleration: 'Harsh acceleration',
-  cornering: 'Harsh cornering',
-  speed_limit: 'Speed limit exceeded',
-  road_type: 'Road type change',
-  trip_start: 'Trip start',
-  trip_end: 'Trip end',
-};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -65,33 +54,6 @@ function ScoreArc({ score, label }: { score: number; label: string }) {
 const arcSt = StyleSheet.create({
   num: { fontSize: 22, fontWeight: '800', color: TEAL },
   lbl: { fontSize: 10, color: '#AAAAAA', marginTop: 1 },
-});
-
-// ── Behaviour bar ──────────────────────────────────────────────────────────
-
-function BehaviourBar({
-  label, count, color,
-}: { label: string; count: number; color: string }) {
-  const pct = Math.min(100, count * 20);
-  return (
-    <View style={bhSt.row}>
-      <Text style={bhSt.label}>{label}</Text>
-      <View style={bhSt.track}>
-        <View style={[bhSt.fill, { width: `${pct}%` as any, backgroundColor: color }]} />
-      </View>
-      <Text style={bhSt.pct}>{count}</Text>
-    </View>
-  );
-}
-const bhSt = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  label: { width: 120, fontSize: 13, color: '#555' },
-  track: {
-    flex: 1, height: 8, backgroundColor: '#EEEEEE', borderRadius: 4,
-    overflow: 'hidden', marginHorizontal: 10,
-  },
-  fill: { height: '100%', borderRadius: 4 },
-  pct: { width: 24, fontSize: 13, fontWeight: '700', color: '#1A1A1A', textAlign: 'right' },
 });
 
 // ── Stat row (icon + label + value) ───────────────────────────────────────
@@ -179,6 +141,12 @@ function TripBaselineBar({ baseline, used, onPress }: { baseline: number; used: 
         <ChevronIcon open={false} color="#AAAAAA" size={16} />
       </View>
       <Text style={ecoSt.baselineCaption}>Your Driving and Environmental Impact</Text>
+      <View style={[ecoSt.quoteBox, !better && ecoSt.quoteBoxWorse]}>
+        <Text style={ecoSt.quoteText}>
+          You drove {better ? 'more' : 'less'} efficiently than{' '}
+          <Text style={ecoSt.quoteBold}>{Math.abs(percentBetter)}%</Text> of similar drivers on this trip.
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -191,6 +159,10 @@ const ecoSt = StyleSheet.create({
   barRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   barRowTrack: { flex: 1, marginBottom: 0 },
   baselineCaption: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginTop: 10, marginBottom: 16 },
+  quoteBox: { backgroundColor: '#E6F7F7', borderRadius: 14, padding: 14, marginBottom: 16 },
+  quoteBoxWorse: { backgroundColor: '#FCEAEA' },
+  quoteText: { fontSize: 13, color: '#1A1A1A', textAlign: 'center', lineHeight: 19 },
+  quoteBold: { fontWeight: '800' },
   statsRow: {
     flexDirection: 'row', alignItems: 'stretch',
     borderWidth: 1, borderColor: '#EEEEEE', borderRadius: 14,
@@ -225,9 +197,6 @@ export default function TripDetailScreen() {
   const distanceKm = trip ? tripDistanceKm(trip) : 0;
   const durationSeconds = trip ? tripDurationSeconds(trip) : 0;
   const avgSpeedKmh = trip ? tripAvgSpeedKmh(trip) : 0;
-  const maxSpeedKmh = trip
-    ? Math.max(0, ...trip.route.map(p => (p.speed ?? 0) * 3.6))
-    : 0;
 
   const reward = trip?.reward;
 
@@ -259,18 +228,12 @@ export default function TripDetailScreen() {
     isProcessing: vgdProcessing,
   } = useVgdTripDetails(vgdEnabled ? trip?.vgdTripId : undefined, trip?.vehicleId ?? '');
   const vgdAnalytics = vgdDetails?.analytics;
-  // point is filtered defensively here — legacy VGD trip data (this read
-  // path only started actually returning data recently) can carry events
-  // with a missing/malformed point.
-  const visibleVgdEvents = vgdEvents.filter(
-    e => e.indicator !== 'trip_start' && e.indicator !== 'trip_end' && e.point,
-  );
 
   // A `source: 'vgd'` trip (backfilled from the backend, see
   // tripHistorySync.ts) has no route — fall back to VGD's own trip_start/
   // trip_end events, same as MyTripScreen.tsx.
-  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.point?.gps;
-  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.point?.gps;
+  const vgdStartPoint = vgdEvents.find(e => e.indicator === 'trip_start')?.gps;
+  const vgdEndPoint = vgdEvents.find(e => e.indicator === 'trip_end')?.gps;
   const start = trip?.route[0]
     ?? (vgdStartPoint ? { latitude: vgdStartPoint.lat, longitude: vgdStartPoint.lon } : undefined);
   const end = trip?.route[trip.route.length - 1]
@@ -361,16 +324,7 @@ export default function TripDetailScreen() {
         <View style={styles.card}>
           <StatRow icon={<MountainIcon color="#999" size={18} />} label="Distance" value={formatDistance(distanceKm, isImperial)} />
           <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} />
-          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Max Speed" value={formatSpeed(maxSpeedKmh, isImperial)} last />
-        </View>
-
-        {/* Driving behaviour — real harsh-event counts from onboard sensors */}
-        <Text style={styles.sectionTitle}>DRIVING BEHAVIOUR</Text>
-        <View style={styles.card}>
-          <BehaviourBar label="Harsh Braking" count={harshBrakeCount} color="#E53935" />
-          <BehaviourBar label="Harsh Acceleration" count={harshAccelCount} color="#F5A623" />
-          <BehaviourBar label="Harsh Cornering" count={harshCornerCount} color="#8B5CF6" />
+          <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} last />
         </View>
 
         {/* CO₂ & Cost */}
@@ -461,61 +415,6 @@ export default function TripDetailScreen() {
             </View>
           )}
         </View>
-
-        {/* Vehicle Generated Data — server-processed detail (addresses,
-            weather, road-type/speed-limit/harsh-event enrichment), read back
-            from vgd_query. Processed asynchronously by vgd_analytics after
-            trip-end, so this can take a little while to appear. */}
-        {vgdEnabled && (
-          <>
-            <Text style={styles.sectionTitle}>VEHICLE GENERATED DATA</Text>
-            <View style={styles.card}>
-              {vgdLoading && !vgdAnalytics ? (
-                <Text style={styles.emptyText}>Loading…</Text>
-              ) : vgdProcessing ? (
-                <Text style={styles.emptyText}>Still processing…</Text>
-              ) : vgdAnalytics ? (
-                <>
-                  {vgdAnalytics.startAddress && (
-                    <StatRow icon={<PinIcon color="#999" size={18} />} label="Start" value={vgdAnalytics.startAddress} />
-                  )}
-                  {vgdAnalytics.endAddress && (
-                    <StatRow icon={<PinIcon color="#999" size={18} />} label="End" value={vgdAnalytics.endAddress} />
-                  )}
-                  {vgdAnalytics.averageSpeed != null && (
-                    <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(vgdAnalytics.averageSpeed, isImperial)} />
-                  )}
-                  <StatRow icon={<LeafIcon color="#999" size={18} />} label="CO₂" value={`${Math.round(vgdAnalytics.co2emissions)} g/km`} />
-                  {(vgdAnalytics.endWeather?.temperatureDesc || vgdAnalytics.endWeather?.skyInfo) && (
-                    <StatRow
-                      icon={<CloudIcon color="#999" size={18} />}
-                      label="Weather"
-                      value={vgdAnalytics.endWeather?.skyInfo ?? vgdAnalytics.endWeather?.temperatureDesc ?? '—'}
-                      last
-                    />
-                  )}
-                </>
-              ) : (
-                <Text style={styles.emptyText}>No data available.</Text>
-              )}
-            </View>
-
-            {visibleVgdEvents.length > 0 && (
-              <View style={styles.card}>
-                {visibleVgdEvents.map((event, i) => (
-                  <StatRow
-                    key={`${event.indicator}-${event.point.time}-${i}`}
-                    icon={<WarningTriangleIcon color="#999" size={18} />}
-                    label={EVENT_INDICATOR_LABELS[event.indicator]}
-                    value={event.point.parameters.address
-                      ?? new Date(event.point.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    last={i === visibleVgdEvents.length - 1}
-                  />
-                ))}
-              </View>
-            )}
-          </>
-        )}
 
       </ScrollView>
       )}
