@@ -1,4 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { logout } from './authSlice';
 
 // Maps a car's Bluetooth hands-free device name to one of this account's
 // vehicles — local to this phone only (not synced to the backend), since
@@ -33,6 +34,15 @@ const bluetoothPairingSlice = createSlice({
     removePairing(state, action: PayloadAction<{ vehicleId: string }>) {
       state.pairings = state.pairings.filter(p => p.vehicleId !== action.payload.vehicleId);
     },
+  },
+  extraReducers: (builder) => {
+    builder
+      // Pairings map a BT device name to one of "this account's" vehicles
+      // (see the interface comment above) and are redux-persist'd with no
+      // per-user key — surviving a logout would let a different account
+      // that logs into the same phone inherit BT-vehicle mappings pointing
+      // at the previous user's vehicle IDs.
+      .addCase(logout, () => initialState);
   },
 });
 

@@ -79,6 +79,21 @@ export function reconcileTripHistory(
       .map(e => [e.externalTripId, e.reward]),
   );
 
+  // A 'vgd'-source trip can have been restored before the backend had
+  // scored it yet (or before a later re-run of the VGD-backfill endpoint
+  // added real energy/cost figures — see MyTripScreen.tsx's Cost &
+  // Consumption fallback), leaving `reward` permanently unset on the
+  // already-persisted local trip since this function previously only ever
+  // attached `reward` at creation time. Fill it in on every sync instead,
+  // same as a first-time restore would — additive-only still holds since
+  // this only touches trips with no `reward` yet, never overwrites an
+  // already-scored trip or a locally-recorded trip's own route/events.
+  const localTripsWithRewardsFilledIn = localTrips.map((trip) => {
+    if (trip.reward || !trip.vgdTripId) return trip;
+    const reward = rewardsByExternalTripId.get(trip.vgdTripId);
+    return reward ? { ...trip, reward } : trip;
+  });
+
   const restored = vgdSummaries
     .filter(summary => !knownVgdTripIds.has(summary.tripId))
     .map((summary) => {
@@ -87,5 +102,5 @@ export function reconcileTripHistory(
       return reward ? { ...trip, reward } : trip;
     });
 
-  return [...localTrips, ...restored];
+  return [...localTripsWithRewardsFilledIn, ...restored];
 }

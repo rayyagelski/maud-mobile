@@ -1,6 +1,6 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { vehiclesApi } from '../../api';
-import { setToken } from './authSlice';
+import { setToken, logout } from './authSlice';
 import type { Vehicle, VehicleState } from '../../types/vehicle.types';
 
 const initialState: VehicleState = {
@@ -72,7 +72,13 @@ const vehicleSlice = createSlice({
       })
       .addCase(selectVehicle.fulfilled, (state, action: PayloadAction<string>) => {
         state.selectedVehicle = state.vehicles.find(v => v.id === action.payload) ?? null;
-      });
+      })
+      // `vehicles` is redux-persist'd, and this slice's own state has no
+      // per-user key — without this, logging out and back in as a different
+      // account rehydrated the previous user's `vehicles`/`selectedVehicle`
+      // until a fresh fetchVehicles() overwrote the list, showing their car
+      // as selected on the home screen in the meantime.
+      .addCase(logout, () => initialState);
   },
 });
 

@@ -123,6 +123,22 @@ export default function SettingsScreen() {
             </View>
           </>
         )}
+
+        <Text style={[styles.sectionTitle, { marginTop: 20 }]}>SUPPORT</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Diagnostics')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Diagnostics</Text>
+              <Text style={styles.rowSubtitle}>
+                See exactly why trip auto-start did or didn't trigger on a recent drive — useful when
+                reporting an issue.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

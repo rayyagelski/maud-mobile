@@ -46,6 +46,7 @@ export type MainStackParamList = {
   DriverScore: undefined;
   EcoScore: undefined;
   Settings: undefined;
+  Diagnostics: undefined;
 };
 
 export type RootStackParamList = {

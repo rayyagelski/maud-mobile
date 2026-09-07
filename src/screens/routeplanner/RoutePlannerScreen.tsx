@@ -55,14 +55,29 @@ const FALLBACK_REGION = {
   longitudeDelta: 0.025,
 };
 
-// Simple warmth qualifier alongside the raw condition description (e.g.
-// "Cloudy/ Warm"), since the weather API only returns a sky condition, not
-// a hot/cold judgement.
+// Simple warmth qualifier alongside the raw condition description, since the
+// weather API only returns a sky condition, not a hot/cold judgement.
 function warmthLabel(temperatureC: number | null): string | null {
   if (temperatureC == null) return null;
   if (temperatureC >= 20) return 'Warm';
   if (temperatureC >= 10) return 'Mild';
   return 'Cold';
+}
+
+// HERE's `description` field (see hereWeatherClient.ts) is sometimes a
+// multi-sentence forecast blurb that already ends in a warmth word (e.g.
+// "Thundershowers. Partly sunny. Warm.") rather than the short single-term
+// sky condition ("Cloudy") the original "description/ warmth" join assumed —
+// unconditionally appending warmthLabel on top of that produced visibly
+// duplicated text ("Warm./ Warm"). Only append it when the description
+// doesn't already end with the same word.
+function formatWeatherCondition(description: string | null, temperatureC: number | null): string {
+  const warmth = warmthLabel(temperatureC);
+  const parts = [description?.trim()].filter((p): p is string => Boolean(p));
+  if (warmth && !parts[0]?.toLowerCase().includes(warmth.toLowerCase())) {
+    parts.push(warmth);
+  }
+  return parts.join(' / ');
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -328,13 +343,13 @@ export default function RoutePlannerScreen() {
   const isElectric = vehicle?.fuelType === 'electric';
   const distanceKm = route ? route.distanceMeters / 1000 : null;
 
-  // Estimated arrival date/time at the destination, for the weather card
-  // ("Thu 08") — the forecast shown is for whenever the driver actually
-  // gets there, not right now.
-  const arrivalDateLabel = route
-    ? new Date(Date.now() + route.durationSeconds * 1000)
-      .toLocaleDateString(undefined, { weekday: 'short', day: '2-digit' })
-    : '';
+  // getConditionsAt() below is a live "observation" fetch (see
+  // hereWeatherClient.ts), not a forecast — it reflects the weather at the
+  // destination right now, not whenever the driver actually arrives. This
+  // used to be labeled with the estimated arrival date instead, which
+  // implied a forecast the app was never actually fetching. Labeled here as
+  // "today"'s date to match what the data really is.
+  const currentConditionsDateLabel = new Date().toLocaleDateString(undefined, { weekday: 'short', day: '2-digit' });
 
   // Estimated fuel/energy used for the planned route — same (distance/100) *
   // consumption calc as before, just now unit-aware for display.
@@ -810,28 +825,32 @@ export default function RoutePlannerScreen() {
           value={tripCostLabel}
         />
 
-        {/* Destination weather — fail-soft, renders nothing if unavailable */}
+        {/* Destination weather — fail-soft, renders nothing if unavailable.
+            Styled to match the weather card on MyTripScreen (weatherCity/
+            weatherConditionGroup each take half the bottom row so a long
+            address and a long condition string wrap independently instead
+            of colliding — the previous unbalanced layout here let the
+            condition text push the address down to a truncated "4…"). */}
         {destinationWeather && (destinationWeather.temperatureC != null || destinationWeather.description) && (
           <View style={styles.weatherSection}>
             <Text style={styles.sectionTitle}>WEATHER</Text>
             <View style={styles.weatherCard}>
               <View style={styles.weatherTopRow}>
-                <Text style={styles.weatherDate}>{arrivalDateLabel}</Text>
+                <Text style={styles.weatherDate}>{currentConditionsDateLabel}</Text>
                 {destinationWeather.temperatureC != null && (
                   <Text style={styles.weatherTemp}>
                     {isImperial
-                      ? Math.round(destinationWeather.temperatureC * 9 / 5 + 32)
-                      : Math.round(destinationWeather.temperatureC)}
+                      ? `${Math.round(destinationWeather.temperatureC * 9 / 5 + 32)}°F`
+                      : `${Math.round(destinationWeather.temperatureC)}°C`}
                   </Text>
                 )}
               </View>
               <View style={styles.weatherBottomRow}>
-                <Text style={styles.weatherCity} numberOfLines={1}>{destinationQuery || 'Destination'}</Text>
+                <Text style={styles.weatherCity} numberOfLines={0}>{destinationQuery || 'Destination'}</Text>
                 <View style={styles.weatherConditionGroup}>
                   <CloudIcon color="#5B9BD5" size={20} />
                   <Text style={styles.weatherCondition}>
-                    {[destinationWeather.description, warmthLabel(destinationWeather.temperatureC)]
-                      .filter(Boolean).join('/ ')}
+                    {formatWeatherCondition(destinationWeather.description, destinationWeather.temperatureC)}
                   </Text>
                 </View>
               </View>
@@ -1075,11 +1094,11 @@ const styles = StyleSheet.create({
   weatherDate: { fontSize: 14, color: '#888888' },
   weatherTemp: { fontSize: 22, fontWeight: '800', color: '#1A1A1A' },
   weatherBottomRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
     marginTop: 6, columnGap: 10,
   },
-  weatherCity: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', flexShrink: 1 },
-  weatherConditionGroup: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
+  weatherCity: { flex: 1, fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  weatherConditionGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', columnGap: 6 },
   weatherCondition: { fontSize: 14, color: '#666666' },
 
   // Start Trip button

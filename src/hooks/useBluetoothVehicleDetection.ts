@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
+import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { useVoicePlayback } from './useVoicePlayback';
@@ -8,6 +10,25 @@ import {
   stopBluetoothVehicleDetection,
   subscribeBluetoothDeviceConnected,
 } from '../services/bluetooth/bluetoothVehicleDetectionModule';
+
+// BLUETOOTH_CONNECT is a runtime ("dangerous") permission on Android 12+
+// (API 31+) — without it, BluetoothVehicleDetectionModule.kt's own
+// hasPermission() check silently fails and start() resolves false with no
+// error, so the native BroadcastReceiver never registers and
+// getConnectedBluetoothDeviceName() returns null forever, even with a
+// genuine OS-level BT connection to a paired vehicle. Nothing in this app
+// ever requested it (only ACCESS_FINE_LOCATION is requested, in
+// AppNavigator.tsx) — real-world impact: BT-gated trip auto-start
+// (useTripAutoDetection.ts) silently never fired for any Android 12+ user,
+// indistinguishable from "not actually connected" with no visible error.
+// No-op on iOS/older Android, where the native side doesn't need it.
+async function ensureBluetoothPermission(): Promise<void> {
+  if (Platform.OS !== 'android' || Platform.Version < 31) return;
+  const status = await check(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT);
+  if (status !== RESULTS.GRANTED) {
+    await request(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT);
+  }
+}
 
 const PROMPT_TIMEOUT_MS = 15_000;
 
@@ -63,7 +84,10 @@ export function useBluetoothVehicleDetection(): {
   }
 
   useEffect(() => {
-    startBluetoothVehicleDetection();
+    let cancelled = false;
+    ensureBluetoothPermission().finally(() => {
+      if (!cancelled) startBluetoothVehicleDetection();
+    });
 
     const unsubscribe = subscribeBluetoothDeviceConnected(deviceName => {
       if (!deviceName) return;
@@ -92,6 +116,7 @@ export function useBluetoothVehicleDetection(): {
     });
 
     return () => {
+      cancelled = true;
       unsubscribe();
       stopBluetoothVehicleDetection();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);

@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { driversApi } from '../../api';
+import { logout } from './authSlice';
 import type { Driver, DriverState } from '../../types/driver.types';
 
 const initialState: DriverState = {
@@ -81,7 +82,11 @@ const driverSlice = createSlice({
         if (state.selectedDriver?.id === action.payload) {
           state.selectedDriver = state.drivers[0] ?? null;
         }
-      });
+      })
+      // Same stale-persisted-state issue as vehicleSlice's logout case: without
+      // this, the previous user's selectedDriver survived a logout/login as a
+      // different account until fetchDrivers() happened to overwrite it.
+      .addCase(logout, () => initialState);
   },
 });
 

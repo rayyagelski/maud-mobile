@@ -54,4 +54,10 @@ export type SyncQueueItemInput =
 
 export interface SyncQueueState {
   items: SyncQueueItem[];
+  // Drives the home-screen sync button's spinner/"Last synced" label and
+  // guards flushSyncQueue (syncEngine.ts) against overlapping runs — e.g. the
+  // connectivity listener and a manual button tap firing at the same moment,
+  // which would otherwise submit the same queued item twice.
+  isSyncing: boolean;
+  lastSyncedAt: number | null;
 }

@@ -117,11 +117,18 @@ function fromResponseDto(dto: TripRewardResponseDto): TripRewardResult {
     co2AvoidedGrams: dto.co2_avoided_grams,
     moneySavedCents: dto.money_saved_cents,
     currencyCode: dto.currency_code,
+    // Unconditionally dereferencing dto.voice_payload.* used to throw a
+    // plain TypeError (no HTTP status) whenever a response omitted or
+    // malformed this field — indistinguishable from a real network failure
+    // once it reached syncEngine.ts's retry loop, so a permanently-broken
+    // response got stuck "retrying" forever instead of surfacing as an
+    // actual error. Default to an empty payload instead — a missing voice
+    // narration just means the app stays silent about it, not a fatal error.
     voicePayload: {
-      script: dto.voice_payload.script,
-      summaryKey: dto.voice_payload.summary_key,
-      highlights: dto.voice_payload.highlights,
-      tips: dto.voice_payload.tips,
+      script: dto.voice_payload?.script ?? '',
+      summaryKey: dto.voice_payload?.summary_key ?? '',
+      highlights: dto.voice_payload?.highlights ?? [],
+      tips: dto.voice_payload?.tips ?? [],
     },
     aiNarrativeTip: dto.ai_narrative_tip ?? null,
   };

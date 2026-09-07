@@ -13,6 +13,7 @@ import {
   isBluetoothVehicleDetectionAvailable, getConnectedBluetoothDeviceName,
   subscribeBluetoothDeviceConnected, subscribeBluetoothDeviceDisconnected,
 } from '../services/bluetooth/bluetoothVehicleDetectionModule';
+import { logDiagnostic } from '../services/diagnosticsLog';
 
 // Vehicle is "moving" above this speed; below it counts as stopped. Shared
 // with a manual Route Planner start (see pendingStart below) and with
@@ -136,20 +137,17 @@ export function useTripAutoDetection() {
     });
     const unsubDisconnect = subscribeBluetoothDeviceDisconnected(() => {
       connectedBluetoothDeviceRef.current = null;
-      // BT disconnecting (engine off, or the phone walking out of range) is
-      // a much more reliable "the drive is over" signal than GPS speed when
-      // the vehicle stops somewhere GPS coverage is poor (parking garages,
-      // covered/indoor lots) — real-drive feedback: the phone was carried
-      // indoors and automated recording kept going for ~15 minutes because
-      // no further GPS fixes ever arrived to let the per-fix/watchdog
-      // stillness checks even notice the vehicle had stopped. Only kicks in
-      // if GPS hasn't already started that countdown itself (stillSinceRef
-      // already set), and only nudges the wall-clock watchdog's normal
-      // STILL_MS timer — doesn't end the trip immediately, since a driver
-      // could plausibly disconnect BT (e.g. phone call takes over the audio
-      // route) without actually having stopped.
-      if (isTrackingRef.current && stillSinceRef.current === null) {
-        stillSinceRef.current = Date.now();
+      // BT connection to the paired vehicle is a hard requirement for
+      // recording (see bluetoothGateLogic.ts) — losing it means the gate is
+      // no longer satisfied, so the trip ends now rather than waiting on the
+      // STILL_MS watchdog. Previously this only nudged the stillness timer
+      // (to tolerate a driver's phone call stealing the audio route without
+      // actually having stopped), but that left recording running—and able
+      // to re-announce out loud—well past the point BT was gone. Explicit
+      // product decision after a real incident: BT out of reach means
+      // recording stops, full stop.
+      if (isTrackingRef.current) {
+        endTripDueToStillness();
       }
     });
     return () => {
@@ -264,14 +262,23 @@ export function useTripAutoDetection() {
     // above), rather than starting the trip from wherever the car has driven
     // to by the time BT finally connects.
     function startOnceBluetoothReady(dispatchStart: () => void) {
-      if (isBluetoothGateSatisfied(
-        isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
-      )) {
+      const moduleAvailable = isBluetoothVehicleDetectionAvailable();
+      const connectedDevice = connectedBluetoothDeviceRef.current;
+      if (isBluetoothGateSatisfied(moduleAvailable, pairingsRef.current, connectedDevice)) {
         pendingBluetoothStartRef.current = null;
         dispatchStart();
         return;
       }
       if (!pendingBluetoothStartRef.current) {
+        // Diagnostic only, not user-facing — logged once per new hold (not
+        // per GPS fix) specifically so a "speed qualified but never started"
+        // report can be traced to the exact blocking condition (module not
+        // linked, no pairing saved at all, or a real connected-device-name
+        // mismatch against the saved pairing) instead of guessing again.
+        logDiagnostic(
+          'Speed qualified but BT gate not satisfied — holding start.',
+          { moduleAvailable, pairingsCount: pairingsRef.current.length, connectedDevice },
+        );
         pendingBluetoothStartRef.current = { capturedAt: Date.now(), dispatchStart };
       }
     }
@@ -301,10 +308,16 @@ export function useTripAutoDetection() {
         if (!isTrackingRef.current && pendingBluetoothStartRef.current) {
           const pendingBt = pendingBluetoothStartRef.current;
           if (Date.now() - pendingBt.capturedAt > PENDING_BLUETOOTH_START_TIMEOUT_MS) {
+            logDiagnostic('BT wait timed out — dropped the held start point.', {
+              waitedMs: Date.now() - pendingBt.capturedAt,
+            });
             pendingBluetoothStartRef.current = null;
           } else if (isBluetoothGateSatisfied(
             isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
           )) {
+            logDiagnostic('BT caught up — resuming held auto-start.', {
+              waitedMs: Date.now() - pendingBt.capturedAt,
+            });
             pendingBluetoothStartRef.current = null;
             pendingBt.dispatchStart();
             return;
@@ -312,7 +325,17 @@ export function useTripAutoDetection() {
         }
 
         // ── Auto-start ─────────────────────────────────────────────────────
-        if (!isTrackingRef.current && !endingRef.current && !pendingBluetoothStartRef.current) {
+        // Deliberately NOT also gated on `!pendingBluetoothStartRef.current`
+        // here — that ref only tracks an ambient/passive auto-detect attempt
+        // waiting on BT (see above), a completely different flow from a
+        // manually-armed Route Planner start below. Nesting the pending-start
+        // branch inside that guard used to mean a stray ambient BT-wait left
+        // over from earlier in the same drive (e.g. the car started moving
+        // once before BT finished connecting) silently blocked the explicit
+        // "Start Trip" tap from ever firing too — real-world symptom: driver
+        // taps Start Trip, drives the actual route, and the screen sits on
+        // "Waiting for movement…" indefinitely despite genuinely driving.
+        if (!isTrackingRef.current && !endingRef.current) {
           if (speedMs >= SPEED_START_MS) {
             // A pending start means the user already tapped "Start Trip" in
             // Route Planner — real intent, not ambient motion the app is
@@ -327,14 +350,34 @@ export function useTripAutoDetection() {
             } else if (pending) {
               stillSinceRef.current = null;
               movingSinceRef.current = null;
+              // Any stray ambient BT-wait is irrelevant now — explicit intent
+              // supersedes it, and leaving it set would incorrectly gate the
+              // *next* auto-detect fix after this trip ends.
+              pendingBluetoothStartRef.current = null;
               const plannedOrigin = pending.plannedRoute?.coordinates[0];
               const initialPoint = plannedOrigin
                 && haversineMeters(plannedOrigin, gpsPoint) <= PLANNED_ORIGIN_MAX_DRIFT_M
                 ? { ...gpsPoint, latitude: plannedOrigin.latitude, longitude: plannedOrigin.longitude }
                 : gpsPoint;
-              startOnceBluetoothReady(() => dispatch(startTrip({ ...pending, initialPoint })));
+              // Deliberately bypasses the BT gate (unlike the pure
+              // auto-detect path below) — the BT requirement exists to stop
+              // ambient/passive detection from silently recording (and once
+              // announcing "Recording in process" in public) with no real
+              // signal the driver is actually in a car. Tapping "Start Trip"
+              // in Route Planner is explicit, unambiguous intent; holding it
+              // hostage to a BT connection the driver may not even have set
+              // up left navigation, speed-zone alerts, and GPS/VGD
+              // transmission silently dead in the water (stuck on "Waiting
+              // for movement…" forever) for any driver without one — a real
+              // regression discovered after the BT-gate fix shipped.
+              dispatch(startTrip({ ...pending, initialPoint }));
               return;
             }
+
+            // Everything below is pure ambient/passive auto-detection —
+            // skipped while an earlier ambient attempt is still waiting on
+            // BT (pendingBluetoothStartRef), unlike the manual path above.
+            if (pendingBluetoothStartRef.current) return;
 
             // Reject a confident non-vehicle activity outright — walking,
             // running, or cycling at qualifying speed shouldn't even start
@@ -344,6 +387,14 @@ export function useTripAutoDetection() {
             const activity = location.activity;
             if (activity && activity.confidence >= MIN_ACTIVITY_CONFIDENCE
               && NON_VEHICLE_ACTIVITIES.has(activity.type)) {
+              // Diagnostic only — traces "speed qualified but auto-start
+              // never fired" reports to a misclassified activity (e.g. smooth
+              // highway driving occasionally read as "still"/"walking" by
+              // BackgroundGeolocation's on-device classifier) rather than BT.
+              logDiagnostic(
+                'Speed qualified but activity rejected as non-vehicle.',
+                { type: activity.type, confidence: activity.confidence, speedKmh: speedMs * 3.6 },
+              );
               movingSinceRef.current = null;
               return;
             }
@@ -366,6 +417,15 @@ export function useTripAutoDetection() {
               // particular fix isn't accurate enough to trust as the trip's
               // starting point — wait for more fixes rather than starting
               // off an unreliable reading.
+              if (!accurateEnough && Date.now() - movingSinceRef.current >= MOVING_CONFIRM_MS) {
+                // Diagnostic only — the confirm window has already elapsed,
+                // so this fix is genuinely stuck on GPS accuracy alone, not
+                // just still within the normal brief hold.
+                logDiagnostic(
+                  'Speed qualified and confirm window elapsed, but GPS accuracy too poor to finalize start.',
+                  { accuracyMeters: coords.accuracy, maxAllowed: MAX_START_ACCURACY_M },
+                );
+              }
               return;
             }
 
@@ -472,6 +532,15 @@ export function useTripAutoDetection() {
       },
     }).then((state) => {
       if (cancelled) return;
+      // Diagnostic only — confirms this whole hook actually mounted and
+      // reached BackgroundGeolocation setup at all. This effect only runs
+      // once locationGranted && locationOnboardingComplete are both true
+      // (see AppNavigator.tsx's TripDetectionRunner gating) — if a "drove
+      // and nothing happened" report shows none of this file's other
+      // diagnostic logs either, checking for the *absence* of this line is
+      // how to tell "auto-detection never started at all" apart from
+      // "started but a specific gate blocked it."
+      logDiagnostic('Mounted, BackgroundGeolocation ready.', { alreadyEnabled: state.enabled });
       if (!state.enabled) BackgroundGeolocation.start();
     });
 

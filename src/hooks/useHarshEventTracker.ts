@@ -21,7 +21,7 @@ import { generateId } from '../utils/helpers';
 import {
   SENSOR_SAMPLE_RATE_MS, SPEEDING_FLAT_THRESHOLD_KMH, MIN_PHONE_USAGE_EVENT_SECONDS, TRIP_AUTO_START_SPEED_KMH,
 } from '../utils/constants';
-import { isBluetoothGateSatisfied } from '../utils/bluetoothGateLogic';
+import { isBluetoothGateSatisfiedWhereEnforceable } from '../utils/bluetoothGateLogic';
 import {
   isBluetoothVehicleDetectionAvailable, getConnectedBluetoothDeviceName,
   subscribeBluetoothDeviceConnected, subscribeBluetoothDeviceDisconnected,
@@ -186,7 +186,7 @@ export function useHarshEventTracker(): void {
         backgroundedAt = Date.now();
         backgroundedAtPoint = lastGpsPoint;
         backgroundedWasViolationEligible = lastGpsSpeedMs >= PHONE_USAGE_MIN_SPEED_MS
-          && isBluetoothGateSatisfied(
+          && isBluetoothGateSatisfiedWhereEnforceable(
             isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
           );
       }

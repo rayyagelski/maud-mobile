@@ -24,6 +24,7 @@ import ServiceHistoryScreen from '../screens/serviceHistory/ServiceHistoryScreen
 import InvoiceScreen from '../screens/invoice/InvoiceScreen';
 import OdometerScreen from '../screens/odometer/OdometerScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import DiagnosticsScreen from '../screens/settings/DiagnosticsScreen';
 import DriversScreen from '../screens/drivers/DriversScreen';
 import AddDriverScreen from '../screens/drivers/AddDriverScreen';
 import type { MainStackParamList } from '../types/navigation.types';
@@ -67,6 +68,7 @@ export default function MainStackNavigator() {
       <Stack.Screen name="Invoice" component={InvoiceScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Odometer" component={OdometerScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Diagnostics" component={DiagnosticsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="RoutePlanner" component={RoutePlannerScreen} options={{ headerShown: false }} />
       <Stack.Screen name="TripSummary" component={TripSummaryScreen} options={{ headerShown: false }} />
       <Stack.Screen name="TripHistory" component={TripHistoryScreen} options={{ headerShown: false }} />

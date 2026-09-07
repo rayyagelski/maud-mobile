@@ -13,8 +13,10 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { fetchHereRoute, geocodeAddress, type LatLng } from '../../services/here/hereRoutingClient';
+import type { VgdTripEvent } from '../../types/vgd.types';
 import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
+  estimateFuelCo2Grams, litersToGallons,
 } from '../../utils/helpers';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 
@@ -64,6 +66,64 @@ function formatShortDuration(seconds: number): string {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return `${m}:${String(rem).padStart(2, '0')}`;
+}
+
+// VGD emits one speed_limit point per detection tick for as long as a
+// violation is ongoing, not one point per violation — an uninterrupted
+// stretch of speeding on the same road showed up as several near-identical
+// rows/pins (same address, same posted limit, seconds apart) instead of one.
+// This collapses a run of consecutive events sharing the same road + same
+// posted limit into a single group spanning from when the violation started
+// to when it ended; a new group starts as soon as the road or the posted
+// limit changes. Shared by the behavior list and the map pins so both agree
+// on what counts as "one" speeding event.
+function groupConsecutiveSpeedingEvents(events: VgdTripEvent[]): VgdTripEvent[][] {
+  const sorted = [...events].sort((a, b) => a.time - b.time);
+  const groups: VgdTripEvent[][] = [];
+  for (const event of sorted) {
+    const currentGroup = groups[groups.length - 1];
+    const prev = currentGroup?.[currentGroup.length - 1];
+    const sameRoad = prev != null && prev.parameters.address === event.parameters.address;
+    const sameLimit = prev != null && prev.parameters.speedLimit === event.parameters.speedLimit;
+    if (currentGroup && sameRoad && sameLimit) {
+      currentGroup.push(event);
+    } else {
+      groups.push([event]);
+    }
+  }
+  return groups;
+}
+
+// The violation's own end-to-end span covers repeated-tick duplicates; also
+// compare against the last tick's own reported duration (vgd_analytics'
+// speedLimitPointsFilter.js) in case that single point measured a longer run
+// than the gaps between this group's ticks imply.
+function speedingGroupDurationSeconds(group: VgdTripEvent[]): number {
+  const first = group[0];
+  const lastEvent = group[group.length - 1];
+  const spanSeconds = lastEvent.time - first.time;
+  const lastOwnDurationSeconds = lastEvent.parameters.minutes != null ? lastEvent.parameters.minutes * 60 : 0;
+  return Math.max(spanSeconds, lastOwnDurationSeconds);
+}
+
+function speedingGroupToBehaviorEvent(
+  group: VgdTripEvent[],
+  index: number,
+  fmtSpeedMs: (metersPerSecond: number) => string,
+): BehaviorEvent {
+  const first = group[0];
+  const maxSpeed = Math.max(...group.map(e => e.parameters.speed ?? 0));
+  const durationSeconds = speedingGroupDurationSeconds(group);
+
+  return {
+    key: `speed-${first.time}-${index}`,
+    kind: 'speeding',
+    timeMs: first.time * 1000,
+    address: first.parameters.address ?? null,
+    actualSpeed: maxSpeed > 0 ? fmtSpeedMs(maxSpeed) : null,
+    speedLimit: first.parameters.speedLimit != null ? fmtSpeedMs(first.parameters.speedLimit) : null,
+    duration: durationSeconds > 0 ? formatShortDuration(durationSeconds) : null,
+  };
 }
 
 function BehaviorEventRow({ event, last }: { event: BehaviorEvent; last: boolean }) {
@@ -150,18 +210,9 @@ export default function MyTripScreen() {
   // is the fallback so the two most safety-relevant event types are still
   // visible with their real detail (address, actual speed, duration, time)
   // instead of silently disappearing along with the map pins.
+  const speedingGroups = groupConsecutiveSpeedingEvents(speedLimitEvents);
   const behaviorEvents: BehaviorEvent[] = [
-    ...speedLimitEvents.map((event, i): BehaviorEvent => ({
-      key: `speed-${event.time}-${i}`,
-      kind: 'speeding',
-      timeMs: event.time * 1000,
-      address: event.parameters.address ?? null,
-      actualSpeed: event.parameters.speed != null ? fmtSpeedMs(event.parameters.speed) : null,
-      speedLimit: event.parameters.speedLimit != null ? fmtSpeedMs(event.parameters.speedLimit) : null,
-      duration: event.parameters.minutes != null
-        ? formatShortDuration(event.parameters.minutes * 60)
-        : null,
-    })),
+    ...speedingGroups.map((group, i) => speedingGroupToBehaviorEvent(group, i, fmtSpeedMs)),
     ...phoneUsageEvents.map((event, i): BehaviorEvent => ({
       key: `phone-${event.id}-${i}`,
       kind: 'phone_usage',
@@ -181,12 +232,36 @@ export default function MyTripScreen() {
   // fuelConsumption/electricityConsumption it defaults to 0 (not null) when
   // the vehicle never sent co2 point parameters, so a literal 0 here means
   // "no data", not "zero emissions".
-  const co2ImpactKg = vgdAnalytics?.co2emissions && distanceKm > 0
+  const vgdCo2ImpactKg = vgdAnalytics?.co2emissions && distanceKm > 0
     ? (vgdAnalytics.co2emissions * distanceKm) / 1000
     : null;
   // Whichever consumption figure VGD actually has for this vehicle (mobile
   // only sends one of fuel/battery point parameters per vehicle type).
   const consumptionPct = vgdAnalytics?.fuelConsumption ?? vgdAnalytics?.electricityConsumption ?? null;
+
+  // Fallback source for a route-less trip: vgdAnalytics' per-point CO2/fuel-%
+  // figures are essentially always null for these (see above), but
+  // trip.reward — backfilled from the backend's own trip_reward table
+  // (TripRewardProcessor.php, joined by vgdTripId === externalTripId, see
+  // reconcileTripHistory in tripHistorySync.ts) — carries a real
+  // fuelUsedLiters figure computed server-side from VGD's aggregate
+  // analytics, even when no per-point telemetry ever existed. Converted to
+  // CO2 client-side using the same EPA/DEFRA-style factors already used
+  // elsewhere in the app (estimateFuelCo2Grams), not a re-derivation of the
+  // backend's own co2_avoided_grams (which measures savings vs. a baseline,
+  // a different figure than total emitted).
+  const reward = trip?.reward;
+  const rewardCo2Grams = reward?.fuelUsedLiters != null
+    ? estimateFuelCo2Grams(reward.fuelType ?? undefined, reward.fuelUsedLiters)
+    : null;
+  const co2ImpactKg = vgdCo2ImpactKg ?? (rewardCo2Grams != null ? rewardCo2Grams / 1000 : null);
+  const consumptionDisplay = consumptionPct != null
+    ? `${consumptionPct.toFixed(1)}%`
+    : reward?.fuelUsedLiters != null
+      ? (isImperial ? `${litersToGallons(reward.fuelUsedLiters).toFixed(2)} gal` : `${reward.fuelUsedLiters.toFixed(2)} L`)
+      : reward?.kwhUsed != null
+        ? `${reward.kwhUsed.toFixed(1)} kWh`
+        : null;
   const endWeather = vgdAnalytics?.endWeather;
   // skyInfo is a raw HERE sky-condition code (e.g. "7"), not human-readable
   // text — only temperatureDesc ("Hot") is fit to show to a driver.
@@ -337,31 +412,39 @@ export default function MyTripScreen() {
               <WaypointPin label="B" color="#1A1A1A" />
             </Marker>
           )}
-          {mapReady && speedLimitEvents.map((event, i) => (
-            <Marker
-              key={`speed-${event.time}-${i}`}
-              coordinate={{ latitude: event.gps.lat, longitude: event.gps.lon }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
-            >
-              <View style={styles.eventDot} />
-              <Callout tooltip={false}>
-                <View style={styles.calloutBox}>
-                  <Text style={styles.calloutTitle}>Over Speed Limit</Text>
-                  {event.parameters.speedLimit != null && (
-                    <Text style={styles.calloutRow}>Speed Limit: {fmtSpeedMs(event.parameters.speedLimit)}</Text>
-                  )}
-                  {event.parameters.speed != null && (
-                    <Text style={styles.calloutRow}>Your Speed: {fmtSpeedMs(event.parameters.speed)}</Text>
-                  )}
-                  <Text style={styles.calloutMeta}>
-                    {fmtTime(event.time * 1000)}
-                    {event.parameters.address ? `, ${event.parameters.address}` : ''}
-                  </Text>
-                </View>
-              </Callout>
-            </Marker>
-          ))}
+          {mapReady && speedingGroups.map((group, i) => {
+            const first = group[0];
+            const maxSpeed = Math.max(...group.map(e => e.parameters.speed ?? 0));
+            const violationSeconds = speedingGroupDurationSeconds(group);
+            return (
+              <Marker
+                key={`speed-${first.time}-${i}`}
+                coordinate={{ latitude: first.gps.lat, longitude: first.gps.lon }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+              >
+                <View style={styles.eventDot} />
+                <Callout tooltip={false}>
+                  <View style={styles.calloutBox}>
+                    <Text style={styles.calloutTitle}>Over Speed Limit</Text>
+                    {first.parameters.speedLimit != null && (
+                      <Text style={styles.calloutRow}>Speed Limit: {fmtSpeedMs(first.parameters.speedLimit)}</Text>
+                    )}
+                    {maxSpeed > 0 && (
+                      <Text style={styles.calloutRow}>Your Speed: {fmtSpeedMs(maxSpeed)}</Text>
+                    )}
+                    {violationSeconds > 0 && (
+                      <Text style={styles.calloutRow}>Duration: {formatShortDuration(violationSeconds)}</Text>
+                    )}
+                    <Text style={styles.calloutMeta}>
+                      {fmtTime(first.time * 1000)}
+                      {first.parameters.address ? `, ${first.parameters.address}` : ''}
+                    </Text>
+                  </View>
+                </Callout>
+              </Marker>
+            );
+          })}
           {mapReady && phoneUsageEvents.map((event, i) => (
             <Marker
               key={`phone-${event.id}-${i}`}
@@ -476,7 +559,7 @@ export default function MyTripScreen() {
                       <Text style={styles.costCardLabel}> Consumption</Text>
                     </View>
                     <Text style={styles.costValue}>
-                      {consumptionPct != null ? `${consumptionPct.toFixed(1)}%` : '—'}
+                      {consumptionDisplay ?? '—'}
                     </Text>
                   </View>
                 </View>
