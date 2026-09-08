@@ -18,13 +18,25 @@ import { useAppSelector } from './useAppSelector';
 function openFocusSettings() {
   if (Platform.OS === 'android') {
     // Deep-links straight to the system's DND access/settings screen.
-    Linking.sendIntent('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS').catch(() => {
-      Linking.openSettings();
-    });
+    // sendIntent can reject (unsupported action) but real-drive feedback
+    // showed it can also throw synchronously — before ever returning a
+    // promise — on some OEMs/Android versions where this settings screen
+    // doesn't exist under this exact intent action. A bare .catch() only
+    // guards the rejection case, not a synchronous throw, so that crashed
+    // the whole app. Wrapped in try/catch for both failure modes; the
+    // fallback itself is guarded too since openSettings() can theoretically
+    // fail the same way.
+    try {
+      Linking.sendIntent('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS').catch(() => {
+        Linking.openSettings().catch(() => {});
+      });
+    } catch {
+      Linking.openSettings().catch(() => {});
+    }
   } else {
     // iOS has no public deep link into Focus/Driving mode settings — the
     // app's own Settings page is the closest reachable screen.
-    Linking.openSettings();
+    Linking.openSettings().catch(() => {});
   }
 }
 

@@ -58,18 +58,34 @@ export type LongitudinalEvent = 'harsh_brake' | 'harsh_accel' | null;
  * orientation relative to the direction of travel is unknown) corroborated by
  * the accelerometer's linear-acceleration magnitude (gravity removed).
  *
- * This is the SRS 4.4 "slip filtering": a phone jostle/drop produces an
- * accelerometer spike with no corresponding GPS speed change (rejected below
- * because gpsSpeedDeltaMs2 won't cross the threshold); GPS noise produces a
- * speed jump with no accelerometer corroboration (rejected because
- * linearAccelMagnitude won't be within tolerance of the GPS-implied magnitude).
+ * This is the SRS 4.4 "slip filtering": GPS noise producing a fake speed jump
+ * with no real physical force behind it is rejected because
+ * linearAccelMagnitude comes in well below what the GPS delta implies. A
+ * phone jostle/drop is independently rejected below by the plain threshold
+ * check, since it produces an accelerometer spike with no corresponding GPS
+ * speed change at all (gpsSpeedDeltaMs2 stays near zero either way).
+ *
+ * Deliberately NOT a symmetric "close to each other" check (that was the bug
+ * fixed here, 2026-09-08): `linearAccelMagnitude` is the accelerometer's PEAK
+ * over the gap between two GPS fixes (GPS fixes arrive on a distance filter,
+ * not a fixed interval — see useHarshEventTracker.ts), while
+ * `gpsSpeedDeltaMs2` is the AVERAGE deceleration/acceleration over that same,
+ * often multi-second gap. A real hard brake is rarely uniform — its peak
+ * force routinely exceeds the window's average by more than a couple of
+ * m/s², especially when the GPS gap is longer than the brake itself. Real-
+ * drive feedback confirmed this: multiple genuinely felt harsh-brake/accel
+ * events during a real drive never appeared in VGD, silently discarded here
+ * because the peak legitimately (and correctly) didn't match the average.
+ * Only a peak meaningfully SMALLER than the GPS-implied delta (i.e. GPS
+ * shows a speed change with no real corroborating force) is now treated as
+ * uncorroborated.
  */
 export function classifyLongitudinalEvent(
   gpsSpeedDeltaMs2: number,
   linearAccelMagnitude: number,
 ): LongitudinalEvent {
   const corroborated =
-    Math.abs(linearAccelMagnitude - Math.abs(gpsSpeedDeltaMs2)) <= SLIP_FILTER_TOLERANCE_MS2;
+    linearAccelMagnitude >= Math.abs(gpsSpeedDeltaMs2) - SLIP_FILTER_TOLERANCE_MS2;
 
   if (!corroborated) return null;
 

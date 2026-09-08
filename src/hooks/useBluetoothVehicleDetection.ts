@@ -5,6 +5,7 @@ import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { useVoicePlayback } from './useVoicePlayback';
 import { selectVehicle } from '../store/slices/vehicleSlice';
+import { setPairing } from '../store/slices/bluetoothPairingSlice';
 import {
   startBluetoothVehicleDetection,
   stopBluetoothVehicleDetection,
@@ -92,8 +93,26 @@ export function useBluetoothVehicleDetection(): {
     const unsubscribe = subscribeBluetoothDeviceConnected(deviceName => {
       if (!deviceName) return;
 
-      const pairing = pairingsRef.current.find(p => p.bluetoothDeviceName === deviceName);
-      if (!pairing) return; // Unpaired/unknown device — nothing to auto-select.
+      let pairing = pairingsRef.current.find(p => p.bluetoothDeviceName === deviceName);
+      let justAutoPaired = false;
+
+      // First-time connection to an unpaired device — real-world feedback:
+      // requiring a manual "Pair with this car" tap on VehicleListScreen
+      // even when the phone's OS-level BT was already connected to the car
+      // before the drive started meant the app never auto-started/auto-
+      // selected anything until that one tap happened, with no indication
+      // *why*. Auto-pairing here is only safe when there's exactly one
+      // vehicle on the account — no ambiguity to guess wrong. A multi-
+      // vehicle household still needs the explicit tap, since silently
+      // guessing which car a BT device belongs to could misattribute trips
+      // to the wrong vehicle with no easy way for the driver to notice.
+      if (!pairing && vehiclesRef.current.length === 1) {
+        pairing = { bluetoothDeviceName: deviceName, vehicleId: vehiclesRef.current[0].id };
+        dispatch(setPairing(pairing));
+        justAutoPaired = true;
+      }
+
+      if (!pairing) return; // Multiple vehicles, none paired yet — needs the manual tap.
 
       const vehicle = vehiclesRef.current.find(v => v.id === pairing.vehicleId);
       if (!vehicle) return;
@@ -106,8 +125,11 @@ export function useBluetoothVehicleDetection(): {
       const driverName = driverNameRef.current;
 
       speak(
-        `Trip will be recorded under ${driverName} in your ${vehicleName}. ` +
-        'Open the app to change vehicle or driver before driving.',
+        justAutoPaired
+          ? `Bluetooth paired with your ${vehicleName}. Trip will be recorded under ${driverName}. ` +
+            'Open the app to change vehicle, driver, or unpair before driving.'
+          : `Trip will be recorded under ${driverName} in your ${vehicleName}. ` +
+            'Open the app to change vehicle or driver before driving.',
       );
 
       if (timeoutRef.current) clearTimeout(timeoutRef.current);

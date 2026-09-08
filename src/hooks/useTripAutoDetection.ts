@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundGeolocation, { type Location } from 'react-native-background-geolocation';
+import type { GpsPoint } from '../types/trip.types';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { startTrip, endTrip, appendGpsPoint, clearPendingStart, setTracking } from '../store/slices/tripSlice';
@@ -102,6 +103,17 @@ export function useTripAutoDetection() {
   const endingRef      = useRef(false);   // guards against double-dispatch of endTrip
   const stillSinceRef  = useRef<number | null>(null);
   const movingSinceRef = useRef<number | null>(null);
+  // The first fix in the current qualifying-speed streak that was ALSO
+  // already accurate enough — captured separately from whichever fix
+  // happens to be current when MOVING_CONFIRM_MS finally elapses. Real-world
+  // feedback: using the elapsed-time fix as the trip's start point recorded
+  // the driver already several seconds/meters down the road (having held
+  // qualifying speed the whole time), which a reverse-geocode then resolves
+  // to a real but wrong neighboring address instead of the actual departure
+  // point. This still requires at least one accurate-enough fix (same
+  // guarantee MAX_START_ACCURACY_M was added for) — it just doesn't have to
+  // be the LAST one in the streak.
+  const earliestAccurateStartPointRef = useRef<GpsPoint | null>(null);
   // Live BT-connected-device name, independent of useBluetoothVehicleDetection
   // (that hook only cares about the connect *event*, for vehicle
   // auto-selection) — this needs to reflect current connection state at any
@@ -350,6 +362,7 @@ export function useTripAutoDetection() {
             } else if (pending) {
               stillSinceRef.current = null;
               movingSinceRef.current = null;
+              earliestAccurateStartPointRef.current = null;
               // Any stray ambient BT-wait is irrelevant now — explicit intent
               // supersedes it, and leaving it set would incorrectly gate the
               // *next* auto-detect fix after this trip ends.
@@ -396,6 +409,7 @@ export function useTripAutoDetection() {
                 { type: activity.type, confidence: activity.confidence, speedKmh: speedMs * 3.6 },
               );
               movingSinceRef.current = null;
+              earliestAccurateStartPointRef.current = null;
               return;
             }
 
@@ -411,6 +425,13 @@ export function useTripAutoDetection() {
             }
 
             const accurateEnough = coords.accuracy == null || coords.accuracy <= MAX_START_ACCURACY_M;
+
+            // Remember the earliest fix in this streak that already met the
+            // accuracy bar — see earliestAccurateStartPointRef's doc comment.
+            // Only ever set once per streak (first qualifying one wins).
+            if (accurateEnough && earliestAccurateStartPointRef.current === null) {
+              earliestAccurateStartPointRef.current = gpsPoint;
+            }
 
             if (!accurateEnough || Date.now() - movingSinceRef.current < MOVING_CONFIRM_MS) {
               // Speed has qualified but hasn't held long enough yet, or this
@@ -429,8 +450,13 @@ export function useTripAutoDetection() {
               return;
             }
 
+            // Captured before resetting the ref below — the earliest
+            // accurate-enough fix in this streak, not necessarily this one.
+            const startPoint = earliestAccurateStartPointRef.current ?? gpsPoint;
+
             stillSinceRef.current = null;
             movingSinceRef.current = null;
+            earliestAccurateStartPointRef.current = null;
 
             startOnceBluetoothReady(() => dispatch(startTrip({
               vehicleId,
@@ -442,7 +468,7 @@ export function useTripAutoDetection() {
               // new backend Driver field, not just a client-side default).
               tripType: 'private',
               transportMode: 'car',
-              initialPoint: gpsPoint,
+              initialPoint: startPoint,
             })));
             return;
           }
@@ -452,6 +478,7 @@ export function useTripAutoDetection() {
           // duration again, same as a single noisy fix never counting on
           // its own.
           movingSinceRef.current = null;
+          earliestAccurateStartPointRef.current = null;
           return;
         }
 

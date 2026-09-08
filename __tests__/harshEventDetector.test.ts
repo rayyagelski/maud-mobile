@@ -31,6 +31,16 @@ describe('classifyLongitudinalEvent (slip filtering)', () => {
     expect(classifyLongitudinalEvent(-1, 1)).toBeNull();
     expect(classifyLongitudinalEvent(1, 1)).toBeNull();
   });
+
+  it('classifies harsh braking even when the accelerometer peak exceeds the GPS-average delta', () => {
+    // Real-drive bug (2026-09-08): a real hard brake's instantaneous peak
+    // routinely exceeds the average deceleration over the (irregular,
+    // distance-filtered) GPS gap — that's expected physics, not phone
+    // jostle. The old symmetric tolerance check rejected this as
+    // "uncorroborated" and silently discarded real driver-felt events.
+    expect(classifyLongitudinalEvent(-5, 8)).toBe('harsh_brake');
+    expect(classifyLongitudinalEvent(4, 9)).toBe('harsh_accel');
+  });
 });
 
 describe('classifyCornering', () => {
