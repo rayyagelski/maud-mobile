@@ -289,6 +289,7 @@ export default function HomeScreen() {
                   style={styles.btStatusRow}
                   onPress={() => navigation.navigate('VehicleList')}
                   activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 40 }}
                 >
                   <View style={[styles.btDot, { backgroundColor: btStatus.color }]} />
                   <Text style={styles.btStatusText}>{btStatus.label}</Text>

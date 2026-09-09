@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
@@ -51,6 +51,31 @@ export default function VehicleListScreen() {
     dispatch(removePairing({ vehicleId }));
   }
 
+  // Deep-links to the OS Bluetooth settings screen so the driver can connect
+  // to the car from there, then come back here to pair — this screen itself
+  // has no way to initiate an OS-level BT connection. Previously there was
+  // no action at all for "not connected" beyond a muted, non-interactive
+  // message. Same try/catch-guarded pattern as useDriveFocusReminder.ts's
+  // openFocusSettings: sendIntent can throw synchronously (not just reject)
+  // on some Android OEMs/versions, which a bare .catch() doesn't protect
+  // against — that exact gap crashed the app there, so it's guarded here
+  // from the start rather than repeating the bug.
+  function handleConnectBluetooth() {
+    if (Platform.OS === 'android') {
+      try {
+        Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() => {
+          Linking.openSettings().catch(() => {});
+        });
+      } catch {
+        Linking.openSettings().catch(() => {});
+      }
+    } else {
+      // iOS has no public deep link into Bluetooth settings — the app's own
+      // Settings page is the closest reachable screen.
+      Linking.openSettings().catch(() => {});
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <FlatList
@@ -93,7 +118,12 @@ export default function VehicleListScreen() {
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <Text style={styles.bluetoothTextMuted}>No car Bluetooth connected right now</Text>
+                  <>
+                    <Text style={styles.bluetoothTextMuted}>No car Bluetooth connected right now</Text>
+                    <TouchableOpacity onPress={handleConnectBluetooth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.bluetoothAction}>Connect Bluetooth</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
             </TouchableOpacity>

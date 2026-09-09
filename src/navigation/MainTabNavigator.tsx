@@ -1,5 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import HomeScreen from '../screens/home/HomeScreen';
 import ComplianceScreen from '../screens/compliance/ComplianceScreen';
 import BreakdownScreen from '../screens/breakdown/BreakdownScreen';
@@ -18,6 +19,8 @@ const breakdownTabIcon = ({ color }: { color: string }) => <BreakdownIcon color=
 const emergencyTabIcon = ({ color }: { color: string }) => <EmergencyIcon color={color} />;
 
 export default function MainTabNavigator() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -28,7 +31,13 @@ export default function MainTabNavigator() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#EBEBEB',
-          paddingBottom: 8,
+          // A hardcoded paddingBottom overrides react-navigation's own
+          // safe-area-aware default entirely, rather than adding to it — on
+          // a device with on-screen 3-button navigation (real screen space,
+          // non-zero bottom inset), the tab bar sat cramped right against
+          // the system nav bar instead of clearing it. Add the real inset
+          // on top of the intended visual padding instead of replacing it.
+          paddingBottom: 8 + insets.bottom,
           paddingTop: 8,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
