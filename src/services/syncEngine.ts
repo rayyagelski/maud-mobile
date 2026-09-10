@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { useAppDispatch } from '../hooks/useAppDispatch';
+import { useAppSelector } from '../hooks/useAppSelector';
 import { tripsApi } from '../api/endpoints/trips';
 import { expensesApi } from '../api/endpoints/expenses';
 import { vehiclesApi } from '../api/endpoints/vehicles';
@@ -107,6 +108,13 @@ const PERIODIC_FLUSH_INTERVAL_MS = 2 * 60 * 1000; // 2 min
 export function useSyncEngine() {
   const dispatch = useAppDispatch();
 
+  // Read via a ref (not a reactive dependency) so the interval below is set
+  // up once for the app's lifetime rather than being torn down and
+  // recreated on every enqueue/dequeue.
+  const pendingCountRef = useRef(0);
+  const pendingCount = useAppSelector(s => s.syncQueue.items.length);
+  useEffect(() => { pendingCountRef.current = pendingCount; }, [pendingCount]);
+
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       if (state.isConnected && state.isInternetReachable !== false) {
@@ -137,11 +145,16 @@ export function useSyncEngine() {
   // backgrounding it, NEITHER trigger fires again — nothing retries until a
   // manual tap. Client-reported concern: "if people forget to sync manually
   // all data in VGD is meaningless." This periodic tick is a safety net
-  // that doesn't depend on catching a transition — flushSyncQueue's own
-  // `condition` already no-ops cheaply when the queue is empty or a flush
-  // is already in flight, so ticking unconditionally is safe.
+  // that doesn't depend on catching a transition. Only actually dispatches
+  // when something is pending — ticking (and dispatching a thunk, however
+  // cheap) every 2 minutes for the app's entire lifetime with nothing to do
+  // is needless battery/wake-up cost, and would also silently bump
+  // "lastSyncedAt" (see syncFinished in syncQueueSlice.ts) even when nothing
+  // was ever actually synced.
   useEffect(() => {
-    const interval = setInterval(() => dispatch(flushSyncQueue()), PERIODIC_FLUSH_INTERVAL_MS);
+    const interval = setInterval(() => {
+      if (pendingCountRef.current > 0) dispatch(flushSyncQueue());
+    }, PERIODIC_FLUSH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [dispatch]);
 }
