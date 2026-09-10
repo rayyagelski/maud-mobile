@@ -166,7 +166,7 @@ export const submitVgdCreateTrip = createAsyncThunk(
 // server-side and in local Redux state. Fetches the current value fresh
 // (matches OdometerScreen's own approach) rather than trusting a possibly-
 // stale cached one. Independent of trip_reward/VGD, fire-and-forget from
-// endTrip, fail-soft — an odometer sync must never block trip completion.
+// endTrip, never blocks trip completion.
 export const updateOdometerAfterTrip = createAsyncThunk(
   'trips/updateOdometerAfterTrip',
   async (args: { vehicleId: string; distanceKm: number }, { dispatch }) => {
@@ -175,8 +175,21 @@ export const updateOdometerAfterTrip = createAsyncThunk(
       const newOdometer = res.data.odometer + args.distanceKm;
       await vehiclesApi.updateOdometer(args.vehicleId, newOdometer);
       dispatch(updateVehicleOdometer({ vehicleId: args.vehicleId, odometer: newOdometer }));
-    } catch {
-      // Fail-soft — odometer sync is best-effort.
+    } catch (err: unknown) {
+      // Previously silently dropped on ANY failure ("best-effort") — for a
+      // genuine offline failure this permanently lost the odometer update
+      // with no retry, unlike trip_reward/VGD above which already queue for
+      // automatic resync. Same convention as those: a real network failure
+      // (no HTTP response reached at all) queues for retry once connectivity
+      // returns; a real backend rejection is dropped, not retried, since it
+      // would just fail identically again. Deliberately stores the trip's
+      // distanceKm, not a pre-computed absolute odometer — the "current +
+      // distance" read has to happen fresh when the queue actually flushes
+      // (see flushSyncQueue in syncEngine.ts), not now while offline.
+      const status = (err as { status?: number } | undefined)?.status;
+      if (status === undefined) {
+        dispatch(enqueueSyncItem({ kind: 'odometer_update', vehicleId: args.vehicleId, distanceKm: args.distanceKm }));
+      }
     }
   },
 );

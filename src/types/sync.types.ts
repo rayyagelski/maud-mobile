@@ -37,11 +37,24 @@ interface VgdPatchPointsSyncItem {
   points: VgdPoint[];
 }
 
+// Stores the trip's driven distance, not a pre-computed absolute odometer
+// value — the actual "current + distance" read-modify-write has to happen
+// at flush time (when a real GET can succeed), not at enqueue time (offline,
+// by definition, whenever this item gets created at all).
+interface OdometerUpdateSyncItem {
+  id: string;
+  kind: 'odometer_update';
+  createdAt: number;
+  vehicleId: string;
+  distanceKm: number;
+}
+
 export type SyncQueueItem =
   | TripRewardSyncItem
   | ExpenseCreateSyncItem
   | VgdCreateTripSyncItem
-  | VgdPatchPointsSyncItem;
+  | VgdPatchPointsSyncItem
+  | OdometerUpdateSyncItem;
 
 // Omit-ing each variant individually (rather than the union as a whole) so
 // the discriminated union's per-variant fields (tripId vs vehicleId) survive
@@ -50,7 +63,8 @@ export type SyncQueueItemInput =
   | Omit<TripRewardSyncItem, 'id' | 'createdAt'>
   | Omit<ExpenseCreateSyncItem, 'id' | 'createdAt'>
   | Omit<VgdCreateTripSyncItem, 'id' | 'createdAt'>
-  | Omit<VgdPatchPointsSyncItem, 'id' | 'createdAt'>;
+  | Omit<VgdPatchPointsSyncItem, 'id' | 'createdAt'>
+  | Omit<OdometerUpdateSyncItem, 'id' | 'createdAt'>;
 
 export interface SyncQueueState {
   items: SyncQueueItem[];
