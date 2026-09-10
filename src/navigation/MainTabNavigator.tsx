@@ -39,6 +39,15 @@ export default function MainTabNavigator() {
           // on top of the intended visual padding instead of replacing it.
           paddingBottom: 8 + insets.bottom,
           paddingTop: 8,
+          // Without an explicit height, the library falls back to its own
+          // fixed default and does NOT grow to fit whatever extra padding
+          // is set above — real-drive feedback: adding the padding alone
+          // (previous fix) squeezed the icon+label into that same fixed-
+          // size area, clipping the label off the bottom entirely instead
+          // of just sitting close to the system nav bar as before. 58px
+          // covers icon + label + both paddings with headroom; insets.bottom
+          // extends it further for on-screen 3-button navigation.
+          height: 58 + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
