@@ -97,6 +97,12 @@ export const flushSyncQueue = createAsyncThunk<
   },
 );
 
+// How often the periodic safety-net retry below runs. Not aggressive — this
+// exists purely to catch the gap the two event-driven triggers below can't
+// cover, not to be the primary/fast path (that's still the NetInfo listener,
+// which fires within moments of a real connectivity change).
+const PERIODIC_FLUSH_INTERVAL_MS = 2 * 60 * 1000; // 2 min
+
 // Subscribes to connectivity/foreground changes and triggers flushSyncQueue.
 export function useSyncEngine() {
   const dispatch = useAppDispatch();
@@ -122,5 +128,20 @@ export function useSyncEngine() {
       if (state === 'active') dispatch(flushSyncQueue());
     });
     return () => subscription.remove();
+  }, [dispatch]);
+
+  // Real-world gap in the two triggers above (both are pure transitions):
+  // if an item gets queued while the phone is already on stable, good
+  // connectivity (e.g. a brief backend timeout, not an actual outage) and
+  // the user just keeps using the app without ever switching networks or
+  // backgrounding it, NEITHER trigger fires again — nothing retries until a
+  // manual tap. Client-reported concern: "if people forget to sync manually
+  // all data in VGD is meaningless." This periodic tick is a safety net
+  // that doesn't depend on catching a transition — flushSyncQueue's own
+  // `condition` already no-ops cheaply when the queue is empty or a flush
+  // is already in flight, so ticking unconditionally is safe.
+  useEffect(() => {
+    const interval = setInterval(() => dispatch(flushSyncQueue()), PERIODIC_FLUSH_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, [dispatch]);
 }
