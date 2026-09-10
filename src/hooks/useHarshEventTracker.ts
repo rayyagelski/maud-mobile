@@ -56,6 +56,7 @@ export function useHarshEventTracker(): void {
   // hook already independently mirrors whatever Redux state it needs via
   // refs, same as the rest of this app's hooks).
   const connectedBluetoothDeviceRef = useRef<string | null>(null);
+  const btPollInFlightRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     getConnectedBluetoothDeviceName().then((name) => {
@@ -128,6 +129,18 @@ export function useHarshEventTracker(): void {
     });
 
     const unsubscribeGps = subscribeGpsFix((speedMs, timestamp, point) => {
+      // Self-corrects connectedBluetoothDeviceRef against the native
+      // module's authoritative state — same fix and same reasoning as
+      // useTripAutoDetection.ts's copy of this ref (see its comment):
+      // event-driven updates alone can get stuck on a misordered HFP/A2DP
+      // disconnect broadcast, with no further event to correct it.
+      if (!btPollInFlightRef.current) {
+        btPollInFlightRef.current = true;
+        getConnectedBluetoothDeviceName()
+          .then((name) => { connectedBluetoothDeviceRef.current = name; })
+          .finally(() => { btPollInFlightRef.current = false; });
+      }
+
       if (lastGpsTimestamp != null) {
         const dtSeconds = (timestamp - lastGpsTimestamp) / 1000;
         if (dtSeconds > 0) {

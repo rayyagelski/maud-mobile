@@ -119,6 +119,9 @@ export function useTripAutoDetection() {
   // auto-selection) — this needs to reflect current connection state at any
   // moment, including "already connected before this hook mounted".
   const connectedBluetoothDeviceRef = useRef<string | null>(null);
+  // Guards the self-correcting poll below against overlapping calls if GPS
+  // fixes arrive faster than a poll can resolve.
+  const btPollInFlightRef = useRef(false);
   // A qualifying auto-start point (speed+activity+accuracy+confirm-timer all
   // satisfied) captured while the BT gate wasn't — real-world BT
   // reconnection to a car head unit can lag well behind these other checks
@@ -312,6 +315,48 @@ export function useTripAutoDetection() {
         accuracy:  coords.accuracy  ?? undefined,
         timestamp,
       };
+
+        // Self-corrects connectedBluetoothDeviceRef against the native
+        // module's own authoritative state on every fix while not yet
+        // tracking — event-driven updates alone (connect/disconnect
+        // broadcasts) proved unreliable across a reconnect: a car's
+        // hands-free connects via two independent Bluetooth profiles (HFP
+        // + A2DP) that negotiate separately and aren't guaranteed to report
+        // in a consistent order, so a late/reordered disconnect broadcast
+        // for one profile could null this ref out again right after a
+        // connect event for the other profile had correctly set it — with
+        // no further event ever arriving to correct it, permanently
+        // blocking auto-start for the rest of the session until a fresh,
+        // forceful reconnect (e.g. via the phone's OS Bluetooth settings,
+        // which produces a brand-new connect broadcast) happened to unstick
+        // it. Real-world symptom this fixes: BT auto-start worked the first
+        // time, then silently never fired again on any later drive despite
+        // the home screen correctly showing "Car connected" throughout
+        // (that badge polls fresh on its own mount, this ref didn't).
+        // Polling here is cheap and fixes arrive every few seconds while
+        // waiting to drive anyway, so this self-heals within moments
+        // instead of staying stuck indefinitely on one missed/misordered
+        // event.
+        if (!isTrackingRef.current && !btPollInFlightRef.current) {
+          btPollInFlightRef.current = true;
+          getConnectedBluetoothDeviceName()
+            .then((name) => {
+              if (name !== connectedBluetoothDeviceRef.current) {
+                // Diagnostic only — confirms (or rules out) the exact
+                // event-vs-truth desync this poll exists to correct. If
+                // this never appears in a real drive's log, the event-driven
+                // updates were keeping up fine on their own and the actual
+                // cause of a reported "worked once, never again" lies
+                // elsewhere.
+                logDiagnostic('BT ref corrected by poll — event-driven value was stale.', {
+                  staleValue: connectedBluetoothDeviceRef.current,
+                  actualValue: name,
+                });
+              }
+              connectedBluetoothDeviceRef.current = name;
+            })
+            .finally(() => { btPollInFlightRef.current = false; });
+        }
 
         // A qualifying point may already be captured and just waiting on BT
         // to catch up — checked on every fix regardless of current speed,
