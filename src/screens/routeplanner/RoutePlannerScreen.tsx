@@ -32,6 +32,7 @@ import {
 } from '../../utils/helpers';
 import { getConditionsAt, type WeatherConditions } from '../../services/weather/weatherClient';
 import { CloudIcon } from '../../components/icons';
+import { subscribeGpsFix } from '../../services/gpsSpeedBus';
 
 type RouteRecommendation = RouteRecommendationResult;
 
@@ -147,6 +148,14 @@ export default function RoutePlannerScreen() {
   }, [dispatch]);
 
   const [origin, setOrigin] = useState<LatLng | null>(null);
+  // Separate from `origin` deliberately — `origin` is the route-planning
+  // "from" point (fetched once, used to compute the route itself) and
+  // shouldn't drift as the driver actually moves, or the planned route
+  // would appear to keep recalculating from a moving start point mid-drive.
+  // This instead feeds the map's camera while a trip is actively tracking,
+  // reusing the same live GPS feed useHarshEventTracker already subscribes
+  // to (gpsSpeedBus.ts) rather than opening a second location subscription.
+  const [liveDriverPosition, setLiveDriverPosition] = useState<LatLng | null>(null);
   const [destinationQuery, setDestinationQuery] = useState('');
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   // routes[0] is always HERE's optimal route; index 0 is selected by default.
@@ -220,6 +229,24 @@ export default function RoutePlannerScreen() {
       { enableHighAccuracy: true },
     );
   }, []);
+
+  // Keeps the map centered on the driver's actual live position while a
+  // trip is tracking — previously the map's region was seeded once from the
+  // route-planning origin above and never updated again, so the camera
+  // stayed frozen wherever the driver was standing when this screen first
+  // opened, regardless of how far they'd actually driven since. Only
+  // subscribes while isTracking, so route-planning (before a trip starts)
+  // still shows the static origin-centered view, not a jittery live one.
+  useEffect(() => {
+    if (!isTracking) {
+      setLiveDriverPosition(null);
+      return undefined;
+    }
+    const unsubscribe = subscribeGpsFix((_speedMs, _timestamp, point) => {
+      setLiveDriverPosition({ latitude: point.latitude, longitude: point.longitude });
+    });
+    return unsubscribe;
+  }, [isTracking]);
 
   // Fuel/electricity price for the Trip Cost estimate below — fail-soft like
   // every other auxiliary lookup in this app (weather, AI tip, reward
@@ -586,8 +613,12 @@ export default function RoutePlannerScreen() {
     dispatch(dismissRerouteSuggestion());
   }
 
-  const mapRegion = origin
-    ? { ...origin, latitudeDelta: 0.045, longitudeDelta: 0.025 }
+  // While tracking, prefer the live GPS feed over the static planning
+  // origin so the map actually follows the driver — see liveDriverPosition's
+  // doc comment above for why this isn't just done by updating `origin`.
+  const mapCenter = (isTracking && liveDriverPosition) ? liveDriverPosition : origin;
+  const mapRegion = mapCenter
+    ? { ...mapCenter, latitudeDelta: 0.045, longitudeDelta: 0.025 }
     : FALLBACK_REGION;
 
   return (
