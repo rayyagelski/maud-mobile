@@ -93,6 +93,58 @@ export default function LocationPermissionScreen() {
     }
   }
 
+  // Android 12+ (API 31+) treats BLUETOOTH_CONNECT as a runtime permission —
+  // real feedback: the bare OS dialog ("Allow MAUDConnect to find, connect
+  // to, and determine the relative position of nearby devices?") showed up
+  // with no context, right after login, and read as unrelated/suspicious to
+  // users who had no idea it meant "detect your car's Bluetooth." Explains
+  // the actual reason first, same pattern as the background-location and
+  // battery-optimization steps above.
+  async function requestBluetoothPermission() {
+    if (Platform.OS !== 'android' || Platform.Version < 31) return;
+    try {
+      const current = await check(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT);
+      if (current === RESULTS.GRANTED) return;
+
+      await waitForActivityFocus();
+
+      await new Promise<void>((resolve) => {
+        Alert.alert(
+          'Connect to Your Car Automatically',
+          "MAUD Connect uses Bluetooth to detect the moment your phone connects to your car's audio system, so trip recording can start automatically when you drive — you won't need to open the app or tap anything.",
+          [{ text: 'Continue', onPress: () => resolve() }],
+        );
+      });
+
+      await request(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT);
+    } catch {
+      // Denied/unavailable — automatic Bluetooth-based trip start just won't
+      // be available; not fatal to onboarding.
+    }
+  }
+
+  // Android's own "physical activity" permission (ACTIVITY_RECOGNITION) is
+  // requested internally by react-native-background-geolocation the first
+  // time it starts (see useTripAutoDetection.ts) — this app never calls
+  // request() for it directly, so there's no request() call to precede here
+  // the way there is for location/Bluetooth above. Real feedback: users saw
+  // "Allow MAUDConnect to access your physical activity?" with zero context
+  // and assumed it meant fitness/step-tracking, asking "why does a driving
+  // app need this, are we running?" This is purely informational — it can't
+  // suppress or delay the SDK's own dialog, only explain it in advance so
+  // it isn't a surprise when it appears shortly after onboarding finishes.
+  async function explainActivityRecognition() {
+    if (Platform.OS !== 'android') return;
+    await waitForActivityFocus();
+    await new Promise<void>((resolve) => {
+      Alert.alert(
+        'Telling Driving Apart from Walking',
+        "Android will also ask to let MAUD Connect check your phone's activity type. This isn't fitness tracking — it's what lets automatic trip detection tell a real drive apart from walking or cycling, so it doesn't start or stop recording at the wrong time.",
+        [{ text: 'Continue', onPress: () => resolve() }],
+      );
+    });
+  }
+
   async function handleAllow() {
     setIsRequesting(true);
     try {
@@ -120,6 +172,8 @@ export default function LocationPermissionScreen() {
       if (result === RESULTS.GRANTED) {
         await requestBackgroundLocation();
         await requestBatteryOptimizationExemption();
+        await requestBluetoothPermission();
+        await explainActivityRecognition();
       }
     } catch {
       // Permission request failed — continue to app

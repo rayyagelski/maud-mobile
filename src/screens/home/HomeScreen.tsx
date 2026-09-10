@@ -152,11 +152,14 @@ export default function HomeScreen() {
   const btPairingForVehicle = displayVehicle
     ? pairings.find(p => p.vehicleId === displayVehicle.id)
     : undefined;
+  // Explicitly says "car" rather than just "Paired"/"Connected" — client
+  // feedback: the bare wording read as unclear/ambiguous (paired to what?
+  // connected to what?) without that context on screen.
   const btStatus: { label: string; color: string } = !btPairingForVehicle
-    ? { label: 'Not paired — tap to pair', color: '#B0B0B0' }
+    ? { label: 'Car not paired — tap to pair', color: '#B0B0B0' }
     : connectedBtDeviceName === btPairingForVehicle.bluetoothDeviceName
-      ? { label: 'Connected', color: '#27AE60' }
-      : { label: 'Paired, not connected', color: '#B0B0B0' };
+      ? { label: 'Car connected', color: '#27AE60' }
+      : { label: 'Car paired, not connected', color: '#B0B0B0' };
 
   function openDropdown() {
     vehicleCardRef.current?.measureInWindow(
@@ -297,21 +300,26 @@ export default function HomeScreen() {
               )}
             </View>
             <View style={styles.headerRight}>
-              <TouchableOpacity
-                style={styles.syncButton}
-                onPress={handleSyncPress}
-                activeOpacity={0.7}
-                disabled={isSyncing}
-              >
-                <RefreshIcon color={TEAL} />
-                {pendingSyncItems.length > 0 && (
-                  <View style={styles.syncBadge}>
-                    <Text style={styles.syncBadgeText}>
-                      {pendingSyncItems.length > 9 ? '9+' : pendingSyncItems.length}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
+              {/* Client feedback: the bare circular icon gave no indication
+                  of what it does — added a visible label underneath. */}
+              <View style={styles.syncColumn}>
+                <TouchableOpacity
+                  style={styles.syncButton}
+                  onPress={handleSyncPress}
+                  activeOpacity={0.7}
+                  disabled={isSyncing}
+                >
+                  <RefreshIcon color={TEAL} />
+                  {pendingSyncItems.length > 0 && (
+                    <View style={styles.syncBadge}>
+                      <Text style={styles.syncBadgeText}>
+                        {pendingSyncItems.length > 9 ? '9+' : pendingSyncItems.length}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                <Text style={styles.syncLabel} numberOfLines={1}>Sync Data Vault</Text>
+              </View>
               <TouchableOpacity style={styles.avatar} onPress={handleAvatarPress} activeOpacity={0.75}>
                 <Text style={styles.avatarText}>{initial}</Text>
               </TouchableOpacity>
@@ -398,6 +406,8 @@ const styles = StyleSheet.create({
   btDot: { width: 8, height: 8, borderRadius: 4 },
   btStatusText: { fontSize: 12, fontWeight: '600', color: '#666666' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  syncColumn: { alignItems: 'center', width: 76 },
+  syncLabel: { fontSize: 9, fontWeight: '600', color: '#666666', marginTop: 2, textAlign: 'center' },
   syncButton: {
     width: 40,
     height: 40,

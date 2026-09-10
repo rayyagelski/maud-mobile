@@ -167,7 +167,14 @@ export default function AppNavigator() {
   return (
     <NavigationContainer ref={navigationRef}>
       {locationGranted && locationOnboardingComplete && <TripDetectionRunner />}
-      {isAuthenticated && <RootBannerStack />}
+      {/* Previously mounted on isAuthenticated alone — RootBannerStack's
+          useBluetoothVehicleDetection immediately requests BLUETOOTH_CONNECT
+          on mount, so it fired right after login, before the user had even
+          reached LocationPermissionScreen (real feedback: the OS Bluetooth
+          dialog appeared while still on the login screen, with no context).
+          Gated the same as TripDetectionRunner now so it waits until after
+          onboarding, where a real explanation is shown first. */}
+      {isAuthenticated && locationOnboardingComplete && <RootBannerStack />}
       <Root.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <Root.Screen name="Main" component={MainStackNavigator} />
