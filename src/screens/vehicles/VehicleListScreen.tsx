@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Linking, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
@@ -53,27 +53,18 @@ export default function VehicleListScreen() {
 
   // Deep-links to the OS Bluetooth settings screen so the driver can connect
   // to the car from there, then come back here to pair — this screen itself
-  // has no way to initiate an OS-level BT connection. Previously there was
-  // no action at all for "not connected" beyond a muted, non-interactive
-  // message. Same try/catch-guarded pattern as useDriveFocusReminder.ts's
-  // openFocusSettings: sendIntent can throw synchronously (not just reject)
-  // on some Android OEMs/versions, which a bare .catch() doesn't protect
-  // against — that exact gap crashed the app there, so it's guarded here
-  // from the start rather than repeating the bug.
+  // has no way to initiate an OS-level BT connection. This used to try
+  // Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS') first (a more
+  // precise deep link), guarded in try/catch for its known synchronous-
+  // throw failure mode — but the equivalent DND-settings intent in
+  // useDriveFocusReminder.ts crashed the app twice in real testing even
+  // with that same guard in place, so this was simplified the same way:
+  // Linking.openSettings() alone (plain app-settings page) is a core,
+  // universally-supported RN API with no comparable OEM-variable native-
+  // intent risk. Lands one screen short of the ideal destination in
+  // exchange for certainty this can't crash the app.
   function handleConnectBluetooth() {
-    if (Platform.OS === 'android') {
-      try {
-        Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() => {
-          Linking.openSettings().catch(() => {});
-        });
-      } catch {
-        Linking.openSettings().catch(() => {});
-      }
-    } else {
-      // iOS has no public deep link into Bluetooth settings — the app's own
-      // Settings page is the closest reachable screen.
-      Linking.openSettings().catch(() => {});
-    }
+    Linking.openSettings().catch(() => {});
   }
 
   return (

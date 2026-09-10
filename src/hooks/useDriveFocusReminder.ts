@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, Linking, Platform } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import { useAppSelector } from './useAppSelector';
 
 /**
@@ -16,28 +16,19 @@ import { useAppSelector } from './useAppSelector';
  * honest, buildable version of this feature without adding native code.
  */
 function openFocusSettings() {
-  if (Platform.OS === 'android') {
-    // Deep-links straight to the system's DND access/settings screen.
-    // sendIntent can reject (unsupported action) but real-drive feedback
-    // showed it can also throw synchronously — before ever returning a
-    // promise — on some OEMs/Android versions where this settings screen
-    // doesn't exist under this exact intent action. A bare .catch() only
-    // guards the rejection case, not a synchronous throw, so that crashed
-    // the whole app. Wrapped in try/catch for both failure modes; the
-    // fallback itself is guarded too since openSettings() can theoretically
-    // fail the same way.
-    try {
-      Linking.sendIntent('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS').catch(() => {
-        Linking.openSettings().catch(() => {});
-      });
-    } catch {
-      Linking.openSettings().catch(() => {});
-    }
-  } else {
-    // iOS has no public deep link into Focus/Driving mode settings — the
-    // app's own Settings page is the closest reachable screen.
-    Linking.openSettings().catch(() => {});
-  }
+  // Used to attempt Linking.sendIntent('android.settings.
+  // NOTIFICATION_POLICY_ACCESS_SETTINGS') first, for a more precise deep
+  // link straight to DND settings, with openSettings() as a fallback. Real
+  // -drive feedback showed that intent action crashing the whole app
+  // (reported twice, identical crash both times) even after wrapping it in
+  // try/catch for its known synchronous-throw failure mode — rather than
+  // keep chasing every possible way an OEM-variable native intent can fail,
+  // removed it entirely. Linking.openSettings() (plain app-settings page,
+  // same call already used as the safe fallback everywhere else in this
+  // app) is a core, universally-supported RN API with no such risk — worth
+  // landing one screen short of the ideal destination in exchange for
+  // certainty this can't crash the app again.
+  Linking.openSettings().catch(() => {});
 }
 
 export function useDriveFocusReminder(): void {
