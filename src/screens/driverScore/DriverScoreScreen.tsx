@@ -31,20 +31,40 @@ const KM_TO_MILES = 0.621371;
 const TIMEFRAMES = ['7 Days', '14 Days', '28 Days'];
 const DROPDOWN_OPTIONS = ['90 Days', '180 Days', '365 Days'];
 
-// v1 rate thresholds, as specified by product (not calibrated against real
-// MAUD trip data yet). "poor" is the rate at which the behavior's subscore
-// hits 0 — everything below scales linearly toward 100 at rate=0. Speeding is
-// a % of drive time; the rest are counts (or seconds, for phone) per 100
+// Rate thresholds for the Driving Behavior bar colors on THIS screen only —
+// reward points are scored server-side from the raw counts
+// (SafetyScoreCalculator.php / EcoScoreCalculator.php) and are unaffected
+// by anything here. "poor" is the rate at which the behavior's subscore
+// hits 0 — everything below scales linearly toward 100 at rate=0. Speeding
+// is a % of drive time; the rest are counts (or seconds, for phone) per 100
 // miles driven. For non-US/metric users this should ideally be computed per
 // 100 km internally rather than converting the mile-based threshold, but v1
 // applies the same per-100mi threshold universally.
+//
+// Harsh-event "poor" rates raised from 4/4/3 (product's v1 numbers):
+// real-drive feedback was 4 harsh-braking events in a ~30-mile week
+// rendering RED, because 4/30mi is ~13 per 100mi and the old scale hit 0 at
+// 4 per 100mi — i.e. even a full 100-mile week with 4 events was red.
+// Resulting bands (events per 100 miles, after the exposure floor below),
+// given scoreColor's 90/61 cutoffs:
+//   brake/accel (20): 0-2 green, 3-7 amber, 8+ red
+//   cornering   (16): 0-1 green, 2-6 amber, 7+ red
 const BEHAVIOR_POOR_RATE = {
   speedingPctOfDriveTime: 8,
   phoneSecondsPer100Mi: 45,
-  harshBrakePer100Mi: 4,
-  harshAccelPer100Mi: 4,
-  harshCornerPer100Mi: 3,
+  harshBrakePer100Mi: 20,
+  harshAccelPer100Mi: 20,
+  harshCornerPer100Mi: 16,
 } as const;
+
+// Per-100-mile rates are computed against at least this much distance. A
+// small sample otherwise explodes the rate — the same 4 events read as
+// 13/100mi after 30 miles but 4/100mi after 100 — so a driver's first
+// short week of the period would always score far worse than a longer one
+// with identical behavior. Below this floor the rate simply scales with
+// how many events there were, which is what a week of light driving should
+// mean anyway.
+const MIN_EXPOSURE_MILES = 100;
 
 // Generic context severity multipliers applied to each trip's contribution
 // before it's aggregated into a rate — a simplified, uniform-across-behaviors
@@ -308,7 +328,9 @@ export default function DriverScoreScreen() {
     harshCornerCount: rawCounts.harshCornerCount + vgdBehavior.harshCornerCount,
   }), [rawCounts, vgdBehavior]);
 
-  const per100Mi = exposureWithVgd.miles > 0 ? exposureWithVgd.miles / 100 : null;
+  // See MIN_EXPOSURE_MILES. Still null with no driving at all in the period
+  // (nothing to score), otherwise floored.
+  const per100Mi = exposureWithVgd.miles > 0 ? Math.max(exposureWithVgd.miles, MIN_EXPOSURE_MILES) / 100 : null;
   const speedingRate = exposureWithVgd.driveSeconds > 0
     ? (exposureWithVgd.speedingSeconds / exposureWithVgd.driveSeconds) * 100 : 0;
   const phoneRate = per100Mi ? exposureWithVgd.phoneTextSeconds / per100Mi : 0;
