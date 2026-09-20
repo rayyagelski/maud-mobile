@@ -91,10 +91,20 @@ const EVENT_TYPE_TO_VGD_PARAMETER: Partial<Record<TelematicsEvent['type'], 'acce
 // useHarshEventTracker.ts), so speed/direction are real readings, not
 // fabricated — including them here is what makes a cornering event's detail
 // card carry the same context (speed, heading) as a braking/acceleration
-// event's, instead of only the single metric value. Distance/odometer are
-// deliberately still omitted: unlike speed/direction, cumulative distance
-// isn't available at this call site (only mapGpsPointsToVgdPoints tracks
-// it), and approximating it here risks a wrong number being worse than none.
+// event's, instead of only the single metric value.
+//
+// `distance` (cumulative metres from trip start, same convention as the GPS
+// points) is taken from the latest GPS point in the same flush batch at or
+// before the event's time — or, if the event precedes every GPS point in
+// this batch, the cumulative total carried over from the previous batch.
+// The web trip-details page reads each event's `distance` straight into its
+// "Driven distance" field and derives "Odometer" from it (maud's
+// TripDataParser.php); road-type/speed-limit events inherit it from the GPS
+// point they're built from, but these mobile-sourced points used to omit it
+// entirely, so both fields showed blank on every cornering/braking/
+// acceleration event. Events are only ever flushed together with the GPS
+// points that surround them (same cursor advance, see tripSlice's flush), so
+// the nearest preceding GPS point is always in reach.
 //
 // event.value is computed on-device in m/s² (harshEventDetector.ts), but
 // VGD's acceleration/cornering parameters are g-force ("gs" per the old iOS
@@ -103,18 +113,30 @@ const EVENT_TYPE_TO_VGD_PARAMETER: Partial<Record<TelematicsEvent['type'], 'acce
 // thresholds (0.5g/0.35g/0.4g) are written against. Divide by MS2_PER_G here
 // so the value actually stored/displayed as "g-force" is one, instead of a
 // raw m/s² number ~9.8x too large.
-export function mapTelematicsEventsToVgdPoints(events: TelematicsEvent[]): VgdPoint[] {
+export function mapTelematicsEventsToVgdPoints(
+  events: TelematicsEvent[],
+  gpsVgdPoints: VgdPoint[] = [],
+  startingCumulativeDistanceMeters = 0,
+): VgdPoint[] {
   return events.reduce<VgdPoint[]>((acc, event) => {
     const parameterKey = EVENT_TYPE_TO_VGD_PARAMETER[event.type];
     if (!parameterKey || event.value == null) return acc;
 
+    const eventTime = toVgdTimeSeconds(event.timestamp);
+    let distance = startingCumulativeDistanceMeters;
+    for (const gpsPoint of gpsVgdPoints) {
+      if (gpsPoint.time > eventTime) break;
+      if (gpsPoint.parameters.distance != null) distance = gpsPoint.parameters.distance;
+    }
+
     acc.push({
       gps: { lat: event.location.latitude, lon: event.location.longitude },
-      time: toVgdTimeSeconds(event.timestamp),
+      time: eventTime,
       parameters: {
         [parameterKey]: event.value / MS2_PER_G,
         ...(event.location.speed != null && { speed: event.location.speed }),
         ...(event.location.heading != null && { direction: Math.round(event.location.heading) }),
+        distance,
       },
     });
     return acc;
@@ -139,6 +161,23 @@ export function markTripStart(points: VgdPoint[]): VgdPoint[] {
 // known GPS fix (never fabricates coordinates — if there's truly no GPS fix
 // to fall back on, returns the batch unchanged and the caller skips the
 // PATCH, same "don't fabricate" convention as the rest of this app).
+//
+// A trip that starts and ends within its very first flush interval (e.g. a
+// manually-armed Route Planner start that fires on a single qualifying-speed
+// fix, immediately followed by stillness/BT-disconnect ending it) can hand
+// this a batch whose *only* point was just tagged 'trip_start' by
+// markTripStart above — the same array index is both the chronological
+// first and last point. Overwriting its type to 'trip_end' used to silently
+// clobber that tag rather than combine with it: vgd_analytics'
+// startPointsFilter/endPointsFilter each key off a single `type` value per
+// point (see startEndPointsFilters.js), so the trip lost its trip_start
+// point entirely — no start address, and tripAnalytics.js's own
+// findBorderPoints had to special-case a null startPoint as a *known*,
+// already-logged symptom of this exact collision (see its
+// "Unexpected amount of trip_start points" warning). Duplicating the point
+// instead — same coordinates/time, one tagged trip_start and one trip_end —
+// gives both filters something to find, matching the real semantics of a
+// trip that genuinely started and ended at the same place and instant.
 export function markTripEnd(
   points: VgdPoint[],
   endTimeEpochMs: number,
@@ -156,6 +195,11 @@ export function markTripEnd(
 
   const sorted = [...points].sort((a, b) => a.time - b.time);
   const last = sorted[sorted.length - 1];
+
+  if (sorted.length === 1 && last.type === 'trip_start') {
+    return [last, { ...last, type: 'trip_end' }];
+  }
+
   sorted[sorted.length - 1] = { ...last, type: 'trip_end' };
   return sorted;
 }

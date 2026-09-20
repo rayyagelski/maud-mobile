@@ -18,7 +18,9 @@ import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
   estimateFuelCo2Grams, litersToGallons,
 } from '../../utils/helpers';
+import { MS2_PER_G } from '../../utils/constants';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
+import type { TelematicsEvent } from '../../types/trip.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -49,15 +51,40 @@ function PerfRow({ icon, label, value }: { icon: React.ReactNode; label: string;
   );
 }
 
+type HarshEventKind = 'harsh_brake' | 'harsh_accel' | 'harsh_corner';
+
 interface BehaviorEvent {
   key: string;
-  kind: 'speeding' | 'phone_usage';
+  kind: 'speeding' | 'phone_usage' | HarshEventKind;
   timeMs: number;
   address: string | null;
   actualSpeed: string | null;
   speedLimit: string | null;
   duration: string | null;
+  // Harsh brake/accel/corner's severity (g-force) — distinct from `duration`
+  // above (which is seconds-based and reads oddly appended with "g").
+  magnitude: string | null;
+  // Only populated for harsh brake/accel/corner — the map-pin coordinate,
+  // which speeding/phone-usage events render from their own separate
+  // source lists (VgdTripEvent/TelematicsEvent) instead of BehaviorEvent.
+  coordinate: LatLng | null;
 }
+
+const HARSH_EVENT_LABELS: Record<HarshEventKind, string> = {
+  harsh_brake: 'Hard braking',
+  harsh_accel: 'Hard acceleration',
+  harsh_corner: 'Cornering',
+};
+const HARSH_EVENT_COLORS: Record<HarshEventKind, string> = {
+  harsh_brake: '#E5484D',
+  harsh_accel: '#F47920',
+  harsh_corner: '#9B59B6',
+};
+const HARSH_INDICATOR_TO_KIND: Partial<Record<VgdTripEvent['indicator'], HarshEventKind>> = {
+  hard_braking: 'harsh_brake',
+  acceleration: 'harsh_accel',
+  cornering: 'harsh_corner',
+};
 
 // mm:ss — these events run seconds to a few minutes, too short for
 // formatDuration's whole-minute-or-hour granularity to read as anything but "0min".
@@ -123,22 +150,62 @@ function speedingGroupToBehaviorEvent(
     actualSpeed: maxSpeed > 0 ? fmtSpeedMs(maxSpeed) : null,
     speedLimit: first.parameters.speedLimit != null ? fmtSpeedMs(first.parameters.speedLimit) : null,
     duration: durationSeconds > 0 ? formatShortDuration(durationSeconds) : null,
+    magnitude: null,
+    coordinate: null,
   };
 }
 
+// VGD-sourced: server-computed hard_braking/acceleration/cornering
+// indicators (same data vgd_analytics' gForcePointsFilters.js drives the
+// web page's markers from), already in g (see vgdPointMapper.ts's
+// mapTelematicsEventsToVgdPoints — mobile divides by MS2_PER_G before
+// upload). Local-sourced: on-device TelematicsEvent, raw m/s², used only as
+// a fallback while VGD is still processing (see harshEvents below).
+function vgdHarshEventToBehaviorEvent(event: VgdTripEvent, kind: HarshEventKind, index: number): BehaviorEvent {
+  const gForce = event.parameters.acceleration ?? event.parameters.cornering ?? null;
+  return {
+    key: `harsh-vgd-${kind}-${event.time}-${index}`,
+    kind,
+    timeMs: event.time * 1000,
+    address: event.parameters.address ?? null,
+    actualSpeed: null,
+    speedLimit: null,
+    duration: null,
+    magnitude: gForce != null ? `${Math.abs(gForce).toFixed(2)}g` : null,
+    coordinate: event.gps ? { latitude: event.gps.lat, longitude: event.gps.lon } : null,
+  };
+}
+function localHarshEventToBehaviorEvent(event: TelematicsEvent, kind: HarshEventKind, index: number): BehaviorEvent {
+  return {
+    key: `harsh-local-${event.id}-${index}`,
+    kind,
+    timeMs: event.timestamp,
+    address: null,
+    actualSpeed: null,
+    speedLimit: null,
+    duration: null,
+    magnitude: event.value != null ? `${Math.abs(event.value / MS2_PER_G).toFixed(2)}g` : null,
+    coordinate: { latitude: event.location.latitude, longitude: event.location.longitude },
+  };
+}
+
+const BEHAVIOR_TITLES: Record<BehaviorEvent['kind'], string> = {
+  speeding: 'Speeding',
+  phone_usage: 'Phone Usage',
+  ...HARSH_EVENT_LABELS,
+};
+
 function BehaviorEventRow({ event, last }: { event: BehaviorEvent; last: boolean }) {
-  const isSpeeding = event.kind === 'speeding';
+  const icon = event.kind === 'speeding' || event.kind === 'harsh_brake' || event.kind === 'harsh_accel' || event.kind === 'harsh_corner'
+    ? <WarningTriangleIcon color={event.kind === 'speeding' ? '#F47920' : HARSH_EVENT_COLORS[event.kind]} size={18} />
+    : <PhoneIcon color="#E0533D" size={18} />;
   return (
     <>
       <View style={styles.behaviorRow}>
-        <View style={styles.behaviorIconBox}>
-          {isSpeeding
-            ? <WarningTriangleIcon color="#F47920" size={18} />
-            : <PhoneIcon color="#E0533D" size={18} />}
-        </View>
+        <View style={styles.behaviorIconBox}>{icon}</View>
         <View style={styles.behaviorMain}>
           <View style={styles.behaviorTopRow}>
-            <Text style={styles.behaviorTitle}>{isSpeeding ? 'Speeding' : 'Phone Usage'}</Text>
+            <Text style={styles.behaviorTitle}>{BEHAVIOR_TITLES[event.kind]}</Text>
             <Text style={styles.behaviorTime}>
               {new Date(event.timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </Text>
@@ -146,13 +213,14 @@ function BehaviorEventRow({ event, last }: { event: BehaviorEvent; last: boolean
           {event.address && (
             <Text style={styles.behaviorAddress} numberOfLines={2}>{event.address}</Text>
           )}
-          {(event.actualSpeed || event.duration) && (
+          {(event.actualSpeed || event.duration || event.magnitude) && (
             <Text style={styles.behaviorDetail}>
               {[
                 event.actualSpeed && event.speedLimit
                   ? `${event.actualSpeed} in a ${event.speedLimit} zone`
                   : event.actualSpeed,
                 event.duration ? `${event.duration} duration` : null,
+                event.magnitude,
               ].filter(Boolean).join(' · ')}
             </Text>
           )}
@@ -201,6 +269,26 @@ export default function MyTripScreen() {
   // VGD point parameter for phone usage to round-trip it through the server.
   const phoneUsageEvents = trip?.events.filter(e => e.type === 'phone_usage') ?? [];
 
+  // Harsh brake/accel/corner: VGD's own processed hard_braking/acceleration/
+  // cornering indicators are authoritative once available (server applies
+  // the same thresholds and is what the web page's markers are driven
+  // from) — only fall back to the on-device detection while VGD is still
+  // processing, or for older trips with no vgdTripId at all. Same
+  // "server wins once ready" idea as speedLimitEvents above, just with a
+  // fallback instead of going empty in the meantime.
+  const vgdHarshEvents = vgdEvents
+    .filter(e => HARSH_INDICATOR_TO_KIND[e.indicator] && e.gps)
+    .map((e, i) => vgdHarshEventToBehaviorEvent(e, HARSH_INDICATOR_TO_KIND[e.indicator]!, i));
+  const localHarshEvents = (trip?.events ?? [])
+    .filter((e): e is TelematicsEvent & { type: HarshEventKind } =>
+      e.type === 'harsh_brake' || e.type === 'harsh_accel' || e.type === 'harsh_corner')
+    .map((e, i) => localHarshEventToBehaviorEvent(e, e.type, i));
+  const harshBehaviorEvents = vgdEnabled && !vgdAddressPending ? vgdHarshEvents : localHarshEvents;
+  // Map pins reuse the same list — coordinate is only populated on harsh
+  // events (see BehaviorEvent's doc comment), so this is just the subset
+  // that actually has somewhere to place a pin.
+  const harshEventPins = harshBehaviorEvents.filter(e => e.coordinate);
+
   const fmtTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const fmtSpeedMs = (metersPerSecond: number) => formatSpeed(metersPerSecond * 3.6, isImperial);
 
@@ -224,7 +312,10 @@ export default function MyTripScreen() {
       actualSpeed: null,
       speedLimit: null,
       duration: event.value != null ? formatShortDuration(event.value) : null,
+      magnitude: null,
+      coordinate: null,
     })),
+    ...harshBehaviorEvents,
   ].sort((a, b) => a.timeMs - b.timeMs);
 
   // Total CO2 for the trip (VGD's co2emissions is g/km — scale by distance).
@@ -461,6 +552,23 @@ export default function MyTripScreen() {
                       ? `${fmtTime(event.timestamp - event.value * 1000)} - ${fmtTime(event.timestamp)}`
                       : fmtTime(event.timestamp)}
                   </Text>
+                </View>
+              </Callout>
+            </Marker>
+          ))}
+          {mapReady && harshEventPins.map((event) => (
+            <Marker
+              key={event.key}
+              coordinate={event.coordinate!}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={[styles.eventDot, { backgroundColor: HARSH_EVENT_COLORS[event.kind as HarshEventKind] }]} />
+              <Callout tooltip={false}>
+                <View style={styles.calloutBox}>
+                  <Text style={styles.calloutTitle}>{HARSH_EVENT_LABELS[event.kind as HarshEventKind]}</Text>
+                  {event.magnitude && <Text style={styles.calloutRow}>{event.magnitude}</Text>}
+                  <Text style={styles.calloutMeta}>{fmtTime(event.timeMs)}</Text>
                 </View>
               </Callout>
             </Marker>

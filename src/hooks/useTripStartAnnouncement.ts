@@ -17,7 +17,10 @@ export function useTripStartAnnouncement(): void {
 
   useEffect(() => {
     if (isTracking && !wasTrackingRef.current) {
-      speak('Trip recording started.');
+      // 'critical' — this one-time confirmation was getting silently
+      // stomped by a speed-zone/turn/AI announcement landing on the very
+      // next GPS fix (see useVoicePlayback.ts).
+      speak('Trip recording started.', 'critical');
     }
     wasTrackingRef.current = isTracking;
   }, [isTracking, speak]);

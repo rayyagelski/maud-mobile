@@ -230,7 +230,11 @@ export const flushVgdPoints = createAsyncThunk(
       trip.vgdCumulativeDistanceKm ?? 0,
       trip.vgdLastSentPoint,
     );
-    const eventVgdPoints = mapTelematicsEventsToVgdPoints(newEvents);
+    const eventVgdPoints = mapTelematicsEventsToVgdPoints(
+      newEvents,
+      gpsVgdPoints,
+      Math.round((trip.vgdCumulativeDistanceKm ?? 0) * 1000),
+    );
     let points = [...gpsVgdPoints, ...eventVgdPoints];
 
     // Only the very first flush for a trip can contain its true first point —

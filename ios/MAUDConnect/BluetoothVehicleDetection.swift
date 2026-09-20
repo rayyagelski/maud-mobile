@@ -49,6 +49,29 @@ class BluetoothVehicleDetection: RCTEventEmitter {
     resolve(connectedDeviceName)
   }
 
+  // iOS has no equivalent to Android's BluetoothAdapter.getBondedDevices() —
+  // AVAudioSession only exposes the currently-active route, not the
+  // system's list of previously-paired devices, and CoreBluetooth doesn't
+  // cover Classic HFP/A2DP at all. Always empty here; kept for interface
+  // parity with the Android module so the JS bridge call doesn't need
+  // Platform.OS branching.
+  @objc(getBondedDevices:rejecter:)
+  func getBondedDevices(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    resolve([String]())
+  }
+
+  // iOS exposes no public screen-on/unlocked state to apps; the phone-usage
+  // proxy on iOS therefore stays AppState-only (iOS also doesn't report a
+  // locked screen as 'background' the way Android does, so the Android
+  // problem this exists for doesn't arise there). Interface parity only.
+  @objc(startScreenStateUpdates)
+  func startScreenStateUpdates() {}
+
+  @objc(isScreenInteractive:rejecter:)
+  func isScreenInteractive(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    resolve(true)
+  }
+
   @objc private func handleRouteChange(_ notification: Notification) {
     let newName = bluetoothDeviceName(in: AVAudioSession.sharedInstance().currentRoute)
 

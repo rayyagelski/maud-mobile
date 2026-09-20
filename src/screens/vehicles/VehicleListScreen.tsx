@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Linking, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
@@ -8,6 +8,7 @@ import { selectVehicle } from '../../store/slices/vehicleSlice';
 import { setPairing, removePairing } from '../../store/slices/bluetoothPairingSlice';
 import {
   getConnectedBluetoothDeviceName,
+  getBondedBluetoothDeviceNames,
   subscribeBluetoothDeviceConnected,
   subscribeBluetoothDeviceDisconnected,
 } from '../../services/bluetooth/bluetoothVehicleDetectionModule';
@@ -36,6 +37,36 @@ export default function VehicleListScreen() {
       unsubDisconnect();
     };
   }, []);
+
+  // Bonded-device picker: the phone's already-paired-at-the-OS-level
+  // devices, not a live scan and not a way to create a new OS pairing (see
+  // getBondedBluetoothDeviceNames' own doc comment — Android reserves both
+  // of those to system apps). Lets a driver map "which of these is my car"
+  // in-app without waiting for a live connect event or leaving the app —
+  // the actual OS-level connect still has to happen via handleConnectBluetooth
+  // below if the car isn't in this list yet.
+  const [pickerVehicleId, setPickerVehicleId] = useState<string | null>(null);
+  const [bondedDevices, setBondedDevices] = useState<string[]>([]);
+  const [bondedDevicesLoading, setBondedDevicesLoading] = useState(false);
+
+  function openDevicePicker(vehicleId: string) {
+    setPickerVehicleId(vehicleId);
+    setBondedDevicesLoading(true);
+    getBondedBluetoothDeviceNames()
+      .then(setBondedDevices)
+      .finally(() => setBondedDevicesLoading(false));
+  }
+
+  function closeDevicePicker() {
+    setPickerVehicleId(null);
+    setBondedDevices([]);
+  }
+
+  function handleChooseBondedDevice(deviceName: string) {
+    if (!pickerVehicleId) return;
+    dispatch(setPairing({ bluetoothDeviceName: deviceName, vehicleId: pickerVehicleId }));
+    closeDevicePicker();
+  }
 
   async function handleSelect(vehicle: Vehicle) {
     await dispatch(selectVehicle(vehicle.id));
@@ -94,12 +125,34 @@ export default function VehicleListScreen() {
               {item.vin && <Text style={styles.vin}>VIN: {item.vin}</Text>}
 
               <View style={styles.bluetoothRow}>
-                {pairing ? (
+                {/* A saved pairing mapping (bluetoothPairingSlice) is not the
+                    same thing as being connected right now — it used to be
+                    shown as "Paired with X" unconditionally, with no relation
+                    to connectedDeviceName at all, so a car that hadn't been
+                    in range for weeks still showed the same badge as one
+                    sitting connected right now. Split into three real states:
+                    paired AND currently connected, paired but NOT currently
+                    connected, and not paired at all. */}
+                {pairing && connectedDeviceName === pairing.bluetoothDeviceName ? (
                   <>
-                    <Text style={styles.bluetoothText}>🔵 Paired with "{pairing.bluetoothDeviceName}"</Text>
+                    <Text style={styles.bluetoothText}>🔵 Connected: "{pairing.bluetoothDeviceName}"</Text>
                     <TouchableOpacity onPress={() => handleUnpair(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                       <Text style={styles.bluetoothAction}>Unpair</Text>
                     </TouchableOpacity>
+                  </>
+                ) : pairing ? (
+                  <>
+                    <Text style={styles.bluetoothTextMuted} numberOfLines={1}>
+                      Paired with "{pairing.bluetoothDeviceName}" — not connected
+                    </Text>
+                    <View style={styles.bluetoothActions}>
+                      <TouchableOpacity onPress={() => openDevicePicker(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={styles.bluetoothAction}>Choose device</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleUnpair(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={styles.bluetoothActionMuted}>Unpair</Text>
+                      </TouchableOpacity>
+                    </View>
                   </>
                 ) : connectedDeviceName ? (
                   <>
@@ -111,8 +164,8 @@ export default function VehicleListScreen() {
                 ) : (
                   <>
                     <Text style={styles.bluetoothTextMuted}>No car Bluetooth connected right now</Text>
-                    <TouchableOpacity onPress={handleConnectBluetooth} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Text style={styles.bluetoothAction}>Connect Bluetooth</Text>
+                    <TouchableOpacity onPress={() => openDevicePicker(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.bluetoothAction}>Choose device</Text>
                     </TouchableOpacity>
                   </>
                 )}
@@ -129,6 +182,56 @@ export default function VehicleListScreen() {
           />
         }
       />
+
+      <Modal
+        visible={pickerVehicleId != null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeDevicePicker}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Choose your car's Bluetooth</Text>
+            <Text style={styles.modalSubtitle}>
+              Devices your phone is already paired with. Don't see your car? Pair it in Bluetooth
+              settings first, then come back here.
+            </Text>
+
+            {bondedDevicesLoading ? (
+              <Text style={styles.modalEmptyText}>Loading…</Text>
+            ) : bondedDevices.length === 0 ? (
+              <Text style={styles.modalEmptyText}>
+                No paired devices found on this phone yet.
+              </Text>
+            ) : (
+              <FlatList
+                data={bondedDevices}
+                keyExtractor={name => name}
+                style={styles.modalList}
+                renderItem={({ item: deviceName }) => (
+                  <TouchableOpacity
+                    style={styles.modalDeviceRow}
+                    onPress={() => handleChooseBondedDevice(deviceName)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modalDeviceName}>{deviceName}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                onPress={() => { closeDevicePicker(); handleConnectBluetooth(); }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.modalFooterLink}>Open Bluetooth Settings</Text>
+              </TouchableOpacity>
+              <Button title="Cancel" onPress={closeDevicePicker} variant="secondary" />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -162,6 +265,23 @@ const styles = StyleSheet.create({
     marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#EFEFF4',
   },
   bluetoothText: { fontSize: 12, color: '#3C3C43', flexShrink: 1, marginRight: 8 },
-  bluetoothTextMuted: { fontSize: 12, color: '#AEAEB2' },
+  bluetoothTextMuted: { fontSize: 12, color: '#AEAEB2', flexShrink: 1, marginRight: 8 },
   bluetoothAction: { fontSize: 12, fontWeight: '700', color: '#1E4E8C' },
+  bluetoothActions: { flexDirection: 'row', columnGap: 14 },
+  bluetoothActionMuted: { fontSize: 12, fontWeight: '700', color: '#AEAEB2' },
+
+  // Bonded-device picker modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, maxHeight: '75%',
+  },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#1C1C1E' },
+  modalSubtitle: { fontSize: 13, color: '#6D6D72', marginTop: 6, marginBottom: 14, lineHeight: 18 },
+  modalEmptyText: { fontSize: 14, color: '#8E8E93', textAlign: 'center', paddingVertical: 24 },
+  modalList: { flexGrow: 0 },
+  modalDeviceRow: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#EFEFF4' },
+  modalDeviceName: { fontSize: 15, color: '#1C1C1E', fontWeight: '600' },
+  modalFooter: { marginTop: 16, alignItems: 'center', rowGap: 12 },
+  modalFooterLink: { fontSize: 13, fontWeight: '700', color: '#1E4E8C' },
 });

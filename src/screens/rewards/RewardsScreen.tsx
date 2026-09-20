@@ -16,7 +16,9 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useCurrencySymbol } from '../../hooks/useCurrencySymbol';
+import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
+import { kmToMiles } from '../../utils/helpers';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 
 const TEAL = '#3ABFBF';
@@ -43,11 +45,17 @@ const STATUS_META: Record<RewardStatus, { label: string; color: string }> = {
   gold: { label: 'GOLD DRIVER', color: GOLD_COLOR },
 };
 
-function buildTips(m: MonthlyRewardSummary): string[] {
+// kmStillNeeded is the backend's own unit (km_still_needed) — this used to
+// be shown to every user unconditionally labeled "km", even on a phone set
+// to imperial units, so a US driver's real remaining distance (in miles)
+// never matched the number on screen at all.
+function buildTips(m: MonthlyRewardSummary, isImperial: boolean): string[] {
   const tips: string[] = [];
   if (!m.meetsEligibility) {
     if (m.eligibilityGap.kmStillNeeded > 0) {
-      tips.push(`Drive ${m.eligibilityGap.kmStillNeeded.toFixed(0)} more km this month to qualify for rewards.`);
+      const remaining = isImperial ? kmToMiles(m.eligibilityGap.kmStillNeeded) : m.eligibilityGap.kmStillNeeded;
+      const unit = isImperial ? 'miles' : 'km';
+      tips.push(`Drive ${remaining.toFixed(0)} more ${unit} this month to qualify for rewards.`);
     }
     if (m.eligibilityGap.tripsStillNeeded > 0) {
       tips.push(`Complete ${m.eligibilityGap.tripsStillNeeded} more trip${m.eligibilityGap.tripsStillNeeded === 1 ? '' : 's'} this month to qualify.`);
@@ -249,6 +257,7 @@ export default function RewardsScreen() {
   const { currentMonth, previousMonth } = useAppSelector(s => s.rewards);
   const trips = useAppSelector(s => s.trips.trips);
   const currencySymbol = useCurrencySymbol();
+  const isImperial = useIsImperialUnits();
 
   useEffect(() => {
     dispatch(fetchRewardOverview());
@@ -300,7 +309,7 @@ export default function RewardsScreen() {
   const scoreDeltaPct = previousMonth && previousMonth.monthlyRewardScore > 0
     ? Math.round(((currentMonth.monthlyRewardScore - previousMonth.monthlyRewardScore) / previousMonth.monthlyRewardScore) * 100)
     : null;
-  const tips = buildTips(currentMonth);
+  const tips = buildTips(currentMonth, isImperial);
   const earnedLabel = `${currencySymbol}${(currentMonth.cashRewardCents / 100).toFixed(2)}`;
   const accruedLabel = `${currencySymbol}${((currentMonth.lifetimeEarnedCents ?? 0) / 100).toFixed(2)}`;
   const redeemedLabel = `${currencySymbol}${((currentMonth.lifetimeRedeemedCents ?? 0) / 100).toFixed(2)}`;
@@ -340,7 +349,9 @@ export default function RewardsScreen() {
             {STATUS_META[currentMonth.status].label}
           </Text>
           <Text style={styles.heroSub}>
-            {currentMonth.tripCount} trip{currentMonth.tripCount === 1 ? '' : 's'} · {currentMonth.totalDistanceKm.toFixed(0)} km this month
+            {currentMonth.tripCount} trip{currentMonth.tripCount === 1 ? '' : 's'} · {isImperial
+              ? `${kmToMiles(currentMonth.totalDistanceKm).toFixed(0)} mi`
+              : `${currentMonth.totalDistanceKm.toFixed(0)} km`} this month
           </Text>
           <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.85}>
             <ShareIcon color="white" size={16} />

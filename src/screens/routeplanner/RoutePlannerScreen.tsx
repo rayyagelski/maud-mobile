@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   TextInput, Dimensions, Alert, Keyboard, Platform,
 } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
@@ -20,6 +20,7 @@ import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { endTrip, armPendingStart, clearPendingStart, setPlannedRouteOnActiveTrip } from '../../store/slices/tripSlice';
+import { logDiagnostic } from '../../services/diagnosticsLog';
 import { dismissRerouteSuggestion, clearRerouteSuggestion } from '../../store/slices/trafficSlice';
 import { vehiclesApi, routesApi, type RouteRecommendationResult } from '../../api';
 import type { FuelPriceResponse, OwnershipCostRateResponse } from '../../types/vehicle.types';
@@ -185,9 +186,28 @@ export default function RoutePlannerScreen() {
   const panelHeight = useSharedValue(PANEL_HEIGHT_DEFAULT);
   const dragStartHeight = useSharedValue(PANEL_HEIGHT_DEFAULT);
 
-  function snapPanelTo(height: number) {
+  // MapView's `region` centers a coordinate in the geometric middle of the
+  // component's own full bounds — which is the *entire* mapContainer behind
+  // the panel, not just the sliver still actually visible above it. The
+  // live driver dot was landing dead center of the whole screen, correct by
+  // that definition but wrong by the one that matters: it read as centered
+  // on the *visible* map, which the panel eats into from the bottom, so the
+  // "true" visible center sits well above the full-screen one. mapPadding
+  // is react-native-maps' own tool for exactly this — it tells the native
+  // SDK how much of the view is obscured so region/camera centering
+  // accounts for the real visible area instead of the raw view bounds.
+  // Tracked as plain JS state (not read off the shared value every frame)
+  // since mapPadding is a native prop, not itself animatable — updated
+  // wherever the panel's target height is actually decided (snapPanelTo,
+  // and the drag gesture's own onEnd below), not on every intermediate
+  // drag frame, since a mid-drag pixel-perfect match isn't what matters
+  // here.
+  const [mapBottomPadding, setMapBottomPadding] = useState(PANEL_HEIGHT_DEFAULT);
+
+  const snapPanelTo = useCallback((height: number) => {
     panelHeight.value = withSpring(height, SPRING_CONFIG);
-  }
+    setMapBottomPadding(height);
+  }, [panelHeight]);
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
@@ -198,10 +218,9 @@ export default function RoutePlannerScreen() {
       panelHeight.value = Math.min(PANEL_HEIGHT_EXPANDED, Math.max(PANEL_HEIGHT_DEFAULT, next));
     })
     .onEnd(() => {
-      panelHeight.value = withSpring(
-        panelHeight.value > PANEL_SNAP_MIDPOINT ? PANEL_HEIGHT_EXPANDED : PANEL_HEIGHT_DEFAULT,
-        SPRING_CONFIG,
-      );
+      const target = panelHeight.value > PANEL_SNAP_MIDPOINT ? PANEL_HEIGHT_EXPANDED : PANEL_HEIGHT_DEFAULT;
+      panelHeight.value = withSpring(target, SPRING_CONFIG);
+      runOnJS(setMapBottomPadding)(target);
     });
 
   const panelAnimatedStyle = useAnimatedStyle(() => ({ height: panelHeight.value }));
@@ -209,18 +228,33 @@ export default function RoutePlannerScreen() {
   // Keyboard appearing/disappearing snaps the same sheet the drag gesture
   // drives — one mechanism, two triggers — so the destination field/
   // suggestions end up above the keyboard instead of behind it.
+  //
+  // PANEL_HEIGHT_EXPANDED (92% of SCREEN_HEIGHT) is sized against the
+  // *un-keyboarded* screen. On Android's default `adjustResize` window mode
+  // the visible root shrinks by the keyboard's own height once it's up, so
+  // snapping to a height computed against the full screen routinely asked
+  // for more room than was actually left above the keyboard — the panel's
+  // top (where the drag handle and the From/To card, including this input,
+  // sit) got pushed above the visible viewport, invisible until the
+  // keyboard closed and the root resized back. Clamping to whatever's
+  // actually left (screen height minus the keyboard's real reported height,
+  // from the event payload) keeps the input on-screen instead.
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const showSub = Keyboard.addListener(showEvent, () => snapPanelTo(PANEL_HEIGHT_EXPANDED));
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      const keyboardHeight = e?.endCoordinates?.height ?? 0;
+      const availableHeight = SCREEN_HEIGHT - keyboardHeight - insets.top - 16;
+      snapPanelTo(Math.min(PANEL_HEIGHT_EXPANDED, Math.max(PANEL_HEIGHT_DEFAULT, availableHeight)));
+    });
     const hideSub = Keyboard.addListener(hideEvent, () => snapPanelTo(PANEL_HEIGHT_DEFAULT));
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [insets.top, snapPanelTo]);
 
   useEffect(() => {
     Geolocation.getCurrentPosition(
@@ -544,6 +578,7 @@ export default function RoutePlannerScreen() {
     if (isTracking && activeTrip) {
       setIsEndingTrip(true);
       const tripId = activeTrip.id;
+      logDiagnostic('Ending trip — stopped manually by user.', { from: 'route-planner' });
       await dispatch(endTrip(tripId));
       setIsEndingTrip(false);
       navigation.navigate('TripSummary', { tripId });
@@ -629,6 +664,7 @@ export default function RoutePlannerScreen() {
           provider={PROVIDER_GOOGLE}
           style={StyleSheet.absoluteFill}
           region={mapRegion}
+          mapPadding={{ top: 0, right: 0, left: 0, bottom: mapBottomPadding }}
           showsUserLocation
           showsMyLocationButton={false}
           showsCompass={false}

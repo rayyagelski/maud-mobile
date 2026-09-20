@@ -6,6 +6,30 @@ import type { SpeedLimitSpan } from '../services/here/hereRoutingClient';
 // ~500 yards, per real-drive feedback on how far ahead a warning is useful.
 export const SPEED_ZONE_ANNOUNCE_DISTANCE_METERS = 457;
 
+// HERE doesn't always have a posted-limit value for every span it returns —
+// `speedLimitMps` comes back null wherever it has no data for that stretch,
+// which is common on minor/residential roads. nextSpeedZoneToAnnounce
+// requires a known (non-null) limit on both sides of a comparison, so those
+// gaps used to just go silent — not "the road has no zone", but "we don't
+// know, so say nothing", indistinguishable from each other to the driver.
+//
+// Carries the last real posted limit forward through any null gap instead,
+// on the reasoning that a road doesn't typically change its speed limit at
+// the exact point HERE's data happens to run out — the most recent known
+// value is a far better estimate than silence. A gap before the very first
+// known limit is left null; there's nothing earlier to estimate from.
+export function fillMissingSpeedLimits(spans: SpeedLimitSpan[]): SpeedLimitSpan[] {
+  let lastKnown: number | null = null;
+  return spans.map((span) => {
+    if (span.speedLimitMps != null) {
+      lastKnown = span.speedLimitMps;
+      return span;
+    }
+    if (lastKnown == null) return span;
+    return { ...span, speedLimitMps: lastKnown };
+  });
+}
+
 export interface SpeedZoneAnnouncement {
   speedLimitMps: number;
   distanceFromStartMeters: number;
@@ -34,10 +58,42 @@ export function currentSpanIndex(spans: SpeedLimitSpan[], distanceAlongRouteMete
 // wants. Each span is identified by its own distanceFromStartMeters, so
 // re-entering an earlier-seen limit later on the route (e.g. 35 -> 45 -> 35)
 // still announces the second 35 zone — it's a distinct span, not a repeat.
+// One announcement per zone — a limit value announced (in either form)
+// within this window is not announced again. Real-drive log of the
+// failure this closes: inside a 30 mph zone with a 25 mph zone ahead, the
+// hook alternated "approaching 25" / "now in 30" every single fix for over
+// a minute ("broken record"), because a single last-announced-span marker
+// can only remember one of the two, and each announcement of one made the
+// other look un-announced again. Zones sharing a limit value within a few
+// minutes of each other are rare enough that suppressing by value is the
+// right trade against that.
+export const SPEED_ZONE_REANNOUNCE_COOLDOWN_MS = 3 * 60 * 1000;
+
+export interface SpeedZoneAnnouncementMemory {
+  // Returns true when announcing this limit now would be a repeat.
+  isRecentlyAnnounced(limitMps: number, now: number): boolean;
+  markAnnounced(limitMps: number, now: number): void;
+}
+
+export function createSpeedZoneAnnouncementMemory(): SpeedZoneAnnouncementMemory {
+  const announcedAt = new Map<number, number>();
+  return {
+    isRecentlyAnnounced: (limitMps, now) => {
+      const at = announcedAt.get(limitMps);
+      return at != null && now - at < SPEED_ZONE_REANNOUNCE_COOLDOWN_MS;
+    },
+    markAnnounced: (limitMps, now) => { announcedAt.set(limitMps, now); },
+  };
+}
+
 export function nextSpeedZoneToAnnounce(
   spans: SpeedLimitSpan[],
   distanceAlongRouteMeters: number,
   lastAnnouncedSpanStartMeters: number | null,
+  // Checked INSIDE rather than filtering the result afterwards: a
+  // suppressed "already in it" for the current zone must fall through to
+  // the "approaching" check for the next one, not mask it.
+  isRecentlyAnnounced: (limitMps: number) => boolean = () => false,
 ): SpeedZoneAnnouncement | null {
   const currentIndex = currentSpanIndex(spans, distanceAlongRouteMeters);
   const current = currentIndex >= 0 ? spans[currentIndex] : null;
@@ -52,7 +108,8 @@ export function nextSpeedZoneToAnnounce(
     current?.speedLimitMps != null &&
     previous?.speedLimitMps != null &&
     current.distanceFromStartMeters !== lastAnnouncedSpanStartMeters &&
-    current.speedLimitMps < previous.speedLimitMps
+    current.speedLimitMps < previous.speedLimitMps &&
+    !isRecentlyAnnounced(current.speedLimitMps)
   ) {
     return {
       speedLimitMps: current.speedLimitMps,
@@ -71,7 +128,8 @@ export function nextSpeedZoneToAnnounce(
     current?.speedLimitMps != null &&
     next.distanceFromStartMeters !== lastAnnouncedSpanStartMeters &&
     next.speedLimitMps < current.speedLimitMps &&
-    next.distanceFromStartMeters - distanceAlongRouteMeters <= SPEED_ZONE_ANNOUNCE_DISTANCE_METERS
+    next.distanceFromStartMeters - distanceAlongRouteMeters <= SPEED_ZONE_ANNOUNCE_DISTANCE_METERS &&
+    !isRecentlyAnnounced(next.speedLimitMps)
   ) {
     return {
       speedLimitMps: next.speedLimitMps,
@@ -81,6 +139,32 @@ export function nextSpeedZoneToAnnounce(
   }
 
   return null;
+}
+
+// Seconds of this fix's interval to count as speeding — the whole interval
+// when the fix is above the posted limit of the span it falls in, else 0.
+// Same criterion vgd_analytics' speedLimitPointsFilter.js applies server-
+// side (any speed above the limit, no tolerance), so the Driver Score's
+// "Speeding" minutes agree with the speed-limit events VGD reports instead
+// of the flat 120 km/h placeholder that used to feed this (which is why it
+// read 0 min on drives with a dozen VGD speeding events).
+export function speedingSecondsForFix(
+  spans: SpeedLimitSpan[],
+  distanceAlongRouteMeters: number,
+  speedMs: number,
+  intervalSeconds: number,
+): number {
+  const index = currentSpanIndex(spans, distanceAlongRouteMeters);
+  const limit = index >= 0 ? spans[index].speedLimitMps : null;
+  if (limit == null || speedMs <= limit || intervalSeconds <= 0) return 0;
+  return intervalSeconds;
+}
+
+// Spoken wording — shared by both hooks so a copy change lands in one place.
+export function speedZoneAnnouncementText(limitLabel: string, isApproaching: boolean): string {
+  return isApproaching
+    ? `You are approaching a ${limitLabel} speed limit zone straight ahead of you.`
+    : `You are now in a ${limitLabel} speed limit zone. Please reduce your speed.`;
 }
 
 // Tracks how long/how far it takes the driver to actually slow down after

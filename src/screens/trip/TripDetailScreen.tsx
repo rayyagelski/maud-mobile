@@ -9,7 +9,7 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   MountainIcon, HourglassIcon, GaugeIcon,
   LeafIcon, DollarIcon,
-  FlashIcon, StarOutlineIcon, LightbulbIcon, ChevronIcon,
+  FlashIcon, StarOutlineIcon, LightbulbIcon, ChevronIcon, WarningTriangleIcon,
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
@@ -18,8 +18,10 @@ import { vehiclesApi } from '../../api';
 import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
 } from '../../utils/helpers';
+import { MS2_PER_G } from '../../utils/constants';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
 import type { TripCostResponse } from '../../types/vehicle.types';
+import type { TelematicsEvent } from '../../types/trip.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -100,6 +102,66 @@ const enSt = StyleSheet.create({
   label: { fontSize: 12, color: '#888', marginLeft: 6 },
   value: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
   sub: { fontSize: 11, color: '#AAAAAA', marginTop: 3 },
+});
+
+// ── Driving events (individual harsh brake/accel/corner occurrences) ───────
+// The aggregate count above ("N harsh driving events...") used to be the
+// only thing shown here — the web VGD page already lists each event
+// individually with a time and severity, and mobile had the same per-event
+// data (trip.events) sitting right there in Redux, just never rendered.
+
+type DrivingEventType = 'harsh_brake' | 'harsh_accel' | 'harsh_corner' | 'phone_usage';
+
+const EVENT_LABELS: Record<DrivingEventType, string> = {
+  harsh_brake: 'Hard braking',
+  harsh_accel: 'Hard acceleration',
+  harsh_corner: 'Cornering',
+  phone_usage: 'Phone usage',
+};
+
+const EVENT_COLORS: Record<DrivingEventType, string> = {
+  harsh_brake: '#E5484D',
+  harsh_accel: '#F47920',
+  harsh_corner: '#9B59B6',
+  phone_usage: '#2F80ED',
+};
+
+function DrivingEventRow({ event, last }: { event: TelematicsEvent; last: boolean }) {
+  const type = event.type as DrivingEventType;
+  const time = new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // Harsh events: event.value is signed m/s² (harsh_brake negative,
+  // harsh_accel/harsh_corner positive, per harshEventDetector.ts) —
+  // magnitude in g is what's meaningful to a driver, sign is already
+  // carried by the label. Phone usage: event.value is seconds — listed here
+  // too (it was filtered out before) so the Driver Score's "Phone usage"
+  // minutes can be traced back to the trips and moments they came from.
+  const valueLabel = event.value == null
+    ? null
+    : type === 'phone_usage'
+      ? `${Math.round(event.value)}s`
+      : `${Math.abs(event.value / MS2_PER_G).toFixed(2)}g`;
+
+  return (
+    <View style={[deSt.row, !last && deSt.rowBorder]}>
+      <View style={deSt.iconBox}>
+        <WarningTriangleIcon color={EVENT_COLORS[type]} size={18} />
+      </View>
+      <View style={deSt.info}>
+        <Text style={deSt.label}>{EVENT_LABELS[type]}</Text>
+        <Text style={deSt.time}>{time}</Text>
+      </View>
+      {valueLabel != null && <Text style={deSt.value}>{valueLabel}</Text>}
+    </View>
+  );
+}
+const deSt = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  iconBox: { width: 26, height: 26, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  info: { flex: 1 },
+  label: { fontSize: 14, color: '#1A1A1A', fontWeight: '600' },
+  time: { fontSize: 12, color: '#999', marginTop: 2 },
+  value: { fontSize: 13, fontWeight: '700', color: '#555' },
 });
 
 // ── Eco savings (this trip vs. baseline) ────────────────────────────────────
@@ -217,6 +279,10 @@ export default function TripDetailScreen() {
   const behaviorCaption = totalHarshEvents === 0
     ? 'Smooth acceleration and steady speed improved efficiency.'
     : `${totalHarshEvents} harsh driving event${totalHarshEvents === 1 ? '' : 's'} this trip reduced your efficiency.`;
+  const drivingEvents = (trip?.events ?? [])
+    .filter((e): e is TelematicsEvent & { type: DrivingEventType } =>
+      e.type === 'harsh_brake' || e.type === 'harsh_accel' || e.type === 'harsh_corner' || e.type === 'phone_usage')
+    .sort((a, b) => a.timestamp - b.timestamp);
 
   // Vehicle Generated Data read-back — only for trips that actually made it
   // into VGD (older trips predating this feature have no vgdTripId at all).
@@ -326,6 +392,21 @@ export default function TripDetailScreen() {
           <StatRow icon={<HourglassIcon color="#999" size={18} />} label="Duration" value={formatDuration(durationSeconds)} />
           <StatRow icon={<GaugeIcon color="#999" size={18} />} label="Avg Speed" value={formatSpeed(avgSpeedKmh, isImperial)} last />
         </View>
+
+        {/* Driving events — individual harsh brake/accel/corner occurrences,
+            same data the aggregate count in ECO SAVINGS below is derived
+            from, just broken out per-event (time + severity) instead of
+            collapsed into a single number. */}
+        {drivingEvents.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>DRIVING EVENTS</Text>
+            <View style={styles.card}>
+              {drivingEvents.map((event, index) => (
+                <DrivingEventRow key={event.id} event={event} last={index === drivingEvents.length - 1} />
+              ))}
+            </View>
+          </>
+        )}
 
         {/* CO₂ & Cost */}
         {(reward || tripCost?.cost != null) && (

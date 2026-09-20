@@ -10,6 +10,9 @@ interface BluetoothVehicleDetectionNativeModule {
   start(): Promise<boolean>;
   stop(): void;
   getConnectedDeviceName(): Promise<string | null>;
+  getBondedDevices(): Promise<string[]>;
+  startScreenStateUpdates(): void;
+  isScreenInteractive(): Promise<boolean>;
 }
 
 const nativeModule = NativeModules.BluetoothVehicleDetection as
@@ -56,10 +59,49 @@ export async function getConnectedBluetoothDeviceName(): Promise<string | null> 
   }
 }
 
+// The phone's already-bonded (paired-at-the-OS-level) device names — NOT a
+// scan for nearby devices, and NOT a way to create a new pairing. Android
+// reserves both of those to system apps; this only surfaces devices already
+// in the OS's own pairing list, for a driver to pick "which one is my car"
+// from inside the app. Always empty on iOS (no equivalent API — see
+// BluetoothVehicleDetection.swift's own comment) and whenever the native
+// module isn't linked.
+export async function getBondedBluetoothDeviceNames(): Promise<string[]> {
+  if (!nativeModule) return [];
+  try {
+    return await nativeModule.getBondedDevices();
+  } catch {
+    return [];
+  }
+}
+
 export function subscribeBluetoothDeviceConnected(listener: DeviceNameListener): () => void {
   if (!emitter) return () => {};
   const subscription = emitter.addListener('onBluetoothDeviceConnected', (event: { deviceName: string | null }) =>
     listener(event.deviceName),
+  );
+  return () => subscription.remove();
+}
+
+// Whether the screen is on AND unlocked — i.e. someone could actually be
+// handling the phone. See BluetoothVehicleDetectionModule.kt: on Android,
+// AppState alone can't distinguish "switched to another app" from "screen
+// locked in the holder". Resolves true wherever the signal doesn't exist
+// (iOS, module not linked) so callers fall back to AppState-only behaviour.
+export async function isScreenInteractive(): Promise<boolean> {
+  if (!nativeModule?.isScreenInteractive) return true;
+  try {
+    return await nativeModule.isScreenInteractive();
+  } catch {
+    return true;
+  }
+}
+
+export function subscribeScreenInteractive(listener: (interactive: boolean) => void): () => void {
+  if (!emitter || !nativeModule?.startScreenStateUpdates) return () => {};
+  nativeModule.startScreenStateUpdates();
+  const subscription = emitter.addListener('onScreenInteractiveChanged', (event: { interactive: boolean }) =>
+    listener(event.interactive),
   );
   return () => subscription.remove();
 }

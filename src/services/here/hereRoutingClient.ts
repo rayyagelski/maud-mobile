@@ -124,6 +124,31 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
   };
 }
 
+// React Native's fetch has no request timeout of its own — on a flaky
+// cellular connection a request can sit unresolved for many minutes. That
+// showed up in a real auto-detected drive: useLiveSpeedZoneAlerts' very
+// first reference-route fetch was issued at trip start and only resolved
+// ~13 minutes later, and since that hook won't issue another request while
+// one is in flight, the whole drive went by with no speed-limit data and
+// no announcements. Bounded here so a hung request fails fast and the
+// caller's normal retry path takes over.
+export const HERE_REQUEST_TIMEOUT_MS = 15 * 1000;
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HERE_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(`HERE request timed out after ${HERE_REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // HERE Routing API v8 — plain REST/JSON, no native SDK. Coordinates are
 // decoded from HERE's flexible-polyline format and fed straight into the
 // existing react-native-maps <Polyline>, so no map-library swap is needed.
@@ -155,7 +180,7 @@ export async function fetchHereRoutes(
     apiKey: HERE_API_KEY,
   });
 
-  const response = await fetch(`https://router.hereapi.com/v8/routes?${params.toString()}`);
+  const response = await fetchWithTimeout(`https://router.hereapi.com/v8/routes?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`HERE routing request failed (${response.status})`);
   }

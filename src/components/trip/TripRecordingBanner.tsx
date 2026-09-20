@@ -5,6 +5,7 @@ import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { endTrip } from '../../store/slices/tripSlice';
 import { formatDuration } from '../../utils/helpers';
 import { navigationRef } from '../../navigation/navigationRef';
+import { logDiagnostic } from '../../services/diagnosticsLog';
 
 const RED = '#E53935';
 
@@ -35,6 +36,7 @@ export default function TripRecordingBanner() {
     if (!activeTrip) return;
     setIsStopping(true);
     const tripId = activeTrip.id;
+    logDiagnostic('Ending trip — stopped manually by user.', { from: 'recording-banner' });
     await dispatch(endTrip(tripId));
     setIsStopping(false);
     if (navigationRef.isReady()) navigationRef.navigate('TripSummary', { tripId } as never);

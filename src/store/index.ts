@@ -1,6 +1,10 @@
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
-import { persistStore, persistReducer, FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER } from 'redux-persist';
+import {
+  persistStore, persistReducer, type PersistConfig,
+  FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER,
+} from 'redux-persist';
 import { throttledAsyncStorage } from './throttledAsyncStorage';
+import { tripsPersistTransform } from './tripsPersistTransform';
 import authReducer from './slices/authSlice';
 import vehicleReducer from './slices/vehicleSlice';
 import driverReducer from './slices/driverSlice';
@@ -30,7 +34,11 @@ const rootReducer = combineReducers({
   settings: settingsReducer,
 });
 
-const persistConfig = {
+// Explicitly typed rather than inferred from the object literal: adding
+// `transforms` below otherwise widens persistReducer's inferred state to a
+// Partial<> of the root state, which then fails to satisfy configureStore
+// and breaks the AppDispatch type for every thunk in the app.
+const persistConfig: PersistConfig<ReturnType<typeof rootReducer>> = {
   key: 'root',
   // Throttled, not raw AsyncStorage — see throttledAsyncStorage.ts. Every
   // dispatch touching a whitelisted slice (trips especially, during active
@@ -45,6 +53,11 @@ const persistConfig = {
   // storage instead (see secureTokenStorage.ts / tokenPersistMiddleware.ts)
   // and is restored on launch by AppNavigator.
   whitelist: ['vehicles', 'drivers', 'trips', 'compliance', 'syncQueue', 'bluetoothPairing', 'settings'],
+  // Bounds the one slice that grows without limit, so the blob this config
+  // writes/reads can't keep getting more expensive every drive — see
+  // tripsPersistTransform.ts. Throttling (above) reduced how OFTEN the blob
+  // is written; this caps how BIG it gets.
+  transforms: [tripsPersistTransform],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

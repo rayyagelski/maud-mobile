@@ -69,20 +69,58 @@ export const HEADLESS_LOCATION_QUEUE_KEY = 'headlessLocationQueue';
 // Hard cap on the headless queue so an extended stretch without a real app
 // launch (e.g. the overnight-idle case from real testing) can't grow it
 // unbounded — oldest entries are dropped first once past this.
-export const HEADLESS_LOCATION_QUEUE_MAX = 2000;
+//
+// 2000 was the original cap, but every queued entry gets fully replayed
+// through handleLocation on the next mount (see useTripAutoDetection.ts) —
+// including a native Bluetooth bridge round-trip per fix — in one
+// synchronous loop. An overnight idle stretch (heartbeatInterval alone is
+// enough to queue one entry a minute for hours, independent of whether the
+// vehicle ever actually moved) could approach the old 2000 cap, meaning
+// reopening the app the next morning fired up to ~2000 back-to-back native
+// calls and Redux dispatches before the UI could respond at all — real-
+// world symptom: the app needing two taps to "wake up" and then freezing
+// outright. The replay's actual purpose is only to catch a recent motion
+// event from just before the app reopened (see REPLAY_LOCATION_QUEUE_MAX
+// below); it was never meant to reconstruct an entire overnight history, so
+// there's no reason for this to be any larger than that same small number.
+export const HEADLESS_LOCATION_QUEUE_MAX = 20;
+// Even within that cap, only this many of the MOST RECENT queued fixes are
+// actually replayed on the next mount — old entries beyond this are
+// discarded outright, without ever running through handleLocation (so no
+// dispatch, no diagnostic log, no BT poll for them). MOVING_CONFIRM_MS's own
+// 5-second confirm window is what the replay exists to reconstruct, and
+// fixes arrive at least every ~1-3s, so this comfortably covers that without
+// reprocessing a long, stale backlog.
+export const REPLAY_LOCATION_QUEUE_MAX = 10;
 export const SPEED_ZONE_ALERT_RADIUS_KM = 2;
 // useLiveSpeedZoneAlerts (auto-detected trips, no real planned route) —
 // periodically fetches a short synthetic HERE route continuing straight
 // ahead from current position/heading purely to read its speedLimitSpans.
 // Ahead distance for that synthetic route.
-export const LIVE_SPEED_ZONE_AHEAD_METERS = 2000;
+//
+// speedZoneAlertLogic.ts only ever looks SPEED_ZONE_ANNOUNCE_DISTANCE_METERS
+// (~457m) ahead to decide whether to warn about an upcoming zone — the old
+// 2000m/1200m pair was sized around minimizing HERE API calls, not around
+// that actual need, and the tradeoff was real: the synthetic route can only
+// ever be "straight ahead" (destinationPointFrom has no idea you're about to
+// turn), so the longer it goes before refreshing, the longer a stretch of
+// road it can be wrong about after a turn — on top of the off-route
+// self-correction (see useLiveSpeedZoneAlerts.ts), which only fires once
+// you're already measurably off the old reference. Shortened both so a stale
+// reference — right or wrong — doesn't survive nearly as long either way.
+export const LIVE_SPEED_ZONE_AHEAD_METERS = 1200;
 // Refetch once this far into the current reference route, leaving a buffer
-// of already-fetched road ahead rather than waiting until it runs out.
-export const LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS = 1200;
+// of already-fetched road ahead rather than waiting until it runs out. The
+// 700m gap to LIVE_SPEED_ZONE_AHEAD_METERS above comfortably covers the
+// ~457m announce window plus real margin for the fetch itself to complete.
+export const LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS = 500;
 // Floor between HERE requests regardless of distance traveled — bounds API
 // cost if GPS noise or a stop-and-go stretch would otherwise trigger
-// refetches too rapidly.
-export const LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS = 30 * 1000;
+// refetches too rapidly. Lowered alongside the distances above — at highway
+// speed the new 500m refetch trigger is crossed in under 20s, and the old
+// 30s floor would have silently suppressed exactly the more-frequent
+// refetches this was just tightened to get.
+export const LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS = 15 * 1000;
 // Below this speed, skip fetching — parked/idling/stop-and-go traffic
 // shouldn't burn HERE routing calls, and heading is unreliable at very low
 // speed anyway (the synthetic "ahead" projection needs a real heading).

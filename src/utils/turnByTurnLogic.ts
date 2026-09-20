@@ -9,6 +9,11 @@ export const TURN_ANNOUNCE_DISTANCE_METERS = 400;
 // How far from the planned route counts as "no longer following it" —
 // fixed-route v1 has no re-routing, so past this it just stops announcing.
 export const OFF_ROUTE_DISTANCE_METERS = 150;
+// Consecutive off-route fixes required before guidance actually gives up —
+// absorbs a single noisy GPS blip rather than silencing guidance on one bad
+// fix. Shared by every route-projected voice hook (turn-by-turn, both
+// speed-zone-alert variants) so they all agree on "off-route" the same way.
+export const OFF_ROUTE_STREAK_THRESHOLD = 3;
 
 // Cumulative along-route distance (metres) to each coordinate in the planned
 // route's own polyline — index-aligned with routeCoordinates. Built once per

@@ -5,12 +5,18 @@ import { useVoicePlayback } from './useVoicePlayback';
 import { useIsImperialUnits } from './useIsImperialUnits';
 import { subscribeGpsFix } from '../services/gpsSpeedBus';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
-import { buildCumulativeRouteDistances, distanceAlongRoute } from '../utils/turnByTurnLogic';
 import {
-  nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, currentSpanIndex, type SpeedZoneComplianceWatch,
+  buildCumulativeRouteDistances, distanceAlongRoute, isOffRoute, OFF_ROUTE_STREAK_THRESHOLD,
+} from '../utils/turnByTurnLogic';
+import {
+  nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, currentSpanIndex, fillMissingSpeedLimits,
+  createSpeedZoneAnnouncementMemory, speedingSecondsForFix, speedZoneAnnouncementText,
+  type SpeedZoneComplianceWatch,
 } from '../utils/speedZoneAlertLogic';
 import { fetchSpeedLimitAheadRoute, type LatLng, type SpeedLimitSpan } from '../services/here/hereRoutingClient';
 import { formatSpeed, generateId } from '../utils/helpers';
+import { logDiagnostic } from '../services/diagnosticsLog';
+import { addSpeedingSeconds } from '../services/harshEventCounters';
 import {
   LIVE_SPEED_ZONE_AHEAD_METERS, LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
   LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS,
@@ -60,13 +66,32 @@ export function useLiveSpeedZoneAlerts(): void {
     // fresh reference route recognize "this is the zone I already announced"
     // even though its offsets are unrelated to the previous route's.
     let lastAnnouncedSpeedLimitMps: number | null = null;
+    // See createSpeedZoneAnnouncementMemory — one announcement per zone.
+    const announced = createSpeedZoneAnnouncementMemory();
+    let lastFixTimestamp: number | null = null;
     let complianceWatch: SpeedZoneComplianceWatch | null = null;
     let lastMatchedIndex: number | null = null;
     let lastFetchAt = 0;
     let fetching = false;
     let distanceAlongReference = 0;
+    // Same off-route detection useSpeedZoneAlerts.ts needed — the reference
+    // route here is a real HERE-routed path, but only ever toward a
+    // synthetic "straight ahead from where we last fetched" destination
+    // (see fetchSpeedLimitAheadRoute), not the road the driver actually
+    // takes. Turning at an intersection the straight-line extrapolation
+    // didn't anticipate leaves the old reference describing a road no
+    // longer being driven until the next refetch — muting voice/compliance
+    // during that gap (and forcing an early refetch, not just waiting for
+    // the usual distance/time trigger) avoids the same "stale window ->
+    // wrong or repeated announcement" failure mode as the Route-Planner
+    // case, just self-correcting faster since this hook already refetches
+    // periodically regardless.
+    let offRouteStreak = 0;
 
-    async function refetch(origin: LatLng, headingDegrees: number) {
+    // 'off-route' | 'distance' | 'initial' — logged alongside the fetch
+    // result so a real drive's Diagnostics log can actually tell which of
+    // the two refetch triggers fired, rather than just "a refetch happened".
+    async function refetch(origin: LatLng, headingDegrees: number, reason: 'off-route' | 'distance' | 'initial') {
       if (fetching) return;
       fetching = true;
       lastFetchAt = Date.now();
@@ -74,7 +99,16 @@ export function useLiveSpeedZoneAlerts(): void {
         const route = await fetchSpeedLimitAheadRoute(origin, headingDegrees, LIVE_SPEED_ZONE_AHEAD_METERS);
         if (route && route.speedLimitSpans.length > 0) {
           referenceCoords = route.coordinates;
-          referenceSpans = route.speedLimitSpans;
+          // Logged from the RAW spans, before filling — logging the filled
+          // result here would silently hide whether HERE actually had any
+          // gaps to begin with, which is the one thing this log exists to
+          // answer. null in limitsKmh below means HERE genuinely returned no
+          // value for that span.
+          const rawNullCount = route.speedLimitSpans.filter(s => s.speedLimitMps == null).length;
+          // See fillMissingSpeedLimits' own doc comment — a gap in HERE's
+          // posted-limit data (common on minor/residential roads) is now
+          // estimated from the last known value instead of going silent.
+          referenceSpans = fillMissingSpeedLimits(route.speedLimitSpans);
           cumulativeRouteDistances = buildCumulativeRouteDistances(route.coordinates);
           lastMatchedIndex = null;
           distanceAlongReference = 0;
@@ -88,9 +122,30 @@ export function useLiveSpeedZoneAlerts(): void {
           lastAnnouncedSpanStartMeters = originSpan?.speedLimitMps === lastAnnouncedSpeedLimitMps
             ? originSpan.distanceFromStartMeters
             : null;
+          // Diagnostic — the only way to tell "no alerts because HERE had no
+          // speed-limit data for these roads" apart from "no alerts because
+          // this never ran" apart from "HERE had gaps and we estimated
+          // through them" from a real-drive report.
+          logDiagnostic('Speed-zone reference route fetched.', {
+            reason,
+            spans: route.speedLimitSpans.length,
+            spansMissingData: rawNullCount,
+            limitsKmh: Array.from(new Set(
+              route.speedLimitSpans.map(s => (s.speedLimitMps == null ? null : Math.round(s.speedLimitMps * 3.6))),
+            )),
+          });
+        } else {
+          logDiagnostic('Speed-zone reference route had no speed-limit data — nothing to announce here.', {
+            reason,
+            hadRoute: route != null,
+          });
         }
-      } catch {
+      } catch (err) {
         // Best-effort — just try again once the next qualifying fix arrives.
+        logDiagnostic('Speed-zone reference route fetch failed.', {
+          reason,
+          message: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         fetching = false;
       }
@@ -99,15 +154,37 @@ export function useLiveSpeedZoneAlerts(): void {
     const unsubscribe = subscribeGpsFix((speedMs, timestamp, point) => {
       if (speedMs < LIVE_SPEED_ZONE_MIN_SPEED_MS) return;
 
-      const needsRefetch = !referenceSpans || distanceAlongReference >= LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS;
+      const wasOffRoute = offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD;
+      const offRoute = referenceCoords ? isOffRoute(point, referenceCoords) : false;
+      offRouteStreak = offRoute ? offRouteStreak + 1 : 0;
+
+      // Off-route is a LEVEL here, not the single-tick edge it used to be
+      // (`offRouteStreak === threshold`). Real-drive log: one turn off the
+      // reference at 9:52, and the next refetch of any kind came at 10:26 —
+      // the edge tick fell inside the 15s rate floor, was skipped, and the
+      // streak never equalled the threshold again; meanwhile distance along
+      // the (wrong) reference stops advancing while off-route, so the
+      // distance trigger could never fire either. 33 minutes of driving
+      // with no speed-limit data. Wanting a refetch for as long as we're
+      // off-route (still rate-limited by the floor) can't get stuck.
+      const refetchReason: 'off-route' | 'distance' | 'initial' | null = offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD
+        ? 'off-route'
+        : !referenceSpans
+          ? 'initial'
+          : distanceAlongReference >= LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS
+            ? 'distance'
+            : null;
       if (
-        needsRefetch && point.heading != null
+        refetchReason && point.heading != null
         && Date.now() - lastFetchAt >= LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS
       ) {
-        refetch({ latitude: point.latitude, longitude: point.longitude }, point.heading);
+        refetch({ latitude: point.latitude, longitude: point.longitude }, point.heading, refetchReason);
       }
 
+      if (wasOffRoute && offRouteStreak === 0) lastMatchedIndex = null;
+
       if (!referenceSpans || !referenceCoords) return;
+      if (offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD) return;
 
       const { distanceMeters: distanceTraveledMeters, matchedIndex } = distanceAlongRoute(
         point, referenceCoords, cumulativeRouteDistances, lastMatchedIndex,
@@ -115,17 +192,33 @@ export function useLiveSpeedZoneAlerts(): void {
       distanceAlongReference = distanceTraveledMeters;
       lastMatchedIndex = matchedIndex;
 
-      const announcement = nextSpeedZoneToAnnounce(referenceSpans, distanceTraveledMeters, lastAnnouncedSpanStartMeters);
+      const announcement = nextSpeedZoneToAnnounce(
+        referenceSpans, distanceTraveledMeters, lastAnnouncedSpanStartMeters,
+        (limit) => announced.isRecentlyAnnounced(limit, timestamp),
+      );
       if (announcement) {
         lastAnnouncedSpanStartMeters = announcement.distanceFromStartMeters;
         lastAnnouncedSpeedLimitMps = announcement.speedLimitMps;
+        announced.markAnnounced(announcement.speedLimitMps, timestamp);
         const limitLabel = formatSpeed(announcement.speedLimitMps * 3.6, isImperialRef.current);
-        speakRef.current(
-          announcement.isApproaching
-            ? `You are approaching a ${limitLabel} speed zone. Please adjust your speed.`
-            : `You are now in a ${limitLabel} speed zone. Please reduce your speed.`,
-        );
+        logDiagnostic('Speed-zone announcement.', {
+          limit: limitLabel,
+          approaching: announcement.isApproaching,
+          speedKmh: Math.round(speedMs * 3.6),
+        });
+        // 'high' — same reasoning as useSpeedZoneAlerts.ts (see
+        // useVoicePlayback.ts).
+        speakRef.current(speedZoneAnnouncementText(limitLabel, announcement.isApproaching), 'high');
       }
+
+      // Driver Score "Speeding" minutes — see speedingSecondsForFix.
+      if (lastFixTimestamp != null) {
+        const over = speedingSecondsForFix(
+          referenceSpans, distanceTraveledMeters, speedMs, (timestamp - lastFixTimestamp) / 1000,
+        );
+        if (over > 0) addSpeedingSeconds(over);
+      }
+      lastFixTimestamp = timestamp;
 
       // Same compliance-tracking TelematicsEvent useSpeedZoneAlerts records —
       // not sent to VGD (no per-point parameter for it), visible in trip

@@ -23,7 +23,6 @@ const TEAL = '#3ABFBF';
 // separate name from TEAL since it means something semantically distinct
 // (best-tier severity color), even though the value is identical today.
 const GOOD = TEAL;
-const LIME = '#A9D94C';
 const ORANGE = '#F5A623';
 const RED = '#E5484D';
 
@@ -80,12 +79,23 @@ function behaviorScore(rate: number, poorRate: number): number {
   return Math.max(0, Math.min(100, Math.round(100 * (1 - rate / poorRate))));
 }
 
+// Product-specified bands: 90-100 green, 61-89 yellow/amber, 0-60 red.
 function scoreColor(score: number): string {
-  if (score >= 85) return GOOD;
-  if (score >= 70) return LIME;
-  if (score >= 50) return ORANGE;
+  if (score >= 90) return GOOD;
+  if (score >= 61) return ORANGE;
   return RED;
 }
+
+// Driving Behavior bars are always full-width — the score is communicated
+// by COLOR (via scoreColor's 90/61/0 bands), not by how much of the track is
+// filled. This was previously a variable-width bar, which needed a separate
+// minimum-visible-width workaround to keep a 0 score from rendering as a
+// blank (invisible) bar — full-width-always makes that workaround
+// unnecessary, since a 0 score is now simply a full RED bar, exactly as
+// legible as a full GREEN one at 100. Deliberately NOT applied to the Trip
+// Insights/Road Type Change rows further down, where the bar length is a
+// genuine share-of-total and must stay proportional.
+const FULL_BEHAVIOR_BAR_PCT = 100;
 
 function timeframeDays(label: string): number {
   return parseInt(label, 10) || 7;
@@ -439,19 +449,24 @@ export default function DriverScoreScreen() {
           ) : (
             <>
               <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-                label="Speeding" count={Math.round(rawCountsWithVgd.speedingSeconds / 60)} unit=" min" barPct={speedingScore}
+                label="Speeding" count={Math.round(rawCountsWithVgd.speedingSeconds / 60)} unit=" min"
+                barPct={FULL_BEHAVIOR_BAR_PCT}
                 barColor={scoreColor(speedingScore)} />
               <BehaviorRow icon={<PhoneIcon color="#888" size={16} />}
-                label="Phone Usage" count={Math.round(rawCountsWithVgd.phoneTextSeconds / 60)} unit=" min" barPct={phoneScore}
+                label="Phone Usage" count={Math.round(rawCountsWithVgd.phoneTextSeconds / 60)} unit=" min"
+                barPct={FULL_BEHAVIOR_BAR_PCT}
                 barColor={scoreColor(phoneScore)} />
               <BehaviorRow icon={<FlashIcon color="#888" size={16} />}
-                label="Harsh Braking" count={rawCountsWithVgd.harshBrakeCount} unit=" events" barPct={harshBrakeScore}
+                label="Harsh Braking" count={rawCountsWithVgd.harshBrakeCount} unit=" events"
+                barPct={FULL_BEHAVIOR_BAR_PCT}
                 barColor={scoreColor(harshBrakeScore)} />
               <BehaviorRow icon={<ArrowUpIcon color="#888" size={16} />}
-                label="Harsh Acceleration" count={rawCountsWithVgd.harshAccelCount} unit=" events" barPct={harshAccelScore}
+                label="Harsh Acceleration" count={rawCountsWithVgd.harshAccelCount} unit=" events"
+                barPct={FULL_BEHAVIOR_BAR_PCT}
                 barColor={scoreColor(harshAccelScore)} />
               <BehaviorRow icon={<RefreshIcon color="#888" size={16} />}
-                label="Cornering" count={rawCountsWithVgd.harshCornerCount} unit=" events" barPct={harshCornerScore}
+                label="Cornering" count={rawCountsWithVgd.harshCornerCount} unit=" events"
+                barPct={FULL_BEHAVIOR_BAR_PCT}
                 barColor={scoreColor(harshCornerScore)} last />
             </>
           )}

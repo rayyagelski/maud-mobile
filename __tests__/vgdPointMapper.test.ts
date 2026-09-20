@@ -124,6 +124,35 @@ describe('mapTelematicsEventsToVgdPoints', () => {
     const points = mapTelematicsEventsToVgdPoints([event('harsh_brake', undefined, 1700000000000)]);
     expect(points).toHaveLength(0);
   });
+
+  describe('cumulative distance on event points', () => {
+    // Batch of GPS points at t=100s/110s/120s with cumulative distance 1000/1500/2000m.
+    const gpsBatch = [
+      { gps: { lat: 0, lon: 0 }, time: 1700000100, parameters: { distance: 1000 } },
+      { gps: { lat: 0, lon: 0 }, time: 1700000110, parameters: { distance: 1500 } },
+      { gps: { lat: 0, lon: 0 }, time: 1700000120, parameters: { distance: 2000 } },
+    ];
+
+    it('takes the distance of the latest GPS point at or before the event time', () => {
+      const [p] = mapTelematicsEventsToVgdPoints([event('harsh_brake', -4.9, 1700000115000)], gpsBatch, 0);
+      expect(p.parameters.distance).toBe(1500);
+    });
+
+    it('uses a GPS point at exactly the event second', () => {
+      const [p] = mapTelematicsEventsToVgdPoints([event('harsh_corner', 4, 1700000120000)], gpsBatch, 0);
+      expect(p.parameters.distance).toBe(2000);
+    });
+
+    it('falls back to the carried-over cumulative when the event precedes every GPS point in the batch', () => {
+      const [p] = mapTelematicsEventsToVgdPoints([event('harsh_accel', 4, 1700000090000)], gpsBatch, 800);
+      expect(p.parameters.distance).toBe(800);
+    });
+
+    it('defaults to 0 with no batch context (first flush, event before first fix)', () => {
+      const [p] = mapTelematicsEventsToVgdPoints([event('harsh_accel', 4, 1700000090000)]);
+      expect(p.parameters.distance).toBe(0);
+    });
+  });
 });
 
 describe('markTripStart', () => {
@@ -170,5 +199,23 @@ describe('markTripEnd', () => {
 
   it('returns an empty array (never fabricates coordinates) when the batch is empty and no fallback exists', () => {
     expect(markTripEnd([], 1700000020000)).toEqual([]);
+  });
+
+  it('duplicates the point instead of clobbering trip_start when a trip starts and ends on the same single point', () => {
+    // Real-world case: a trip whose entire lifetime fits inside its first
+    // flush interval (e.g. one qualifying-speed fix immediately followed by
+    // stillness ending it) — markTripStart already tagged the batch's only
+    // point 'trip_start' before this runs.
+    const started = markTripStart(
+      mapGpsPointsToVgdPoints([point(52.52, 13.405, 1700000000000)], 0).vgdPoints,
+    );
+
+    const marked = markTripEnd(started, 1700000000000);
+
+    expect(marked).toHaveLength(2);
+    expect(marked.filter(p => p.type === 'trip_start')).toHaveLength(1);
+    expect(marked.filter(p => p.type === 'trip_end')).toHaveLength(1);
+    expect(marked[0].gps).toEqual(marked[1].gps);
+    expect(marked[0].time).toBe(marked[1].time);
   });
 });

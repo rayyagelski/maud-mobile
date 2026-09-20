@@ -4,11 +4,8 @@ import { useVoicePlayback } from './useVoicePlayback';
 import { subscribeGpsFix } from '../services/gpsSpeedBus';
 import {
   buildCumulativeRouteDistances, distanceAlongRoute, nextManeuverToAnnounce, isOffRoute,
+  OFF_ROUTE_STREAK_THRESHOLD,
 } from '../utils/turnByTurnLogic';
-
-// Consecutive off-route fixes required before guidance gives up — absorbs a
-// single noisy GPS blip rather than silencing guidance on one bad fix.
-const OFF_ROUTE_STREAK_THRESHOLD = 3;
 
 /**
  * Voice-only turn-by-turn guidance for a Route-Planner-originated trip —
@@ -65,7 +62,10 @@ export function useTurnByTurnGuidance(): void {
       const maneuver = nextManeuverToAnnounce(plannedRoute.maneuvers, distanceTraveledMeters, announcedCount);
       if (maneuver) {
         announcedCount += 1;
-        speakRef.current(maneuver.instruction);
+        // 'critical' — a turn instruction must not be cut off by a lower-
+        // priority speed-zone/AI-recommendation announcement firing on the
+        // same or a following GPS fix (see useVoicePlayback.ts).
+        speakRef.current(maneuver.instruction, 'critical');
       }
     });
 
