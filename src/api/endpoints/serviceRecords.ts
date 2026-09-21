@@ -1,6 +1,6 @@
 import client from '../client';
 import type {
-  ComponentCondition, ComponentConditionStatus, ServicePrediction, ServiceRecord, VehicleComponent,
+  ComponentCondition, ComponentConditionStatus, ServiceRecord, UpcomingServicesResponse, VehicleComponent,
 } from '../../types/serviceRecord.types';
 
 export const serviceRecordsApi = {
@@ -28,9 +28,10 @@ export const serviceRecordsApi = {
     return res.data.condition;
   },
 
-  // Sorted most-urgent-first by the backend. Distances in km.
-  getPredictions: async (vehicleId: string) => {
-    const res = await client.get<{ predictions: ServicePrediction[] }>(`/vehicles/${vehicleId}/service-predictions`);
-    return res.data.predictions;
+  // The jobs the manufacturer lists for the vehicle's next service visit.
+  // Distances in km.
+  getUpcomingServices: async (vehicleId: string) => {
+    const res = await client.get<UpcomingServicesResponse>(`/vehicles/${vehicleId}/upcoming-services`);
+    return res.data;
   },
 };

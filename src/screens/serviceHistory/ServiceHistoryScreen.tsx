@@ -15,7 +15,7 @@ import { vehiclesApi, serviceRecordsApi } from '../../api';
 import { kmToMiles } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type {
-  ComponentCondition, ComponentConditionStatus, ServicePrediction, ServiceUrgency, VehicleComponent,
+  ComponentCondition, ComponentConditionStatus, UpcomingServicesResponse, VehicleComponent,
 } from '../../types/serviceRecord.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -42,28 +42,16 @@ const STATUS_META: Record<ComponentConditionStatus, { label: string; color: stri
   bad: { label: 'Bad', color: '#E5484D' },
 };
 
-// Predictive alerts come from the backend's ServicePredictionService (one
-// per catalog job, most urgent first). Only the actionable band is listed
-// here — an "ok" job months/thousands of km away isn't an alert.
-const ALERT_URGENCIES: ServiceUrgency[] = ['overdue', 'due_soon', 'upcoming'];
-const MAX_ALERTS = 6;
-
-function describePrediction(p: ServicePrediction, isImperial: boolean): string {
-  const parts: string[] = [];
-  if (p.kmRemaining != null) {
-    const dist = isImperial ? kmToMiles(p.kmRemaining) : p.kmRemaining;
-    const unit = isImperial ? 'mi' : 'km';
-    parts.push(dist < 0
-      ? `${Math.round(-dist).toLocaleString()} ${unit} overdue`
-      : `~${Math.round(dist).toLocaleString()} ${unit}`);
-  }
-  if (p.daysRemaining != null) {
-    parts.push(p.daysRemaining < 0
-      ? `${-p.daysRemaining} days overdue`
-      : `~${p.daysRemaining} days`);
-  }
-  const when = parts.join(' · ') || 'Due date unknown';
-  return p.estimated ? `${when} · estimated` : when;
+// "Upcoming Services" = the manufacturer-listed jobs at the vehicle's next
+// service visit (the one the header describes) — not independent per-job
+// predictions. Every row shares that visit's date, shown in the calendar
+// slot on the right.
+function formatCalendarDate(iso: string): { month: string; day: string } {
+  const d = new Date(iso);
+  return {
+    month: d.toLocaleDateString(undefined, { month: 'short' }).toUpperCase(),
+    day: String(d.getDate()),
+  };
 }
 
 function currencySymbol(code: string): string {
@@ -124,7 +112,7 @@ export default function ServiceHistoryScreen() {
   const displayOdometer = odometer != null && isImperial ? kmToMiles(odometer) : odometer;
   const [condition, setCondition] = useState<ComponentCondition[] | null>(null);
   const [savingComponent, setSavingComponent] = useState<VehicleComponent | null>(null);
-  const [predictions, setPredictions] = useState<ServicePrediction[] | null>(null);
+  const [upcoming, setUpcoming] = useState<UpcomingServicesResponse | null>(null);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -135,9 +123,9 @@ export default function ServiceHistoryScreen() {
     serviceRecordsApi.getCondition(vehicleId)
       .then(setCondition)
       .catch(() => setCondition(null));
-    serviceRecordsApi.getPredictions(vehicleId)
-      .then(setPredictions)
-      .catch(() => setPredictions(null));
+    serviceRecordsApi.getUpcomingServices(vehicleId)
+      .then(setUpcoming)
+      .catch(() => setUpcoming(null));
   }, [vehicleId, dispatch]);
 
   // Tap cycles good -> warning -> bad -> good. Optimistic: the pill changes
@@ -170,9 +158,11 @@ export default function ServiceHistoryScreen() {
     ? displayNextDueMileage - displayOdometer : null;
   const distanceUnit = isImperial ? 'miles' : 'km';
 
-  const alerts = (predictions ?? [])
-    .filter(p => ALERT_URGENCIES.includes(p.urgency))
-    .slice(0, MAX_ALERTS);
+  const upcomingServices = upcoming?.available ? upcoming.services : [];
+  // The visit's milestone in the manufacturer's own unit (miles) or km.
+  const milestoneLabel = upcoming?.nextService
+    ? `${(isImperial ? upcoming.nextService.milestoneMileageMiles : Math.round(upcoming.nextService.milestoneMileageKm)).toLocaleString()} ${distanceUnit}`
+    : null;
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -273,44 +263,56 @@ export default function ServiceHistoryScreen() {
           </View>
         )}
 
-        {/* Predictive Alerts */}
+        {/* Upcoming Services — the jobs at the next service visit */}
         <SectionHeader
-          title="PREDICTIVE ALERTS"
+          title="UPCOMING SERVICES"
           expanded={alertsOpen}
           onToggle={() => setAlertsOpen(v => !v)}
         />
         {alertsOpen && (
           <View style={styles.card}>
-            {alerts.map((alert, i) => {
-              const urgent = alert.urgency === 'overdue' || alert.urgency === 'due_soon';
+            {milestoneLabel && upcomingServices.length > 0 && (
+              <Text style={styles.upcomingIntro}>
+                Manufacturer schedule for the {milestoneLabel} service
+                {upcoming?.nextService?.anchor === 'odometer' ? ' (based on your current mileage)' : ''}:
+              </Text>
+            )}
+            {upcomingServices.map((service, i) => {
+              const cal = service.dueDate ? formatCalendarDate(service.dueDate) : null;
               return (
                 <View
-                  key={alert.jobType}
-                  style={[styles.alertRow, i < alerts.length - 1 && styles.rowBorder]}
+                  key={service.name}
+                  style={[styles.alertRow, i < upcomingServices.length - 1 && styles.rowBorder]}
                 >
                   <View style={styles.alertInfo}>
-                    <Text style={styles.alertTitle}>{alert.label}</Text>
-                    <Text style={[styles.alertSub, alert.urgency === 'overdue' && styles.alertSubOverdue]}>
-                      {describePrediction(alert, isImperial)}
-                    </Text>
+                    <Text style={styles.alertTitle}>{service.name}</Text>
+                    {service.action && (
+                      <Text style={styles.alertSub}>{service.action}</Text>
+                    )}
                   </View>
-                  <View style={[styles.actionBtn, urgent ? styles.actionPrimary : styles.actionSecondary]}>
-                    <Text style={[styles.actionText, !urgent && styles.actionTextSecondary]}>
-                      {alert.urgency === 'overdue' ? 'Overdue' : urgent ? 'Due soon' : 'Upcoming'}
-                    </Text>
-                  </View>
+                  {cal ? (
+                    <View style={styles.calendar} accessibilityLabel={`Due ${new Date(service.dueDate as string).toLocaleDateString()}`}>
+                      <Text style={styles.calendarMonth}>{cal.month}</Text>
+                      <Text style={styles.calendarDay}>{cal.day}</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.calendar, styles.calendarEmpty]}>
+                      <Text style={styles.calendarMonth}>DATE</Text>
+                      <Text style={styles.calendarDash}>—</Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
-            {predictions === null && (
-              <Text style={styles.emptyText}>Predictions unavailable right now.</Text>
+            {(upcoming === null || !upcoming.available) && (
+              <Text style={styles.emptyText}>Maintenance schedule unavailable for this vehicle right now.</Text>
             )}
-            {predictions !== null && alerts.length === 0 && (
-              <Text style={styles.emptyText}>Nothing due in the next few months.</Text>
+            {upcoming?.available && upcomingServices.length === 0 && (
+              <Text style={styles.emptyText}>No manufacturer services listed for the next interval.</Text>
             )}
-            {alerts.some(a => a.estimated) && (
+            {upcoming?.available && upcomingServices.length > 0 && !upcoming.nextService?.dueDate && (
               <Text style={styles.condHint}>
-                "Estimated" items have no recorded service yet and assume the typical interval for this job.
+                Add a service record to get a due date — the mileage comes from the manufacturer schedule.
               </Text>
             )}
           </View>
@@ -418,12 +420,19 @@ const styles = StyleSheet.create({
   alertInfo: { flex: 1 },
   alertTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
   alertSub: { fontSize: 13, color: '#888' },
-  alertSubOverdue: { color: '#E5484D', fontWeight: '600' },
-  actionBtn: { borderRadius: 22, paddingHorizontal: 22, paddingVertical: 10 },
-  actionPrimary: { backgroundColor: '#F57C00' },
-  actionSecondary: { backgroundColor: '#EEEEEE' },
-  actionText: { fontSize: 14, fontWeight: '700', color: 'white' },
-  actionTextSecondary: { color: '#555' },
+  upcomingIntro: { fontSize: 13, color: '#666', paddingTop: 14, paddingBottom: 4 },
+  // Calendar-page tile in the slot the old action button occupied.
+  calendar: {
+    width: 56, borderRadius: 10, overflow: 'hidden', alignItems: 'center',
+    backgroundColor: 'white', borderWidth: 1, borderColor: '#E3E3E3',
+  },
+  calendarEmpty: { opacity: 0.5 },
+  calendarMonth: {
+    alignSelf: 'stretch', textAlign: 'center', backgroundColor: TEAL, color: 'white',
+    fontSize: 10, fontWeight: '800', letterSpacing: 0.5, paddingVertical: 3,
+  },
+  calendarDay: { fontSize: 20, fontWeight: '800', color: '#1A1A1A', paddingVertical: 4 },
+  calendarDash: { fontSize: 18, color: '#999', paddingVertical: 5 },
 
   // Past service rows
   pastRow: {

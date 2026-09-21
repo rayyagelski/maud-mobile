@@ -36,24 +36,31 @@ export interface ComponentCondition {
   updatedAt: string | null;
 }
 
-// ── Predictive alerts ──────────────────────────────────────────────────────
+// ── Upcoming services ──────────────────────────────────────────────────────
+// The manufacturer-listed jobs belonging to the vehicle's NEXT service
+// visit (the one the "Next Service Due" header describes), from the
+// backend's UpcomingServicesService (TorqueNode maintenance schedule
+// resolved against the next-due mileage).
 
-export type ServiceUrgency = 'overdue' | 'due_soon' | 'upcoming' | 'ok';
-
-export interface ServicePrediction {
-  jobType: string;
-  label: string;
+export interface UpcomingService {
+  name: string;               // e.g. "Replace Engine Oil", as the manufacturer lists it
+  action: string | null;      // "Replace" | "Inspect" | "Rotate" | ...
   component: VehicleComponent | null;
-  // true = no recorded occurrence of this job; projected from the vehicle's
-  // current odometer / age to the next interval boundary instead.
-  estimated: boolean;
-  lastDoneDate: string | null;
-  lastDoneMileageKm: number | null;
-  dueDate: string | null;
-  dueMileageKm: number | null;
-  daysRemaining: number | null;
-  kmRemaining: number | null;
-  urgency: ServiceUrgency;
+  dueDate: string | null;     // YYYY-MM-DD — the visit's date; same for every service in it
+}
+
+export interface UpcomingServicesResponse {
+  // false = schedule couldn't be fetched (no key, vehicle unknown, network)
+  available: boolean;
+  nextService: {
+    dueDate: string | null;
+    dueMileageKm: number | null;
+    // The schedule milestone the visit falls on (manufacturer's own figure).
+    milestoneMileageKm: number;
+    milestoneMileageMiles: number;
+    anchor: 'service-record' | 'odometer' | 'first-milestone';
+  } | null;
+  services: UpcomingService[];
 }
 
 export interface ServiceRecordState {
