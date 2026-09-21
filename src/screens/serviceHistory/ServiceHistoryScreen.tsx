@@ -11,9 +11,12 @@ import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchServiceRecords } from '../../store/slices/serviceRecordSlice';
-import { vehiclesApi } from '../../api';
+import { vehiclesApi, serviceRecordsApi } from '../../api';
 import { kmToMiles } from '../../utils/helpers';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
+import type {
+  ComponentCondition, ComponentConditionStatus, ServicePrediction, ServiceUrgency, VehicleComponent,
+} from '../../types/serviceRecord.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -21,19 +24,47 @@ const TEAL = '#3ABFBF';
 const GREEN = '#27AE60';
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 
-// Kept as static placeholders per the confirmed decision — no per-component
-// wear-tracking data source exists anywhere (no OBD, no telemetry).
-const CONDITION_ITEMS = [
-  { label: 'Brakes', status: 'Good' },
-  { label: 'Tires', status: 'Good' },
-  { label: 'Battery', status: 'Good' },
-  { label: 'Alignment', status: 'Good' },
-];
+// Driver-reported condition — there is no wear sensor source (no OBD, no
+// telemetry), so this is explicitly the driver's own three-state rating,
+// tapped through in place and synced to the backend so the web sees the
+// same value.
+const COMPONENT_LABELS: Record<VehicleComponent, string> = {
+  brakes: 'Brakes',
+  tires: 'Tires',
+  battery: 'Battery',
+  alignment: 'Alignment',
+};
+const CONDITION_ORDER: VehicleComponent[] = ['brakes', 'tires', 'battery', 'alignment'];
+const STATUS_CYCLE: ComponentConditionStatus[] = ['good', 'warning', 'bad'];
+const STATUS_META: Record<ComponentConditionStatus, { label: string; color: string }> = {
+  good: { label: 'Good', color: GREEN },
+  warning: { label: 'Warning', color: '#F5A623' },
+  bad: { label: 'Bad', color: '#E5484D' },
+};
 
-const ALERTS = [
-  { title: 'Brake Pads', sub: '~1,200 km · ~18 days', action: 'Book', primary: true },
-  { title: 'Tire Pressure', sub: 'Check within 7 days', action: 'Check', primary: false },
-];
+// Predictive alerts come from the backend's ServicePredictionService (one
+// per catalog job, most urgent first). Only the actionable band is listed
+// here — an "ok" job months/thousands of km away isn't an alert.
+const ALERT_URGENCIES: ServiceUrgency[] = ['overdue', 'due_soon', 'upcoming'];
+const MAX_ALERTS = 6;
+
+function describePrediction(p: ServicePrediction, isImperial: boolean): string {
+  const parts: string[] = [];
+  if (p.kmRemaining != null) {
+    const dist = isImperial ? kmToMiles(p.kmRemaining) : p.kmRemaining;
+    const unit = isImperial ? 'mi' : 'km';
+    parts.push(dist < 0
+      ? `${Math.round(-dist).toLocaleString()} ${unit} overdue`
+      : `~${Math.round(dist).toLocaleString()} ${unit}`);
+  }
+  if (p.daysRemaining != null) {
+    parts.push(p.daysRemaining < 0
+      ? `${-p.daysRemaining} days overdue`
+      : `~${p.daysRemaining} days`);
+  }
+  const when = parts.join(' · ') || 'Due date unknown';
+  return p.estimated ? `${when} · estimated` : when;
+}
 
 function currencySymbol(code: string): string {
   return { EUR: '€', USD: '$', GBP: '£' }[code] ?? code;
@@ -91,6 +122,9 @@ export default function ServiceHistoryScreen() {
   // miles only at the display edge below, for imperial-locale customers.
   const [odometer, setOdometer] = useState<number | null>(null);
   const displayOdometer = odometer != null && isImperial ? kmToMiles(odometer) : odometer;
+  const [condition, setCondition] = useState<ComponentCondition[] | null>(null);
+  const [savingComponent, setSavingComponent] = useState<VehicleComponent | null>(null);
+  const [predictions, setPredictions] = useState<ServicePrediction[] | null>(null);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -98,13 +132,47 @@ export default function ServiceHistoryScreen() {
     vehiclesApi.getOdometer(vehicleId)
       .then(res => setOdometer(res.data.odometer))
       .catch(() => setOdometer(null));
+    serviceRecordsApi.getCondition(vehicleId)
+      .then(setCondition)
+      .catch(() => setCondition(null));
+    serviceRecordsApi.getPredictions(vehicleId)
+      .then(setPredictions)
+      .catch(() => setPredictions(null));
   }, [vehicleId, dispatch]);
+
+  // Tap cycles good -> warning -> bad -> good. Optimistic: the pill changes
+  // immediately, and reverts to the server's answer only if the save fails.
+  async function cycleCondition(component: VehicleComponent) {
+    if (!vehicleId || savingComponent || !condition) return;
+    const current = condition.find(c => c.component === component)?.status ?? 'good';
+    const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length];
+    const previous = condition;
+    setCondition(condition.map(c => (c.component === component ? { ...c, status: next } : c)));
+    setSavingComponent(component);
+    try {
+      setCondition(await serviceRecordsApi.setCondition(vehicleId, component, next));
+    } catch {
+      setCondition(previous);
+    } finally {
+      setSavingComponent(null);
+    }
+  }
 
   const sortedRecords = [...records].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
   const mostRecentWithDueDate = sortedRecords.find(r => r.nextDueDate);
   const daysUntilDue = mostRecentWithDueDate?.nextDueDate
     ? Math.round((new Date(mostRecentWithDueDate.nextDueDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
     : null;
+  // Next-due mileage from the same record as the date (km on the wire).
+  const nextDueMileageKm = mostRecentWithDueDate?.nextDueMileage ?? null;
+  const displayNextDueMileage = nextDueMileageKm != null && isImperial ? kmToMiles(nextDueMileageKm) : nextDueMileageKm;
+  const distanceUntilDue = displayNextDueMileage != null && displayOdometer != null
+    ? displayNextDueMileage - displayOdometer : null;
+  const distanceUnit = isImperial ? 'miles' : 'km';
+
+  const alerts = (predictions ?? [])
+    .filter(p => ALERT_URGENCIES.includes(p.urgency))
+    .slice(0, MAX_ALERTS);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -147,10 +215,25 @@ export default function ServiceHistoryScreen() {
             ) : (
               <Text style={styles.infoText}>No upcoming service scheduled.</Text>
             )}
+            {displayNextDueMileage != null && (
+              <View style={styles.infoRow}>
+                <WrenchIcon color="#555" size={15} />
+                <Text style={styles.infoText}>
+                  {'  '}At {Math.round(displayNextDueMileage).toLocaleString()} {distanceUnit}
+                  {distanceUntilDue != null && (
+                    <Text style={styles.infoGray}>
+                      {distanceUntilDue >= 0
+                        ? ` (~${Math.round(distanceUntilDue).toLocaleString()} ${distanceUnit} to go)`
+                        : ` (${Math.round(-distanceUntilDue).toLocaleString()} ${distanceUnit} overdue)`}
+                    </Text>
+                  )}
+                </Text>
+              </View>
+            )}
             {displayOdometer !== null && (
               <Text style={styles.currentKm}>
                 Currently at <Text style={styles.currentKmBold}>
-                  {Math.round(displayOdometer).toLocaleString()} {isImperial ? 'miles' : 'km'}
+                  {Math.round(displayOdometer).toLocaleString()} {distanceUnit}
                 </Text>
               </Text>
             )}
@@ -165,17 +248,28 @@ export default function ServiceHistoryScreen() {
         />
         {conditionOpen && (
           <View style={styles.card}>
-            {CONDITION_ITEMS.map((item, i) => (
-              <View
-                key={item.label}
-                style={[styles.condRow, i < CONDITION_ITEMS.length - 1 && styles.rowBorder]}
-              >
-                <Text style={styles.condLabel}>{item.label}</Text>
-                <View style={styles.goodPill}>
-                  <Text style={styles.goodPillText}>{item.status}</Text>
+            {CONDITION_ORDER.map((component, i) => {
+              const status = condition?.find(c => c.component === component)?.status ?? 'good';
+              const meta = STATUS_META[status];
+              return (
+                <View
+                  key={component}
+                  style={[styles.condRow, i < CONDITION_ORDER.length - 1 && styles.rowBorder]}
+                >
+                  <Text style={styles.condLabel}>{COMPONENT_LABELS[component]}</Text>
+                  <TouchableOpacity
+                    style={[styles.condPill, { backgroundColor: meta.color }, savingComponent === component && styles.condPillSaving]}
+                    onPress={() => cycleCondition(component)}
+                    disabled={!condition || savingComponent !== null}
+                    activeOpacity={0.7}
+                    accessibilityLabel={`${COMPONENT_LABELS[component]} condition: ${meta.label}. Tap to change.`}
+                  >
+                    <Text style={styles.condPillText}>{meta.label}</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
-            ))}
+              );
+            })}
+            <Text style={styles.condHint}>Tap a rating to change it.</Text>
           </View>
         )}
 
@@ -187,25 +281,38 @@ export default function ServiceHistoryScreen() {
         />
         {alertsOpen && (
           <View style={styles.card}>
-            {ALERTS.map((alert, i) => (
-              <View
-                key={alert.title}
-                style={[styles.alertRow, i < ALERTS.length - 1 && styles.rowBorder]}
-              >
-                <View style={styles.alertInfo}>
-                  <Text style={styles.alertTitle}>{alert.title}</Text>
-                  <Text style={styles.alertSub}>{alert.sub}</Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.actionBtn, alert.primary ? styles.actionPrimary : styles.actionSecondary]}
-                  activeOpacity={0.8}
+            {alerts.map((alert, i) => {
+              const urgent = alert.urgency === 'overdue' || alert.urgency === 'due_soon';
+              return (
+                <View
+                  key={alert.jobType}
+                  style={[styles.alertRow, i < alerts.length - 1 && styles.rowBorder]}
                 >
-                  <Text style={[styles.actionText, !alert.primary && styles.actionTextSecondary]}>
-                    {alert.action}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+                  <View style={styles.alertInfo}>
+                    <Text style={styles.alertTitle}>{alert.label}</Text>
+                    <Text style={[styles.alertSub, alert.urgency === 'overdue' && styles.alertSubOverdue]}>
+                      {describePrediction(alert, isImperial)}
+                    </Text>
+                  </View>
+                  <View style={[styles.actionBtn, urgent ? styles.actionPrimary : styles.actionSecondary]}>
+                    <Text style={[styles.actionText, !urgent && styles.actionTextSecondary]}>
+                      {alert.urgency === 'overdue' ? 'Overdue' : urgent ? 'Due soon' : 'Upcoming'}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            {predictions === null && (
+              <Text style={styles.emptyText}>Predictions unavailable right now.</Text>
+            )}
+            {predictions !== null && alerts.length === 0 && (
+              <Text style={styles.emptyText}>Nothing due in the next few months.</Text>
+            )}
+            {alerts.some(a => a.estimated) && (
+              <Text style={styles.condHint}>
+                "Estimated" items have no recorded service yet and assume the typical interval for this job.
+              </Text>
+            )}
           </View>
         )}
 
@@ -297,11 +404,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   condLabel: { fontSize: 15, color: '#333' },
-  goodPill: {
-    backgroundColor: GREEN, borderRadius: 22,
-    paddingHorizontal: 24, paddingVertical: 9,
+  condPill: {
+    borderRadius: 22, paddingHorizontal: 22, paddingVertical: 9, minWidth: 96, alignItems: 'center',
   },
-  goodPillText: { fontSize: 14, fontWeight: '700', color: 'white' },
+  condPillSaving: { opacity: 0.6 },
+  condPillText: { fontSize: 14, fontWeight: '700', color: 'white' },
+  condHint: { fontSize: 12, color: '#999', textAlign: 'center', paddingVertical: 10 },
 
   // Alert rows
   alertRow: {
@@ -310,6 +418,7 @@ const styles = StyleSheet.create({
   alertInfo: { flex: 1 },
   alertTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
   alertSub: { fontSize: 13, color: '#888' },
+  alertSubOverdue: { color: '#E5484D', fontWeight: '600' },
   actionBtn: { borderRadius: 22, paddingHorizontal: 22, paddingVertical: 10 },
   actionPrimary: { backgroundColor: '#F57C00' },
   actionSecondary: { backgroundColor: '#EEEEEE' },
