@@ -19,7 +19,7 @@ import { logDiagnostic } from '../services/diagnosticsLog';
 import { addSpeedingSeconds } from '../services/harshEventCounters';
 import {
   LIVE_SPEED_ZONE_AHEAD_METERS, LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
-  LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS,
+  LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS, LIVE_SPEED_ZONE_FETCH_STALL_MS,
 } from '../utils/constants';
 
 /**
@@ -73,6 +73,10 @@ export function useLiveSpeedZoneAlerts(): void {
     let lastMatchedIndex: number | null = null;
     let lastFetchAt = 0;
     let fetching = false;
+    // In-flight request bookkeeping for the timer-free stall guard in the
+    // fix handler — see LIVE_SPEED_ZONE_FETCH_STALL_MS there.
+    let fetchStartedAt = 0;
+    let fetchGeneration = 0;
     let distanceAlongReference = 0;
     // Same off-route detection useSpeedZoneAlerts.ts needed — the reference
     // route here is a real HERE-routed path, but only ever toward a
@@ -94,9 +98,26 @@ export function useLiveSpeedZoneAlerts(): void {
     async function refetch(origin: LatLng, headingDegrees: number, reason: 'off-route' | 'distance' | 'initial') {
       if (fetching) return;
       fetching = true;
-      lastFetchAt = Date.now();
+      fetchStartedAt = Date.now();
+      lastFetchAt = fetchStartedAt;
+      const generation = ++fetchGeneration;
+      if (reason === 'initial') {
+        // Dates the request itself, so a log can tell "asked at trip start,
+        // answered 16 minutes later" (a stalled connection) apart from
+        // "not asked until 16 minutes in" (a gate). Only the first one —
+        // the rest are frequent enough that the result line suffices.
+        logDiagnostic('Speed-zone reference route requested.', { reason });
+      }
       try {
         const route = await fetchSpeedLimitAheadRoute(origin, headingDegrees, LIVE_SPEED_ZONE_AHEAD_METERS);
+        if (generation !== fetchGeneration) {
+          // Abandoned by the fix handler below while this was hanging —
+          // a newer request owns the reference now (or is about to).
+          logDiagnostic('Speed-zone reference route: stale response discarded.', {
+            reason, ageSeconds: Math.round((Date.now() - fetchStartedAt) / 1000),
+          });
+          return;
+        }
         if (route && route.speedLimitSpans.length > 0) {
           referenceCoords = route.coordinates;
           // Logged from the RAW spans, before filling — logging the filled
@@ -147,12 +168,31 @@ export function useLiveSpeedZoneAlerts(): void {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        fetching = false;
+        // A stale request must not clear the flag a newer one owns.
+        if (generation === fetchGeneration) fetching = false;
       }
     }
 
     const unsubscribe = subscribeGpsFix((speedMs, timestamp, point) => {
       if (speedMs < LIVE_SPEED_ZONE_MIN_SPEED_MS) return;
+
+      // Stall guard, clocked by GPS fixes rather than a JS timer: with the
+      // screen off Android throttles timers, and hereRoutingClient's own
+      // AbortController timeout demonstrably never fired on a real drive —
+      // the "initial" request issued at trip start resolved 16 minutes
+      // later, and since one request in flight blocks all others, the
+      // entire drive went without speed-limit data. Fixes keep arriving
+      // every second while driving, so this check always runs on time.
+      if (fetching && Date.now() - fetchStartedAt > LIVE_SPEED_ZONE_FETCH_STALL_MS) {
+        logDiagnostic('Speed-zone reference route request stalled — abandoning it.', {
+          ageSeconds: Math.round((Date.now() - fetchStartedAt) / 1000),
+        });
+        fetchGeneration++;
+        fetching = false;
+        // Let the refetch below go straight through rather than waiting
+        // out the rate floor again on top of the stall.
+        lastFetchAt = 0;
+      }
 
       const wasOffRoute = offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD;
       const offRoute = referenceCoords ? isOffRoute(point, referenceCoords) : false;

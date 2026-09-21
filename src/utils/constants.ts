@@ -121,6 +121,11 @@ export const LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS = 500;
 // 30s floor would have silently suppressed exactly the more-frequent
 // refetches this was just tightened to get.
 export const LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS = 15 * 1000;
+// An in-flight HERE request older than this is abandoned and retried — the
+// check is driven by incoming GPS fixes, not a timer (see
+// useLiveSpeedZoneAlerts.ts for why a timer can't be relied on here).
+// Comfortably above the client's own 15s timeout so the two never fight.
+export const LIVE_SPEED_ZONE_FETCH_STALL_MS = 20 * 1000;
 // Below this speed, skip fetching — parked/idling/stop-and-go traffic
 // shouldn't burn HERE routing calls, and heading is unreliable at very low
 // speed anyway (the synthetic "ahead" projection needs a real heading).

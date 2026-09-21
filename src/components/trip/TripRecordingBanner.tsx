@@ -37,7 +37,12 @@ export default function TripRecordingBanner() {
     setIsStopping(true);
     const tripId = activeTrip.id;
     logDiagnostic('Ending trip — stopped manually by user.', { from: 'recording-banner' });
-    await dispatch(endTrip(tripId));
+    // endTrip closes the trip locally before its first await, so recording
+    // has stopped by the time dispatch returns — navigate now rather than
+    // holding a spinner for the enrichment network calls (minutes on a bad
+    // connection). TripSummary re-renders from the store as the reward and
+    // context arrive.
+    dispatch(endTrip(tripId)).catch(() => {});
     setIsStopping(false);
     if (navigationRef.isReady()) navigationRef.navigate('TripSummary', { tripId } as never);
   }

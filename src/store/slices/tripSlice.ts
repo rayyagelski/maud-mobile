@@ -427,6 +427,17 @@ export const endTrip = createAsyncThunk(
     if (!trip || trip.id !== tripId) return rejectWithValue('No matching active trip');
 
     const endTime = Date.now();
+    // Close the trip locally NOW, before any network call below. Everything
+    // after this — weather, energy, reward submission — is best-effort
+    // enrichment and can take arbitrarily long on a stalled connection.
+    // Real drive: BT dropped, endTrip dispatched, and the awaits below hung
+    // for 9 minutes with no data signal; the trip stayed "active" the whole
+    // time, so the next drive's GPS points were appended to it (VGD merged
+    // two trips into one, end address = start address, the second trip
+    // never existed in the app) and auto-start was blocked for it. RTK runs
+    // this function synchronously up to its first await, so the close has
+    // already applied when the dispatch(endTrip()) call returns.
+    dispatch(closeActiveTrip({ tripId, endTime }));
     // Anchor-based accumulation, not a plain point-to-point reduce: GPS
     // positional error (commonly 3-10m) means consecutive noisy fixes taken
     // while stationary or barely moving still sum to nonzero distance,
@@ -516,6 +527,22 @@ const tripSlice = createSlice({
         state.activeTrip.route.push(action.payload);
       }
     },
+    // Synchronous end of recording — see endTrip. Moves the active trip
+    // into history as completed and stops tracking immediately; endTrip's
+    // fulfilled reducer later merges context/reward into that stored entry.
+    closeActiveTrip(state, action: PayloadAction<{ tripId: string; endTime: number }>) {
+      const trip = state.activeTrip;
+      if (!trip || trip.id !== action.payload.tripId) return;
+      const completed: Trip = { ...trip, endTime: action.payload.endTime, status: 'completed' };
+      state.activeTrip = null;
+      state.isTracking = false;
+      const idx = state.trips.findIndex(t => t.id === completed.id);
+      if (idx >= 0) {
+        state.trips[idx] = completed;
+      } else {
+        state.trips.unshift(completed);
+      }
+    },
     addTelematicsEvent(state, action: PayloadAction<TelematicsEvent>) {
       if (state.activeTrip) {
         state.activeTrip.events.push(action.payload);
@@ -590,25 +617,31 @@ const tripSlice = createSlice({
       .addCase(endTrip.pending, (state) => { state.isLoading = true; })
       .addCase(endTrip.fulfilled, (state, action: PayloadAction<Trip>) => {
         state.isLoading = false;
-        // action.payload was built from a snapshot of activeTrip taken at
-        // the *start* of endTrip's thunk — any VGD progress reducers
-        // (markVgdTripCreated/advanceVgdFlushProgress) that fired on
-        // state.activeTrip since then (the final flushVgdPoints dispatch
-        // often resolves before endTrip's own reward-submission await does)
-        // would otherwise be silently discarded by a blind overwrite here.
-        const latestActiveTrip = state.activeTrip;
-        const merged: Trip = latestActiveTrip?.id === action.payload.id
+        // The trip was already closed and stored by closeActiveTrip at the
+        // start of the thunk; action.payload was built from the snapshot
+        // taken before that. Merge the enrichment (context, counters,
+        // reward) onto the STORED entry rather than overwriting it — any
+        // VGD progress reducers (markVgdTripCreated/advanceVgdFlushProgress)
+        // that fired on it since (the final flushVgdPoints often resolves
+        // before the reward-submission await does) would otherwise be
+        // silently discarded.
+        const stored = findTripById(state, action.payload.id);
+        const merged: Trip = stored
           ? {
             ...action.payload,
-            vgdTripCreated: latestActiveTrip.vgdTripCreated,
-            vgdSentRouteCount: latestActiveTrip.vgdSentRouteCount,
-            vgdSentEventCount: latestActiveTrip.vgdSentEventCount,
-            vgdCumulativeDistanceKm: latestActiveTrip.vgdCumulativeDistanceKm,
-            vgdLastSentPoint: latestActiveTrip.vgdLastSentPoint,
+            vgdTripCreated: stored.vgdTripCreated,
+            vgdSentRouteCount: stored.vgdSentRouteCount,
+            vgdSentEventCount: stored.vgdSentEventCount,
+            vgdCumulativeDistanceKm: stored.vgdCumulativeDistanceKm,
+            vgdLastSentPoint: stored.vgdLastSentPoint,
           }
           : action.payload;
-        state.activeTrip = null;
-        state.isTracking = false;
+        // Defensive — closeActiveTrip already did this; a no-op unless the
+        // close somehow didn't apply (mismatched id).
+        if (state.activeTrip?.id === merged.id) {
+          state.activeTrip = null;
+          state.isTracking = false;
+        }
         const idx = state.trips.findIndex(t => t.id === merged.id);
         if (idx >= 0) {
           state.trips[idx] = merged;
@@ -616,11 +649,16 @@ const tripSlice = createSlice({
           state.trips.unshift(merged);
         }
       })
-      .addCase(endTrip.rejected, (state) => {
-        // No matching active trip found — just stop tracking, nothing to save.
+      .addCase(endTrip.rejected, (state, action) => {
         state.isLoading = false;
-        state.activeTrip = null;
-        state.isTracking = false;
+        // Only clear the active trip if it's still the one this end was
+        // for. The trip is normally already closed by closeActiveTrip, and
+        // a late rejection (enrichment failing minutes later on a bad
+        // connection) must not tear down a NEW trip that has started since.
+        if (state.activeTrip === null || state.activeTrip.id === action.meta.arg) {
+          state.activeTrip = null;
+          state.isTracking = false;
+        }
       })
       .addCase(syncTripHistoryFromBackend.fulfilled, (state, action) => {
         state.trips = reconcileTripHistory(
@@ -644,6 +682,7 @@ const tripSlice = createSlice({
 
 export const {
   appendGpsPoint,
+  closeActiveTrip,
   addTelematicsEvent,
   setTracking,
   armPendingStart,

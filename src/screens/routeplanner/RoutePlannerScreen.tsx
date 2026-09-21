@@ -579,7 +579,9 @@ export default function RoutePlannerScreen() {
       setIsEndingTrip(true);
       const tripId = activeTrip.id;
       logDiagnostic('Ending trip — stopped manually by user.', { from: 'route-planner' });
-      await dispatch(endTrip(tripId));
+      // Same reasoning as TripRecordingBanner: the trip is closed locally
+      // by the time dispatch returns; don't wait on the enrichment calls.
+      dispatch(endTrip(tripId)).catch(() => {});
       setIsEndingTrip(false);
       navigation.navigate('TripSummary', { tripId });
       return;

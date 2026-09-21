@@ -342,18 +342,22 @@ export function useTripAutoDetection() {
     if (!activeTripRef.current || endingRef.current) return;
     endingRef.current = true;
     const tripId = activeTripRef.current.id;
-    // .finally, not .then — the whole ambient auto-start path is skipped
-    // while endingRef is set, so a rejected endTrip (network, backend error)
-    // would otherwise leave auto-detection silently dead for the rest of
-    // the session with no diagnostic line to show for it.
-    dispatch(endTrip(tripId)).then(() => {
+    const ending = dispatch(endTrip(tripId));
+    // endTrip closes the trip locally synchronously (closeActiveTrip runs
+    // before its first await), so by here recording has already stopped
+    // and a new trip may legitimately start. Release the guard NOW — it
+    // only exists to stop a second endTrip being dispatched for the same
+    // trip from the BT/heartbeat/per-fix paths racing each other. Holding
+    // it until the thunk settled blocked auto-start for as long as the
+    // enrichment network calls took: 9 minutes on a real stalled drive,
+    // during which the next trip never started.
+    endingRef.current     = false;
+    stillSinceRef.current = null;
+    ending.then(() => {
       if (navigationRef.isReady()) {
         navigationRef.navigate('TripSummary', { tripId });
       }
-    }).finally(() => {
-      endingRef.current     = false;
-      stillSinceRef.current = null;
-    });
+    }).catch(() => {});
   }
 
   // Stale-trip watchdog: redux-persist now persists `trips` (see
