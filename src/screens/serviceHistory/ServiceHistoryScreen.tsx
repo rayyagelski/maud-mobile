@@ -192,6 +192,9 @@ export default function ServiceHistoryScreen() {
             <Text style={styles.nextCardTitle}>Next Service Due</Text>
           </View>
           <View style={styles.nextCardBody}>
+            {milestoneLabel && (
+              <Text style={styles.nextCardMilestone}>{milestoneLabel}</Text>
+            )}
             {mostRecentWithDueDate?.nextDueDate ? (
               <View style={styles.infoRow}>
                 <CalendarIcon color="#555" size={15} />
@@ -271,9 +274,9 @@ export default function ServiceHistoryScreen() {
         />
         {alertsOpen && (
           <View style={styles.card}>
-            {milestoneLabel && upcomingServices.length > 0 && (
+            {upcomingServices.length > 0 && (
               <Text style={styles.upcomingIntro}>
-                Manufacturer schedule for the {milestoneLabel} service
+                Manufacturer schedule for the service above
                 {upcoming?.nextService?.anchor === 'odometer' ? ' (based on your current mileage)' : ''}:
               </Text>
             )}
@@ -379,6 +382,10 @@ const styles = StyleSheet.create({
   },
   nextCardTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
   nextCardBody: { paddingLeft: 2 },
+  // The manufacturer schedule milestone (e.g. "37,500 miles") — the
+  // number that actually determines which services are listed below,
+  // promoted above the date/mileage detail rows per user request.
+  nextCardMilestone: { fontSize: 30, fontWeight: '800', color: '#1A1A1A', marginBottom: 6 },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 7 },
   infoText: { fontSize: 14, color: '#333' },
   infoGray: { color: '#888' },
