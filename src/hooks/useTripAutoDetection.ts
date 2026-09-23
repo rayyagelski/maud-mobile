@@ -200,6 +200,9 @@ export function useTripAutoDetection() {
   // the full ambient path again: another native BT poll, another Redux
   // dispatch, another VGD point.
   const lastFixIdentityRef = useRef<string | null>(null);
+  // Previous fix's position, for estimating speed on a fix that has no GPS
+  // speed — see handleLocation.
+  const lastPositionRef = useRef<GpsPoint | null>(null);
   // See DEPARTURE_CANDIDATE_TTL_MS.
   const departureCandidateRef = useRef<{ point: GpsPoint; at: number } | null>(null);
   const duplicateFixCountRef = useRef(0);
@@ -232,6 +235,8 @@ export function useTripAutoDetection() {
         endPoint: last ? { lat: last.latitude, lon: last.longitude } : null,
         metersFromStart: first && last ? Math.round(haversineMeters(first, last)) : null,
         harshEvents: previous.events.filter(e => e.type.startsWith('harsh_')).length,
+        // Fixes that came from Wi-Fi/cell positioning (no GPS speed/heading).
+        nonGpsFixes: previous.route.filter(p => p.speedEstimated).length,
       });
     }
     previousActiveTripRef.current = activeTrip;
@@ -513,11 +518,37 @@ export function useTripAutoDetection() {
 
     const handleLocation = (location: Location) => {
       const { coords } = location;
-      // GPS speed is in m/s; missing/negative means unavailable
-      const speedMs = coords.speed != null && coords.speed >= 0 ? coords.speed : 0;
       const timestamp = typeof location.timestamp === 'string'
         ? new Date(location.timestamp).getTime()
         : location.timestamp;
+
+      // Speed and heading are "only present when location came from GPS,
+      // -1 otherwise" (plugin docs) — Wi-Fi/cell fixes, 20-30% of fixes on
+      // real drives. Speed used to be coerced to 0 here, so a car doing
+      // 28 mph "stopped" and "restarted" every few seconds: that manufactured
+      // most recorded harsh braking/acceleration events, stored fake zero
+      // speeds in VGD (never counted as speeding), and reset the auto-start
+      // streak. Heading was passed through as -1, a bogus compass heading.
+      // For a non-GPS fix, speed is instead estimated from the distance to
+      // the previous fix and flagged speedEstimated — usable for "is the car
+      // moving", but excluded from anything that measures acceleration.
+      const hasGpsSpeed = coords.speed != null && coords.speed >= 0;
+      const heading = coords.heading != null && coords.heading >= 0 ? coords.heading : undefined;
+      let speedMs: number;
+      if (hasGpsSpeed) {
+        speedMs = coords.speed as number;
+      } else {
+        speedMs = 0;
+        const prev = lastPositionRef.current;
+        const dtS = prev ? (timestamp - prev.timestamp) / 1000 : 0;
+        if (prev && dtS > 0 && dtS <= 15) {
+          const meters = haversineMeters(prev, { latitude: coords.latitude, longitude: coords.longitude });
+          // Below combined position uncertainty the "movement" is just
+          // noise between two fixes — no evidence of speed either way.
+          const noiseM = Math.max(10, (coords.accuracy ?? 0) + (prev.accuracy ?? 0));
+          if (meters > noiseM) speedMs = meters / dtS;
+        }
+      }
 
       // See lastFixIdentityRef — drop repeat deliveries of the same fix.
       // Keyed on timestamp+coords rather than the SDK's uuid: the stored
@@ -538,15 +569,17 @@ export function useTripAutoDetection() {
       }
       lastFixIdentityRef.current = fixIdentity;
 
-      const gpsPoint = {
+      const gpsPoint: GpsPoint = {
         latitude:  coords.latitude,
         longitude: coords.longitude,
         altitude:  coords.altitude  ?? undefined,
         speed:     speedMs,
-        heading:   coords.heading   ?? undefined,
+        heading,
         accuracy:  coords.accuracy  ?? undefined,
         timestamp,
+        ...(!hasGpsSpeed && { speedEstimated: true }),
       };
+      lastPositionRef.current = gpsPoint;
 
         // Self-corrects connectedBluetoothDeviceRef against the native
         // module's own authoritative state on every fix while not yet
@@ -630,6 +663,12 @@ export function useTripAutoDetection() {
         // "Start Trip" tap from ever firing too — real-world symptom: driver
         // taps Start Trip, drives the actual route, and the screen sits on
         // "Waiting for movement…" indefinitely despite genuinely driving.
+        //
+        // A fix with no GPS speed plays no part in starting a trip: it can't
+        // start a moving streak (a Wi-Fi/cell position jump while parked
+        // would read as motion), and it can't break one either — the fake
+        // 0 m/s such fixes used to carry kept resetting the streak mid-drive.
+        if (!isTrackingRef.current && gpsPoint.speedEstimated) return;
         if (!isTrackingRef.current && !endingRef.current) {
           if (speedMs >= SPEED_START_MS) {
             // A pending start means the user already tapped "Start Trip" in
@@ -950,22 +989,30 @@ export function useTripAutoDetection() {
         // (see stillnessLogic.ts), which is how a parked car presents once
         // BackgroundGeolocation's own motion detection goes stationary.
         lastFixAtRef.current = Date.now();
-        lastFixSpeedMsRef.current = speedMs;
+        // Only a GPS speed is trusted as "how fast were we going" for the
+        // silence-based end check.
+        if (!gpsPoint.speedEstimated) lastFixSpeedMsRef.current = speedMs;
 
         // ── Record GPS + auto-end ───────────────────────────────────────────
         if (isTrackingRef.current && activeTripRef.current) {
+          // Every fix goes into the route; the speedEstimated flag travels
+          // with it so consumers can tell a GPS speed from an estimate.
           dispatch(appendGpsPoint(gpsPoint));
           publishGpsFix(speedMs, timestamp, gpsPoint);
 
-          if (speedMs < SPEED_STOP_MS) {
-            if (stillSinceRef.current === null) {
-              stillSinceRef.current = Date.now();
-            } else if (Date.now() - stillSinceRef.current >= STILL_MS) {
-              endTripDueToStillness();
+          // Stillness is judged on GPS speeds only — neither started by a
+          // missing speed nor reset by a position-noise estimate.
+          if (!gpsPoint.speedEstimated) {
+            if (speedMs < SPEED_STOP_MS) {
+              if (stillSinceRef.current === null) {
+                stillSinceRef.current = Date.now();
+              } else if (Date.now() - stillSinceRef.current >= STILL_MS) {
+                endTripDueToStillness();
+              }
+            } else {
+              // Vehicle is moving again — reset the stillness timer
+              stillSinceRef.current = null;
             }
-          } else {
-            // Vehicle is moving again — reset the stillness timer
-            stillSinceRef.current = null;
           }
         }
       };

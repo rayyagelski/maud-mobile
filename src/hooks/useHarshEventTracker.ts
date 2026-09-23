@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, AppState, type AppStateStatus } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { accelerometer, setUpdateIntervalForType, SensorTypes } from 'react-native-sensors';
+import { AppState, type AppStateStatus } from 'react-native';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
@@ -11,15 +9,9 @@ import {
   incrementHarshEventCount,
   addPhoneTextSeconds,
 } from '../services/harshEventCounters';
-import {
-  createGravityFilter,
-  classifyLongitudinalEvent,
-  createCorneringDetector,
-} from '../utils/harshEventDetector';
+import { createCorneringDetector, createLongitudinalDetector } from '../utils/harshEventDetector';
 import { generateId } from '../utils/helpers';
-import {
-  SENSOR_SAMPLE_RATE_MS, MIN_PHONE_USAGE_EVENT_SECONDS, TRIP_AUTO_START_SPEED_KMH,
-} from '../utils/constants';
+import { MIN_PHONE_USAGE_EVENT_SECONDS, TRIP_AUTO_START_SPEED_KMH } from '../utils/constants';
 import { isBluetoothGateSatisfiedWhereEnforceable } from '../utils/bluetoothGateLogic';
 import {
   isBluetoothVehicleDetectionAvailable, getConnectedBluetoothDeviceName,
@@ -31,34 +23,12 @@ import type { GpsPoint, TelematicsEvent } from '../types/trip.types';
 
 const PHONE_USAGE_MIN_SPEED_MS = TRIP_AUTO_START_SPEED_KMH / 3.6;
 
-// A device missing the accelerometer entirely is a hardware fact that won't
-// change between trips — showing this Alert every single time a trip starts
-// would just be noise. Persisted so a driver sees it exactly once (ever, on
-// this device), instead of either never being told at all or being
-// interrupted by it on every drive.
-const ACCELEROMETER_UNAVAILABLE_NOTICE_KEY = 'accelerometerUnavailableNoticeShown';
-
-async function notifyMissingSensorOnce(storageKey: string, title: string, message: string): Promise<void> {
-  try {
-    const alreadyShown = await AsyncStorage.getItem(storageKey);
-    if (alreadyShown) return;
-    await AsyncStorage.setItem(storageKey, '1');
-  } catch {
-    // If the flag itself can't be persisted, still show the Alert this one
-    // time rather than risk silently never telling the driver at all —
-    // worst case it repeats on a later trip instead of going missing.
-  }
-  Alert.alert(title, message);
-}
-
 /**
- * Harsh-event detection (SRS 2.8/4.4), complementary to useTripAutoDetection
- * (GPS-only start/stop): braking/acceleration from the accelerometer
- * corroborated by GPS speed, cornering from GPS course over ground (see
- * createCorneringDetector for why not the gyroscope). Subscribes to sensors
- * only while a trip is being tracked, to avoid unnecessary battery drain,
- * and mirrors GPS fixes via gpsSpeedBus rather than opening a second
- * location subscription.
+ * Harsh-event detection (SRS 2.8/4.4), complementary to useTripAutoDetection:
+ * braking, acceleration and cornering, all measured from the vehicle's GPS
+ * track (see harshEventDetector.ts for why not the phone's motion sensors).
+ * Runs only while a trip is being tracked, and mirrors GPS fixes via
+ * gpsSpeedBus rather than opening a second location subscription.
  */
 export function useHarshEventTracker(): void {
   const dispatch = useAppDispatch();
@@ -103,11 +73,9 @@ export function useHarshEventTracker(): void {
 
     resetHarshEventCounters();
 
-    const gravityFilter = createGravityFilter();
-    let peakAccelMagnitude = 0;
     let lastGpsSpeedMs = 0;
-    let lastGpsTimestamp: number | null = null;
     let lastGpsPoint: GpsPoint | null = null;
+    const longitudinal = createLongitudinalDetector();
     const cornering = createCorneringDetector();
 
     function emitEvent(type: TelematicsEvent['type'], location: GpsPoint, value: number) {
@@ -126,36 +94,6 @@ export function useHarshEventTracker(): void {
       else if (type === 'harsh_corner') incrementHarshEventCount('harshCornerCount');
     }
 
-    setUpdateIntervalForType(SensorTypes.accelerometer, SENSOR_SAMPLE_RATE_MS);
-
-    // react-native-sensors' observables throw (not reject a promise) when a
-    // device genuinely lacks the sensor — real-world crash: "Sensor
-    // gyroscope is not available" surfaced as an app-wide FATAL uncaught JS
-    // error, since .subscribe(nextHandler) alone registers no error handler
-    // and RxJS rethrows an unhandled observable error. The accelerometer
-    // gets the same fail-soft treatment: log once and lose that one signal
-    // for this trip, never crash the app over a missing sensor.
-    const accelSub = accelerometer.subscribe({
-      next: ({ x, y, z }) => {
-        // Horizontal component only — braking/accelerating are horizontal
-        // forces, while road shock through a rigid phone mount is mostly
-        // vertical and was inflating this peak into false harsh events (see
-        // classifyLongitudinalEvent).
-        const sample = gravityFilter.update({ x, y, z });
-        if (sample.horizontalMs2 > peakAccelMagnitude) peakAccelMagnitude = sample.horizontalMs2;
-      },
-      error: (err) => {
-        logDiagnostic('Accelerometer unavailable — harsh brake/accel detection disabled for this trip.', {
-          message: err?.message ?? String(err),
-        });
-        notifyMissingSensorOnce(
-          ACCELEROMETER_UNAVAILABLE_NOTICE_KEY,
-          'Harsh Braking/Acceleration Not Available',
-          "This phone doesn't have a motion sensor MAUD Connect can use, so harsh braking and acceleration events won't be recorded on this device. Everything else — trip recording, route, speed, and cornering — still works normally.",
-        );
-      },
-    });
-
     const unsubscribeGps = subscribeGpsFix((speedMs, timestamp, point) => {
       // Self-corrects connectedBluetoothDeviceRef against the native
       // module's authoritative state — same fix and same reasoning as
@@ -169,18 +107,14 @@ export function useHarshEventTracker(): void {
           .finally(() => { btPollInFlightRef.current = false; });
       }
 
-      if (lastGpsTimestamp != null) {
-        const dtSeconds = (timestamp - lastGpsTimestamp) / 1000;
-        if (dtSeconds > 0) {
-          const gpsSpeedDeltaMs2 = (speedMs - lastGpsSpeedMs) / dtSeconds;
-          const event = classifyLongitudinalEvent(gpsSpeedDeltaMs2, peakAccelMagnitude);
-          // Records the value the classification was actually made on, not
-          // the GPS-derived average — those disagree, and storing the average
-          // is why the UI could show a "hard braking" event at 0.20g next to
-          // a 0.5g threshold.
-          if (event) emitEvent(event.type, point, event.valueMs2);
-        }
-      }
+      // Braking/acceleration from GPS speed change — see
+      // createLongitudinalDetector. Fixes without a GPS speed are skipped.
+      const longitudinalEvent = longitudinal.update({
+        timestampMs: timestamp,
+        speedMs,
+        speedEstimated: point.speedEstimated,
+      });
+      if (longitudinalEvent) emitEvent(longitudinalEvent.type, point, longitudinalEvent.valueMs2);
 
       // Cornering from GPS course over ground — see createCorneringDetector.
       const lateralAccelMs2 = cornering.update({
@@ -190,9 +124,7 @@ export function useHarshEventTracker(): void {
       });
       if (lateralAccelMs2 != null) emitEvent('harsh_corner', point, lateralAccelMs2);
 
-      peakAccelMagnitude = 0;
       lastGpsSpeedMs = speedMs;
-      lastGpsTimestamp = timestamp;
       lastGpsPoint = point;
 
       // Speeding seconds are no longer counted here against a flat 120 km/h
@@ -273,7 +205,6 @@ export function useHarshEventTracker(): void {
     });
 
     return () => {
-      accelSub.unsubscribe();
       unsubscribeGps();
       appStateSub.remove();
       screenSubCancelled = true;

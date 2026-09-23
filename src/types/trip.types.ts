@@ -9,9 +9,14 @@ export interface GpsPoint {
   longitude: number;
   altitude?: number;
   speed?: number; // m/s
-  heading?: number; // degrees
+  // Degrees. Absent when the fix didn't come from GPS (Android reports -1).
+  heading?: number;
   accuracy?: number;
   timestamp: number;
+  // true = this fix had no GPS speed (a Wi-Fi/cell fix; Android reports -1)
+  // and `speed` was estimated from the distance to the previous fix.
+  // Good enough for "is the car moving", not for measuring acceleration.
+  speedEstimated?: boolean;
 }
 
 export interface TelematicsEvent {

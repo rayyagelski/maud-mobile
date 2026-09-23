@@ -1,7 +1,8 @@
 export const API_BASE_URL = 'https://myautodata.com/api/v1';
 export const AUTH_HEADER = 'X-Token-Auth';
 
-// Harsh-event thresholds, in m/s² (linear, gravity-removed) — derived from
+// Harsh-event thresholds, in m/s² of vehicle acceleration (measured from the
+// GPS track — see harshEventDetector.ts) — derived from
 // vgd_analytics' own canonical g-force thresholds (D:\Projects\MAUD\vgd_analytics
 // \src\service\analytics\gForcePointsFilters.js: BRAKING_THRESHOLD=0.5g,
 // ACCELERATION_THRESHOLD=0.35g, CORNERING_THRESHOLD=0.4g — the backend's
@@ -23,10 +24,6 @@ export const HARSH_ACCEL_THRESHOLD = 0.35 * MS2_PER_G;
 // a_lateral = speed * yawRate(rad/s), same magnitude bar as the other two
 // harsh-event axes.
 export const HARSH_CORNER_THRESHOLD_MS2 = 0.4 * MS2_PER_G;
-// GPS-speed derivative must corroborate an accelerometer spike within this
-// tolerance (SRS 4.4 "slip filtering") — rejects phone jostles (accel spike,
-// no GPS change) and GPS noise (GPS jump, no accel corroboration).
-export const SLIP_FILTER_TOLERANCE_MS2 = 1.5;
 // Minimum backgrounded duration before it's logged as a discrete phone_usage
 // TelematicsEvent (with location, for map markers) rather than just adding to
 // the phoneTextSeconds aggregate counter — filters out trivial blips (e.g. an
@@ -139,7 +136,6 @@ export const WEATHER_ALERT_REFRESH_DISTANCE_KM = 10;
 // this often rather than on every GPS fix.
 export const TRAFFIC_MONITOR_REFRESH_DISTANCE_KM = 3;
 export const GPS_LOCATION_INTERVAL_MS = 3000;
-export const SENSOR_SAMPLE_RATE_MS = 100;
 
 export const FUEL_PRICE_CACHE_TTL_MS = 36 * 60 * 60 * 1000; // 36 hours
 export const WEATHER_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
