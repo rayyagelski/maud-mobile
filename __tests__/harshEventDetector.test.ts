@@ -1,12 +1,11 @@
 import {
   classifyLongitudinalEvent,
-  classifyCornering,
+  createCorneringDetector,
   createGravityFilter,
-  vector3MagnitudeDegPerSec,
-  yawRateDegPerSec,
   headingDeltaDeg,
-  headingYawRateDegPerSec,
+  type CorneringFix,
 } from '../src/utils/harshEventDetector';
+import { MS2_PER_G } from '../src/utils/constants';
 
 describe('classifyLongitudinalEvent (slip filtering)', () => {
   it('classifies harsh braking when GPS deceleration and accelerometer spike agree', () => {
@@ -74,29 +73,84 @@ describe('classifyLongitudinalEvent (slip filtering)', () => {
   });
 });
 
-describe('classifyCornering', () => {
-  it('detects cornering when derived lateral acceleration exceeds threshold while moving', () => {
-    // Threshold is 0.4g (~3.92 m/s², see constants.ts) — 30 deg/s at 10 m/s
-    // => ~5.24 m/s² lateral, above threshold
-    const result = classifyCornering(30, 10);
-    expect(result).not.toBeNull();
-    expect(result).toBeCloseTo(5.236, 2);
+// Feeds fixes 1s apart (the real GPS cadence) through a fresh detector and
+// returns the lateral values (in g) of every event it fired.
+function runCornering(fixes: Array<Omit<CorneringFix, 'timestampMs'>>): number[] {
+  const detector = createCorneringDetector();
+  const events: number[] = [];
+  fixes.forEach((f, i) => {
+    const lateral = detector.update({ ...f, timestampMs: 1_700_000_000_000 + i * 1000 });
+    if (lateral != null) events.push(lateral / MS2_PER_G);
+  });
+  return events;
+}
+
+// A steady turn: heading advancing `degPerSec` every second at `speedMs`.
+function turn(startDeg: number, degPerSec: number, seconds: number, speedMs: number) {
+  return Array.from({ length: seconds }, (_, i) => ({
+    headingDeg: (startDeg + degPerSec * i + 360) % 360, speedMs,
+  }));
+}
+const straight = (deg: number, seconds: number, speedMs: number) => turn(deg, 0, seconds, speedMs);
+
+describe('createCorneringDetector (GPS course over ground)', () => {
+  it('fires once for a genuinely harsh corner', () => {
+    // 30°/s at 10 m/s = 0.52 rad/s * 10 = 5.2 m/s² = 0.53g, held 4 seconds.
+    const events = runCornering([...straight(0, 3, 10), ...turn(0, 30, 5, 10), ...straight(150, 3, 10)]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toBeGreaterThan(0.45);
   });
 
-  it('does not detect cornering below the derived lateral-acceleration threshold', () => {
-    // 10 deg/s at 10 m/s => ~1.75 m/s² lateral, below the ~3.92 m/s² threshold
-    expect(classifyCornering(10, 10)).toBeNull();
+  it('ignores a normal turn below the 0.4g threshold', () => {
+    // A 90° right turn at 12 mph over 5s: 18°/s at 5.4 m/s = 0.17g.
+    expect(runCornering([...straight(0, 3, 5.4), ...turn(0, 18, 6, 5.4), ...straight(90, 3, 5.4)])).toHaveLength(0);
   });
 
-  it('scales with speed — the same yaw rate is harsher at higher speed', () => {
-    // 10 deg/s at 30 m/s => ~5.24 m/s² lateral, now above threshold
-    const result = classifyCornering(10, 30);
-    expect(result).not.toBeNull();
-    expect(result).toBeCloseTo(5.236, 2);
+  it('ignores a single heading glitch on a straight road', () => {
+    // One fix reporting a wildly wrong heading, then back — the old
+    // single-pair method turned exactly this into a "harsh corner".
+    const fixes = straight(66, 10, 21);
+    fixes[5] = { headingDeg: 110, speedMs: 21 };
+    expect(runCornering(fixes)).toHaveLength(0);
   });
 
-  it('ignores gyro rotation while stationary (phone handled by hand, not the car turning)', () => {
-    expect(classifyCornering(50, 0)).toBeNull();
+  it('ignores normal GPS heading jitter at highway speed', () => {
+    // ±4° wobble every fix at 47 mph — a real straight road.
+    const jitter = [0, 4, -3, 4, -4, 2, -3, 4, 0, -4, 3, -2].map(d => ({ headingDeg: (60 + d + 360) % 360, speedMs: 21 }));
+    expect(runCornering(jitter)).toHaveLength(0);
+  });
+
+  it('reports one event for one bend, not one per fix — the 2-seconds-apart double count', () => {
+    // Real data: 0.43g and 0.48g recorded 2s apart in the same bend.
+    const events = runCornering([...straight(180, 3, 12), ...turn(180, -35, 7, 12), ...straight(0, 4, 12)]);
+    expect(events).toHaveLength(1);
+  });
+
+  it('reports two separate corners when separated by enough straight road', () => {
+    const events = runCornering([
+      ...straight(0, 3, 10), ...turn(0, 30, 5, 10),
+      ...straight(150, 6, 10),
+      ...turn(150, 30, 5, 10), ...straight(300, 3, 10),
+    ]);
+    expect(events).toHaveLength(2);
+  });
+
+  it('ignores heading swings at parking-lot speed, where GPS bearing is unreliable', () => {
+    // 90°/s "turns" at 3 m/s (7 mph) would compute as 0.48g — below the
+    // 5 m/s floor, so not trusted at all.
+    expect(runCornering(turn(0, 90, 6, 3))).toHaveLength(0);
+  });
+
+  it('handles the 360→0 wraparound as a small turn, not a huge one', () => {
+    // Driving straight north with heading hovering around 0/360.
+    const fixes = [358, 1, 359, 2, 0, 358, 1].map(h => ({ headingDeg: h, speedMs: 20 }));
+    expect(runCornering(fixes)).toHaveLength(0);
+  });
+
+  it('resets its window when heading drops out', () => {
+    // A turn split by a fix with no heading can't be measured across the gap.
+    const fixes = [...turn(0, 30, 2, 10), { headingDeg: null, speedMs: 10 }, ...straight(60, 2, 10)];
+    expect(runCornering(fixes)).toHaveLength(0);
   });
 });
 
@@ -114,18 +168,6 @@ describe('headingDeltaDeg', () => {
 
   it('returns 0 for an unchanged heading', () => {
     expect(headingDeltaDeg(90, 90)).toBeCloseTo(0, 5);
-  });
-});
-
-describe('headingYawRateDegPerSec', () => {
-  it('converts a heading change over time into a deg/sec magnitude', () => {
-    // 350° -> 10° (20° turn) over 2 seconds => 10 deg/s
-    expect(headingYawRateDegPerSec(350, 10, 2)).toBeCloseTo(10, 5);
-  });
-
-  it('returns 0 for a non-positive time delta rather than dividing by zero', () => {
-    expect(headingYawRateDegPerSec(10, 20, 0)).toBe(0);
-    expect(headingYawRateDegPerSec(10, 20, -1)).toBe(0);
   });
 });
 
@@ -173,46 +215,5 @@ describe('createGravityFilter', () => {
     const { magnitudeMs2, horizontalMs2 } = filter.update({ x: 0, y: 0, z: 9.81 + 6 });
     expect(magnitudeMs2).toBeGreaterThan(3); // the full magnitude still sees it...
     expect(horizontalMs2).toBeLessThan(0.5); // ...the horizontal component doesn't.
-  });
-});
-
-describe('yawRateDegPerSec', () => {
-  const gravityOnZ = { x: 0, y: 0, z: 9.81 };
-
-  it('keeps rotation about the vertical axis (a real turn)', () => {
-    // Yaw = spinning about the axis gravity points along.
-    expect(yawRateDegPerSec({ x: 0, y: 0, z: Math.PI / 2 }, gravityOnZ)).toBeCloseTo(90, 5);
-  });
-
-  it('discards rotation about a horizontal axis (pitch/roll from a bump)', () => {
-    // Real-drive report: 30+ "cornering" events in a 19-minute drive with the
-    // phone rigidly mounted upright — every bump read as turning because all
-    // three gyroscope axes were being summed together.
-    expect(yawRateDegPerSec({ x: Math.PI / 2, y: 0, z: 0 }, gravityOnZ)).toBeCloseTo(0, 5);
-    expect(yawRateDegPerSec({ x: 0, y: Math.PI / 2, z: 0 }, gravityOnZ)).toBeCloseTo(0, 5);
-  });
-
-  it('works regardless of how the phone is oriented', () => {
-    // Phone lying on its side: gravity along x, so a turn is rotation about x.
-    const gravityOnX = { x: 9.81, y: 0, z: 0 };
-    expect(yawRateDegPerSec({ x: Math.PI / 2, y: 0, z: 0 }, gravityOnX)).toBeCloseTo(90, 5);
-    expect(yawRateDegPerSec({ x: 0, y: 0, z: Math.PI / 2 }, gravityOnX)).toBeCloseTo(0, 5);
-  });
-
-  it('is direction-agnostic (left and right turns are both turns)', () => {
-    expect(yawRateDegPerSec({ x: 0, y: 0, z: -Math.PI / 2 }, gravityOnZ)).toBeCloseTo(90, 5);
-  });
-
-  it('falls back to the full magnitude when gravity is not known yet', () => {
-    // Before the accelerometer has reported (or on a device without one),
-    // previous behavior rather than no cornering detection at all.
-    expect(yawRateDegPerSec({ x: Math.PI / 2, y: 0, z: 0 }, null)).toBeCloseTo(90, 5);
-  });
-});
-
-describe('vector3MagnitudeDegPerSec', () => {
-  it('converts a rad/s vector magnitude to deg/s', () => {
-    const degPerSec = vector3MagnitudeDegPerSec({ x: Math.PI, y: 0, z: 0 });
-    expect(degPerSec).toBeCloseTo(180, 5);
   });
 });

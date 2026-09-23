@@ -22,9 +22,11 @@ export const vgdApi = {
   getTripDetails: (tripId: string, vehicleId: string) =>
     vgdClient.get<{ trip: VgdTripDetails }>(`/trips/${tripId}`, { params: { vehicleId } }),
 
-  listTripEvents: (tripId: string, vehicleId: string) =>
+  // Paged — a single trip can exceed one page of events. Callers that need
+  // every event walk the pages using stats.total (see useVgdBehaviorAggregate).
+  listTripEvents: (tripId: string, vehicleId: string, offset = 0, limit = 100) =>
     vgdClient.get<VgdTripEventsResponse>(`/trips/${tripId}/events`, {
-      params: { vehicleId, offset: 0, limit: 100 },
+      params: { vehicleId, offset, limit },
     }),
 
   // Backs trip-history restore after a reinstall/new device — the app

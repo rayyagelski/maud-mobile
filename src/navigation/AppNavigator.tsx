@@ -23,6 +23,7 @@ import { useVgdPointFlush } from '../hooks/useVgdPointFlush';
 import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useTripHistorySync } from '../hooks/useTripHistorySync';
 import { useSyncEngine } from '../services/syncEngine';
+import { useBackgroundNetworkCheck } from '../hooks/useBackgroundNetworkCheck';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
@@ -50,6 +51,7 @@ function TripDetectionRunner() {
   useTrafficMonitor();
   useVgdPointFlush();
   useSyncEngine();
+  useBackgroundNetworkCheck();
   return null;
 }
 

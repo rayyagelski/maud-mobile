@@ -5,7 +5,6 @@ import {
   HARSH_ACCEL_THRESHOLD,
   HARSH_CORNER_THRESHOLD_MS2,
   SLIP_FILTER_TOLERANCE_MS2,
-  TRIP_AUTO_START_SPEED_KMH,
 } from './constants';
 
 export interface Vector3 {
@@ -13,8 +12,6 @@ export interface Vector3 {
   y: number;
   z: number;
 }
-
-const SPEED_START_MS = TRIP_AUTO_START_SPEED_KMH / 3.6;
 
 function magnitude(v: Vector3): number {
   return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -58,9 +55,8 @@ export interface LinearAccelSample {
  * Exponential-moving-average low-pass filter that separates gravity from the
  * raw (gravity + linear) accelerometer signal react-native-sensors reports.
  *
- * Also exposes the running gravity estimate, because gravity doubles as a
- * reference for "which way is down" — the gyroscope handler needs it to pick
- * real turning out of the raw rotation signal (see yawRateDegPerSec).
+ * Also exposes the running gravity estimate ("which way is down"), which
+ * horizontalMagnitude uses to separate driving forces from vertical bumps.
  *
  * Stateful by design (each active trip should own one instance) — not a pure
  * function, kept alongside the pure classifiers below because it has no
@@ -97,28 +93,6 @@ export function createGravityFilter(alpha = 0.8) {
       gravity = null;
     },
   };
-}
-
-/**
- * Yaw rate (deg/s) — rotation about the vertical axis, which is what
- * actually happens when a vehicle turns.
- *
- * vector3MagnitudeDegPerSec (below) takes the magnitude of all three
- * gyroscope axes together, so it can't tell a turn from a pitch or roll.
- * Real-drive report with the phone rigidly mounted in a holder rather than
- * lying on a charger pad: a 19-minute drive logged 30+ "cornering" events,
- * several within a second or two of each other, because every bump in the
- * road transmitted straight into the mount as pitch/roll and read as
- * turning. Projecting onto gravity keeps only rotation about the vertical
- * axis and discards the rest.
- *
- * Falls back to the full magnitude when gravity isn't known yet (the
- * accelerometer hasn't reported, or isn't available on this device), which
- * is the previous behavior rather than no detection at all.
- */
-export function yawRateDegPerSec(gyroRadPerSec: Vector3, gravity: Vector3 | null): number {
-  if (!gravity) return vector3MagnitudeDegPerSec(gyroRadPerSec);
-  return radPerSecToDegPerSec(Math.abs(componentAlongGravity(gyroRadPerSec, gravity)));
 }
 
 export type LongitudinalEvent = 'harsh_brake' | 'harsh_accel' | null;
@@ -206,30 +180,110 @@ export function classifyLongitudinalEvent(
   return null;
 }
 
+// ── Cornering (GPS course-over-ground) ─────────────────────────────────────
+//
+// Cornering is detected from the vehicle's GPS heading, not the phone's
+// gyroscope. Replayed against a real week of drives (14 trips) from the
+// stored VGD points, the gyroscope approach recorded 206 "harsh cornering"
+// events, including 76 and 80 in single trips whose sharpest actual turn
+// per GPS was 0.25g — a phone in a holder reads mount vibration and road
+// pitch/roll as rotation, and the gravity estimate it's projected onto
+// drifts during every maneuver (createGravityFilter's ~0.45s time constant
+// absorbs any sustained force), leaking non-yaw rotation into "yaw". It
+// overstated real turns 2-4x (e.g. 0.64g reported where GPS shows 0.15g).
+// The same week replayed through this detector yields 1 event, on the one
+// trip with a genuinely sharp turn (0.66g peak). GPS course over ground is
+// the vehicle's own direction of travel, independent of how the phone is
+// mounted.
+//
+// Robustness, each rule addressing a failure mode of the previous single-
+// fix-pair GPS fallback:
+//  - Turn rate is measured across a 2-4s WINDOW of fixes (sum of signed
+//    heading deltas / elapsed time), not between two consecutive fixes — a
+//    single jittery heading, or two fixes a fraction of a second apart,
+//    can't produce an extreme rate. A glitch mid-window cancels itself out
+//    in the signed sum.
+//  - Speed floor of 5 m/s (18 km/h) across the whole window: below that,
+//    GPS bearing is unreliable, and the previous 1 mph gate let parking-lot
+//    crawls turn heading noise into "harsh" corners.
+//  - Must stay above threshold for 2 consecutive fixes: a real harsh corner
+//    holds its lateral force for seconds; a one-fix artefact doesn't.
+//  - One event per corner: re-arms only after the rate has been back below
+//    threshold for CORNERING_RELEASE_MS (the previous GPS path had no
+//    hysteresis at all and double-counted every bend 2s apart).
+export const CORNER_MIN_SPEED_MS = 5;
+export const CORNER_WINDOW_MIN_S = 2;
+export const CORNER_WINDOW_MAX_S = 4;
+export const CORNER_SUSTAIN_FIXES = 2;
+export const CORNERING_RELEASE_MS = 2000;
+
+export interface CorneringFix {
+  timestampMs: number;
+  headingDeg: number | null;
+  speedMs: number;
+}
+
 /**
- * Classifies cornering from centripetal (lateral) acceleration, derived from
- * gyroscope yaw rate and GPS speed (a_lateral = speed * yawRate(rad/s)) —
- * gated on GPS speed so a stationary phone being rotated by hand doesn't
- * register, and so the same yaw rate isn't judged equally "harsh" at parking-
- * lot speed as at highway speed. Returns the lateral acceleration in m/s²
- * (same unit as classifyLongitudinalEvent's value) when it crosses the harsh
- * threshold, else null. Approximation: without full orientation-fusion, this
- * doesn't distinguish yaw from pitch/roll, so a pothole-induced rotation at
- * speed can register as "cornering" too; acceptable for Phase 1.
+ * Stateful per-trip cornering detector. Feed it every GPS fix in order;
+ * `update` returns the lateral acceleration (m/s²) exactly once per harsh
+ * corner — on the fix where it's confirmed — and null otherwise.
  */
-export function classifyCornering(gyroMagnitudeDegPerSec: number, gpsSpeedMs: number): number | null {
-  if (gpsSpeedMs < SPEED_START_MS) return null;
-  const yawRateRadPerSec = gyroMagnitudeDegPerSec * (Math.PI / 180);
-  const lateralAccelMs2 = gpsSpeedMs * yawRateRadPerSec;
-  return lateralAccelMs2 >= HARSH_CORNER_THRESHOLD_MS2 ? lateralAccelMs2 : null;
-}
+export function createCorneringDetector() {
+  let window: CorneringFix[] = [];
+  let aboveCount = 0;
+  let active = false;
+  let belowSinceMs: number | null = null;
 
-export function radPerSecToDegPerSec(rad: number): number {
-  return rad * (180 / Math.PI);
-}
+  function noteBelow(nowMs: number) {
+    aboveCount = 0;
+    if (!active) return;
+    if (belowSinceMs === null) belowSinceMs = nowMs;
+    else if (nowMs - belowSinceMs >= CORNERING_RELEASE_MS) {
+      active = false;
+      belowSinceMs = null;
+    }
+  }
 
-export function vector3MagnitudeDegPerSec(v: Vector3): number {
-  return radPerSecToDegPerSec(Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z));
+  return {
+    update(fix: CorneringFix): number | null {
+      if (fix.headingDeg == null || fix.speedMs < CORNER_MIN_SPEED_MS) {
+        // A gap in usable heading breaks the window — the turn can't be
+        // measured across it.
+        window = [];
+        noteBelow(fix.timestampMs);
+        return null;
+      }
+
+      window.push(fix);
+      while (window.length > 0 && fix.timestampMs - window[0].timestampMs > CORNER_WINDOW_MAX_S * 1000) {
+        window.shift();
+      }
+
+      const spanS = (fix.timestampMs - window[0].timestampMs) / 1000;
+      let lateralMs2 = 0;
+      if (spanS >= CORNER_WINDOW_MIN_S) {
+        let turnDeg = 0;
+        for (let i = 1; i < window.length; i++) {
+          turnDeg += headingDeltaDeg(window[i - 1].headingDeg as number, window[i].headingDeg as number);
+        }
+        const meanSpeed = window.reduce((sum, f) => sum + f.speedMs, 0) / window.length;
+        lateralMs2 = meanSpeed * (Math.abs(turnDeg) / spanS) * (Math.PI / 180);
+      }
+
+      if (lateralMs2 < HARSH_CORNER_THRESHOLD_MS2) {
+        noteBelow(fix.timestampMs);
+        return null;
+      }
+
+      aboveCount++;
+      belowSinceMs = null;
+      if (!active && aboveCount >= CORNER_SUSTAIN_FIXES) {
+        active = true;
+        return lateralMs2;
+      }
+      return null;
+    },
+  };
 }
 
 /**
@@ -242,25 +296,3 @@ export function headingDeltaDeg(fromDeg: number, toDeg: number): number {
   return raw;
 }
 
-/**
- * GPS-heading-based fallback for classifyCornering, for a device with no
- * gyroscope (real-world case: react-native-sensors' gyroscope observable
- * throwing "Sensor gyroscope is not available" — see
- * useHarshEventTracker.ts). Converts the heading change between two GPS
- * fixes into the same deg/sec yaw-rate magnitude a gyroscope would report,
- * so it can feed the same classifyCornering formula. Coarser than the
- * gyroscope by nature — GPS fixes arrive seconds apart rather than every
- * 100ms, and heading itself is only reliable while actually moving, which
- * classifyCornering's own speed gate already handles — but it's the only
- * signal available at all without a gyroscope, and a quick tight turn's
- * average heading rate over the gap still very plausibly clears the harsh-
- * cornering threshold even if diluted below the turn's true peak.
- */
-export function headingYawRateDegPerSec(
-  fromHeadingDeg: number,
-  toHeadingDeg: number,
-  dtSeconds: number,
-): number {
-  if (dtSeconds <= 0) return 0;
-  return Math.abs(headingDeltaDeg(fromHeadingDeg, toHeadingDeg)) / dtSeconds;
-}

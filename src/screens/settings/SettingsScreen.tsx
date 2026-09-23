@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import BackgroundGeolocation from 'react-native-background-geolocation';
@@ -39,9 +39,13 @@ function SettingRow({ title, subtitle, value, onValueChange }: {
 // after that — opens the device's own OEM-specific power settings screen.
 async function handleOpenPowerSettings() {
   try {
-    await BackgroundGeolocation.deviceSettings.showPowerManager();
+    // showPowerManager() only builds the request; show() opens the screen.
+    const request = await BackgroundGeolocation.deviceSettings.showPowerManager();
+    await BackgroundGeolocation.deviceSettings.show(request);
   } catch {
-    // Not supported on this device/OEM — nothing to fall back to.
+    // No OEM power manager on this device — the app's own settings page
+    // (Battery / Mobile data) is the next best place.
+    Linking.openSettings().catch(() => {});
   }
 }
 

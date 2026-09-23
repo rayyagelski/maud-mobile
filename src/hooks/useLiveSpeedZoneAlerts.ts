@@ -43,6 +43,10 @@ export function useLiveSpeedZoneAlerts(): void {
   const speakRef = useRef(speak);
   useEffect(() => { speakRef.current = speak; }, [speak]);
   const isImperialRef = useRef(isImperial);
+  // Compliance toggle (dashboard footer) — see useSpeedZoneAlerts.
+  const { alertsEnabled } = useAppSelector(s => s.compliance);
+  const alertsEnabledRef = useRef(alertsEnabled);
+  useEffect(() => { alertsEnabledRef.current = alertsEnabled; }, [alertsEnabled]);
   useEffect(() => { isImperialRef.current = isImperial; }, [isImperial]);
 
   useEffect(() => {
@@ -77,6 +81,8 @@ export function useLiveSpeedZoneAlerts(): void {
     // fix handler — see LIVE_SPEED_ZONE_FETCH_STALL_MS there.
     let fetchStartedAt = 0;
     let fetchGeneration = 0;
+    // The in-flight request, so an abandoned one can actually be cancelled.
+    let inFlight: AbortController | null = null;
     let distanceAlongReference = 0;
     // Same off-route detection useSpeedZoneAlerts.ts needed — the reference
     // route here is a real HERE-routed path, but only ever toward a
@@ -108,8 +114,12 @@ export function useLiveSpeedZoneAlerts(): void {
         // the rest are frequent enough that the result line suffices.
         logDiagnostic('Speed-zone reference route requested.', { reason });
       }
+      const controller = new AbortController();
+      inFlight = controller;
       try {
-        const route = await fetchSpeedLimitAheadRoute(origin, headingDegrees, LIVE_SPEED_ZONE_AHEAD_METERS);
+        const route = await fetchSpeedLimitAheadRoute(
+          origin, headingDegrees, LIVE_SPEED_ZONE_AHEAD_METERS, controller.signal,
+        );
         if (generation !== fetchGeneration) {
           // Abandoned by the fix handler below while this was hanging —
           // a newer request owns the reference now (or is about to).
@@ -163,11 +173,16 @@ export function useLiveSpeedZoneAlerts(): void {
         }
       } catch (err) {
         // Best-effort — just try again once the next qualifying fix arrives.
-        logDiagnostic('Speed-zone reference route fetch failed.', {
-          reason,
-          message: err instanceof Error ? err.message : String(err),
-        });
+        // A request cancelled on purpose (abandoned as stalled, or the trip
+        // ended) was already logged by whoever cancelled it.
+        if (!controller.signal.aborted) {
+          logDiagnostic('Speed-zone reference route fetch failed.', {
+            reason,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       } finally {
+        if (inFlight === controller) inFlight = null;
         // A stale request must not clear the flag a newer one owns.
         if (generation === fetchGeneration) fetching = false;
       }
@@ -187,6 +202,8 @@ export function useLiveSpeedZoneAlerts(): void {
         logDiagnostic('Speed-zone reference route request stalled — abandoning it.', {
           ageSeconds: Math.round((Date.now() - fetchStartedAt) / 1000),
         });
+        inFlight?.abort();
+        inFlight = null;
         fetchGeneration++;
         fetching = false;
         // Let the refetch below go straight through rather than waiting
@@ -245,10 +262,13 @@ export function useLiveSpeedZoneAlerts(): void {
           limit: limitLabel,
           approaching: announcement.isApproaching,
           speedKmh: Math.round(speedMs * 3.6),
+          mutedByComplianceToggle: !alertsEnabledRef.current,
         });
         // 'high' — same reasoning as useSpeedZoneAlerts.ts (see
         // useVoicePlayback.ts).
-        speakRef.current(speedZoneAnnouncementText(limitLabel, announcement.isApproaching), 'high');
+        if (alertsEnabledRef.current) {
+          speakRef.current(speedZoneAnnouncementText(limitLabel, announcement.isApproaching), 'high');
+        }
       }
 
       // Driver Score "Speeding" minutes — see speedingSecondsForFix.
@@ -282,6 +302,12 @@ export function useLiveSpeedZoneAlerts(): void {
       }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      // Trip ended — don't leave a request queued behind a blocked network.
+      inFlight?.abort();
+      inFlight = null;
+      fetchGeneration++;
+    };
   }, [isTracking, plannedRoute, activeTrip?.id, dispatch]);
 }

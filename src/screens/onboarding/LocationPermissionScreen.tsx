@@ -87,7 +87,12 @@ export default function LocationPermissionScreen() {
         );
       });
 
-      await BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations();
+      // showIgnoreBatteryOptimizations() only BUILDS the request (device
+      // info + whether it was seen before) — show() is what actually opens
+      // the settings screen. Calling only the former (as this used to) meant
+      // this step never opened anything, and the app ran battery-optimized.
+      const request = await BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations();
+      await BackgroundGeolocation.deviceSettings.show(request);
     } catch {
       // Not supported on this device/OS version — fall back to default behavior.
     }

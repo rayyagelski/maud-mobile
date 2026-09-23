@@ -37,6 +37,11 @@ export function useSpeedZoneAlerts(): void {
   const speakRef = useRef(speak);
   useEffect(() => { speakRef.current = speak; }, [speak]);
   const isImperialRef = useRef(isImperial);
+  // Compliance toggle (dashboard footer): mutes the spoken alert only —
+  // zone tracking, compliance events and their logging carry on either way.
+  const { alertsEnabled } = useAppSelector(s => s.compliance);
+  const alertsEnabledRef = useRef(alertsEnabled);
+  useEffect(() => { alertsEnabledRef.current = alertsEnabled; }, [alertsEnabled]);
   useEffect(() => { isImperialRef.current = isImperial; }, [isImperial]);
 
   useEffect(() => {
@@ -93,11 +98,14 @@ export function useSpeedZoneAlerts(): void {
         const limitLabel = formatSpeed(announcement.speedLimitMps * 3.6, isImperialRef.current);
         logDiagnostic('Speed-zone announcement.', {
           limit: limitLabel, approaching: announcement.isApproaching, speedKmh: Math.round(speedMs * 3.6),
+          mutedByComplianceToggle: !alertsEnabledRef.current,
         });
         // 'high' — must not cut off a 'critical' turn-by-turn instruction,
         // but should still be able to interrupt a lower-priority AI-
         // recommendation announcement (see useVoicePlayback.ts).
-        speakRef.current(speedZoneAnnouncementText(limitLabel, announcement.isApproaching), 'high');
+        if (alertsEnabledRef.current) {
+          speakRef.current(speedZoneAnnouncementText(limitLabel, announcement.isApproaching), 'high');
+        }
       }
 
       // Driver Score "Speeding" minutes — see speedingSecondsForFix.

@@ -13,6 +13,7 @@ interface BluetoothVehicleDetectionNativeModule {
   getBondedDevices(): Promise<string[]>;
   startScreenStateUpdates(): void;
   isScreenInteractive(): Promise<boolean>;
+  getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
 }
 
 const nativeModule = NativeModules.BluetoothVehicleDetection as
@@ -94,6 +95,25 @@ export async function isScreenInteractive(): Promise<boolean> {
     return await nativeModule.isScreenInteractive();
   } catch {
     return true;
+  }
+}
+
+// Android restrictions that block the app's network while it's in the
+// background — see BluetoothVehicleDetectionModule.kt. 'enabled' dataSaver
+// means THIS app is restricted on mobile data in the background (Data Saver
+// on without an exemption, or the app's own background-data switch off).
+export interface BackgroundRestrictions {
+  dataSaver: 'disabled' | 'whitelisted' | 'enabled' | 'unknown';
+  backgroundRestricted: boolean | null;
+}
+
+export async function getBackgroundRestrictions(): Promise<BackgroundRestrictions> {
+  const unknown: BackgroundRestrictions = { dataSaver: 'unknown', backgroundRestricted: null };
+  if (!nativeModule?.getBackgroundRestrictions) return unknown;
+  try {
+    return await nativeModule.getBackgroundRestrictions();
+  } catch {
+    return unknown;
   }
 }
 

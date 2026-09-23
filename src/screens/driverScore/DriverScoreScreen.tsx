@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -250,6 +250,17 @@ export default function DriverScoreScreen() {
     [current],
   );
 
+  // Speeding time comes from VGD's server-side speed_limit events for every
+  // trip that has a VGD record — see useVgdBehaviorAggregate for why the
+  // on-device counter can't be trusted for it. The local counter is only a
+  // fallback for a trip that never reached VGD.
+  const vgdBehavior = useVgdBehaviorAggregate(current);
+  const speedingSecondsFor = useCallback((t: Trip): number => {
+    const vgdMinutes = t.vgdTripId != null ? vgdBehavior.speedingMinutesByVgdTripId[t.vgdTripId] : undefined;
+    if (vgdMinutes != null) return vgdMinutes * 60;
+    return t.eventCounters?.speedingSeconds ?? 0;
+  }, [vgdBehavior.speedingMinutesByVgdTripId]);
+
   // Context-weighted exposure totals — each trip's raw counters are scaled by
   // its own night/rain/highway/after-midnight multiplier before being summed,
   // so two identical harsh-braking counts don't score the same if one
@@ -259,9 +270,9 @@ export default function DriverScoreScreen() {
       current.reduce(
         (acc, t) => {
           const c = t.eventCounters;
+          const m = tripContextMultiplier(t);
+          acc.speedingSeconds += speedingSecondsFor(t) * m;
           if (c) {
-            const m = tripContextMultiplier(t);
-            acc.speedingSeconds += c.speedingSeconds * m;
             acc.phoneTextSeconds += c.phoneTextSeconds * m;
             acc.harshBrakeCount += c.harshBrakeCount * m;
             acc.harshAccelCount += c.harshAccelCount * m;
@@ -276,7 +287,7 @@ export default function DriverScoreScreen() {
           harshAccelCount: 0, harshCornerCount: 0, driveSeconds: 0, miles: 0,
         },
       ),
-    [current],
+    [current, speedingSecondsFor],
   );
 
   // Real harsh-event counts backfilled from VGD for trips that have no local
@@ -286,9 +297,6 @@ export default function DriverScoreScreen() {
   // per-trip-then-summed), so it's added unweighted rather than run back
   // through tripContextMultiplier per trip — a deliberate simplification,
   // same spirit as CONTEXT_MULTIPLIERS' own "uniform stand-in" note above.
-  // VGD has no speeding-seconds/phone-usage-seconds equivalent, so those two
-  // stay local-only.
-  const vgdBehavior = useVgdBehaviorAggregate(current);
   const exposureWithVgd = useMemo(() => ({
     ...exposure,
     harshBrakeCount: exposure.harshBrakeCount + vgdBehavior.harshBrakeCount,
@@ -308,8 +316,8 @@ export default function DriverScoreScreen() {
       current.reduce(
         (acc, t) => {
           const c = t.eventCounters;
+          acc.speedingSeconds += speedingSecondsFor(t);
           if (c) {
-            acc.speedingSeconds += c.speedingSeconds;
             acc.phoneTextSeconds += c.phoneTextSeconds;
             acc.harshBrakeCount += c.harshBrakeCount;
             acc.harshAccelCount += c.harshAccelCount;
@@ -319,7 +327,7 @@ export default function DriverScoreScreen() {
         },
         { speedingSeconds: 0, phoneTextSeconds: 0, harshBrakeCount: 0, harshAccelCount: 0, harshCornerCount: 0 },
       ),
-    [current],
+    [current, speedingSecondsFor],
   );
   const rawCountsWithVgd = useMemo(() => ({
     ...rawCounts,

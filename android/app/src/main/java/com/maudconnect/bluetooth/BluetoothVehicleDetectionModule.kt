@@ -106,6 +106,45 @@ class BluetoothVehicleDetectionModule(reactContext: ReactApplicationContext) :
     promise.resolve(isScreenInteractiveNow())
   }
 
+  // Android restrictions that cut a BACKGROUNDED app off from the network.
+  // Real-drive evidence: every GPS point uploaded during two drives reached
+  // the server only at the second the app was reopened — the OS was holding
+  // all of the app's traffic while its screen was off, which also silenced
+  // speed-zone alerts (no HERE response) and stalled trip-end calls. Read-
+  // only status checks; nothing here changes a setting.
+  //  - dataSaver: ConnectivityManager.getRestrictBackgroundStatus() — covers
+  //    both Data Saver and the per-app "Allow background data usage" switch
+  //    being off ("enabled" = this app IS restricted on mobile data).
+  //  - backgroundRestricted: ActivityManager.isBackgroundRestricted() — the
+  //    Android 9+ "Restricted" battery setting for this app.
+  @ReactMethod
+  fun getBackgroundRestrictions(promise: Promise) {
+    val result = Arguments.createMap()
+    try {
+      val cm = reactApplicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+      val status = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) cm.restrictBackgroundStatus else -1
+      result.putString("dataSaver", when (status) {
+        android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED -> "disabled"
+        android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED -> "whitelisted"
+        android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED -> "enabled"
+        else -> "unknown"
+      })
+    } catch (e: Exception) {
+      result.putString("dataSaver", "unknown")
+    }
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val am = reactApplicationContext.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        result.putBoolean("backgroundRestricted", am.isBackgroundRestricted)
+      } else {
+        result.putNull("backgroundRestricted")
+      }
+    } catch (e: Exception) {
+      result.putNull("backgroundRestricted")
+    }
+    promise.resolve(result)
+  }
+
   override fun getName(): String = "BluetoothVehicleDetection"
 
   @ReactMethod

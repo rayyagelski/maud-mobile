@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Alert, AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { accelerometer, gyroscope, setUpdateIntervalForType, SensorTypes } from 'react-native-sensors';
+import { accelerometer, setUpdateIntervalForType, SensorTypes } from 'react-native-sensors';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
@@ -14,9 +14,7 @@ import {
 import {
   createGravityFilter,
   classifyLongitudinalEvent,
-  classifyCornering,
-  yawRateDegPerSec,
-  headingYawRateDegPerSec,
+  createCorneringDetector,
 } from '../utils/harshEventDetector';
 import { generateId } from '../utils/helpers';
 import {
@@ -33,22 +31,12 @@ import type { GpsPoint, TelematicsEvent } from '../types/trip.types';
 
 const PHONE_USAGE_MIN_SPEED_MS = TRIP_AUTO_START_SPEED_KMH / 3.6;
 
-// How long the yaw rate must stay below the cornering threshold before the
-// current corner counts as finished and a new one can be reported. Long
-// enough to bridge the flicker that was splitting one corner into several
-// events, short enough that two genuinely separate turns (a chicane, or
-// turning out of one street straight into another) still register apart.
-const CORNERING_RELEASE_MS = 2000;
-
-// A device missing the accelerometer/gyroscope entirely is a hardware fact
-// that won't change between trips — showing this Alert every single time a
-// trip starts would just be noise. Persisted so a driver sees it exactly
-// once (ever, on this device), instead of either never being told at all
-// (the original fail-soft-only behavior — real complaint: a client
-// wondering why cornering events never show up, with the app never having
-// said why) or being interrupted by it on every drive.
+// A device missing the accelerometer entirely is a hardware fact that won't
+// change between trips — showing this Alert every single time a trip starts
+// would just be noise. Persisted so a driver sees it exactly once (ever, on
+// this device), instead of either never being told at all or being
+// interrupted by it on every drive.
 const ACCELEROMETER_UNAVAILABLE_NOTICE_KEY = 'accelerometerUnavailableNoticeShown';
-const GYROSCOPE_UNAVAILABLE_NOTICE_KEY = 'gyroscopeUnavailableNoticeShown';
 
 async function notifyMissingSensorOnce(storageKey: string, title: string, message: string): Promise<void> {
   try {
@@ -64,10 +52,12 @@ async function notifyMissingSensorOnce(storageKey: string, title: string, messag
 }
 
 /**
- * Real accelerometer/gyroscope-based harsh-event detection (SRS 2.8/4.4),
- * complementary to useTripAutoDetection (GPS-only start/stop). Subscribes to
- * sensors only while a trip is being tracked, to avoid unnecessary battery
- * drain, and mirrors GPS fixes via gpsSpeedBus rather than opening a second
+ * Harsh-event detection (SRS 2.8/4.4), complementary to useTripAutoDetection
+ * (GPS-only start/stop): braking/acceleration from the accelerometer
+ * corroborated by GPS speed, cornering from GPS course over ground (see
+ * createCorneringDetector for why not the gyroscope). Subscribes to sensors
+ * only while a trip is being tracked, to avoid unnecessary battery drain,
+ * and mirrors GPS fixes via gpsSpeedBus rather than opening a second
  * location subscription.
  */
 export function useHarshEventTracker(): void {
@@ -118,12 +108,7 @@ export function useHarshEventTracker(): void {
     let lastGpsSpeedMs = 0;
     let lastGpsTimestamp: number | null = null;
     let lastGpsPoint: GpsPoint | null = null;
-    // Flipped false by the gyroscope's own error handler below — read from
-    // the GPS-fix callback to decide whether the GPS-heading fallback should
-    // even run. Starts optimistic (true) since most devices do have a
-    // working gyroscope; only a real "not available" error turns it off.
-    let gyroscopeAvailable = true;
-    let lastHeadingDeg: number | null = null;
+    const cornering = createCorneringDetector();
 
     function emitEvent(type: TelematicsEvent['type'], location: GpsPoint, value: number) {
       if (!activeTripIdRef.current) return;
@@ -142,17 +127,14 @@ export function useHarshEventTracker(): void {
     }
 
     setUpdateIntervalForType(SensorTypes.accelerometer, SENSOR_SAMPLE_RATE_MS);
-    setUpdateIntervalForType(SensorTypes.gyroscope, SENSOR_SAMPLE_RATE_MS);
 
     // react-native-sensors' observables throw (not reject a promise) when a
     // device genuinely lacks the sensor — real-world crash: "Sensor
-    // gyroscope is not available" on a device with no gyroscope, surfacing
-    // as an app-wide FATAL uncaught JS error about a minute into every trip,
-    // since .subscribe(nextHandler) alone registers no error handler and
-    // RxJS rethrows an unhandled observable error rather than swallowing it.
-    // Same risk applies to the accelerometer on some devices, so both get
-    // the same fail-soft treatment: log once and lose that one signal for
-    // this trip, never crash the app over a missing sensor.
+    // gyroscope is not available" surfaced as an app-wide FATAL uncaught JS
+    // error, since .subscribe(nextHandler) alone registers no error handler
+    // and RxJS rethrows an unhandled observable error. The accelerometer
+    // gets the same fail-soft treatment: log once and lose that one signal
+    // for this trip, never crash the app over a missing sensor.
     const accelSub = accelerometer.subscribe({
       next: ({ x, y, z }) => {
         // Horizontal component only — braking/accelerating are horizontal
@@ -170,60 +152,6 @@ export function useHarshEventTracker(): void {
           ACCELEROMETER_UNAVAILABLE_NOTICE_KEY,
           'Harsh Braking/Acceleration Not Available',
           "This phone doesn't have a motion sensor MAUD Connect can use, so harsh braking and acceleration events won't be recorded on this device. Everything else — trip recording, route, speed, and cornering — still works normally.",
-        );
-      },
-    });
-
-    // Gyroscope samples arrive every SENSOR_SAMPLE_RATE_MS (100ms) and a real
-    // turn stays above the yaw-rate threshold for a second or more, so
-    // classifying per-sample would log one turn as 10-20 separate events.
-    // corneringActive gates on the rising edge only — a new event fires once
-    // per continuous above-threshold episode, not once per sample.
-    //
-    // The episode is only considered over once the signal has stayed below
-    // threshold for CORNERING_RELEASE_MS, rather than the instant it dips.
-    // Without that hold, a signal that flickers across the threshold splits
-    // one physical corner into a burst of separate events — real-drive
-    // report logged two "cornering" events inside the same second, which no
-    // actual corner can produce.
-    let corneringActive = false;
-    let belowThresholdSince: number | null = null;
-    const gyroSub = gyroscope.subscribe({
-      next: ({ x, y, z }) => {
-        if (!lastGpsPoint) return;
-        // Real turning is rotation about the vertical axis. Using all three
-        // gyroscope axes together counted pitch/roll from road bumps as
-        // cornering — see yawRateDegPerSec.
-        const yawDegPerSec = yawRateDegPerSec({ x, y, z }, gravityFilter.getGravity());
-        const lateralAccelMs2 = classifyCornering(yawDegPerSec, lastGpsSpeedMs);
-        const isCornering = lateralAccelMs2 != null;
-
-        if (isCornering) {
-          belowThresholdSince = null;
-          if (!corneringActive) {
-            corneringActive = true;
-            emitEvent('harsh_corner', lastGpsPoint, lateralAccelMs2);
-          }
-          return;
-        }
-
-        if (!corneringActive) return;
-        const now = Date.now();
-        if (belowThresholdSince === null) belowThresholdSince = now;
-        else if (now - belowThresholdSince >= CORNERING_RELEASE_MS) {
-          corneringActive = false;
-          belowThresholdSince = null;
-        }
-      },
-      error: (err) => {
-        gyroscopeAvailable = false;
-        logDiagnostic('Gyroscope unavailable — falling back to GPS-heading-based cornering detection.', {
-          message: err?.message ?? String(err),
-        });
-        notifyMissingSensorOnce(
-          GYROSCOPE_UNAVAILABLE_NOTICE_KEY,
-          'Cornering Detection Using GPS',
-          "This phone doesn't have a gyroscope, so MAUD Connect estimates cornering from GPS movement instead — slightly less precise, but cornering events still get recorded. Everything else works normally.",
         );
       },
     });
@@ -251,25 +179,17 @@ export function useHarshEventTracker(): void {
           // is why the UI could show a "hard braking" event at 0.20g next to
           // a 0.5g threshold.
           if (event) emitEvent(event.type, point, event.valueMs2);
-
-          // GPS-heading fallback for cornering — only runs once the
-          // gyroscope has actually errored (see its subscribe() above), not
-          // as a second, redundant detector alongside a working gyroscope.
-          // Coarser by nature (GPS fixes arrive seconds apart, not every
-          // 100ms — see headingYawRateDegPerSec's own doc comment), but it's
-          // the only signal available at all without a gyroscope.
-          if (!gyroscopeAvailable && lastHeadingDeg != null && point.heading != null) {
-            const headingRateDegPerSec = headingYawRateDegPerSec(lastHeadingDeg, point.heading, dtSeconds);
-            const lateralAccelMs2 = classifyCornering(headingRateDegPerSec, speedMs);
-            const isCornering = lateralAccelMs2 != null;
-            if (isCornering && !corneringActive) {
-              emitEvent('harsh_corner', point, lateralAccelMs2);
-            }
-            corneringActive = isCornering;
-          }
         }
       }
-      if (point.heading != null) lastHeadingDeg = point.heading;
+
+      // Cornering from GPS course over ground — see createCorneringDetector.
+      const lateralAccelMs2 = cornering.update({
+        timestampMs: timestamp,
+        headingDeg: point.heading ?? null,
+        speedMs,
+      });
+      if (lateralAccelMs2 != null) emitEvent('harsh_corner', point, lateralAccelMs2);
+
       peakAccelMagnitude = 0;
       lastGpsSpeedMs = speedMs;
       lastGpsTimestamp = timestamp;
@@ -354,7 +274,6 @@ export function useHarshEventTracker(): void {
 
     return () => {
       accelSub.unsubscribe();
-      gyroSub.unsubscribe();
       unsubscribeGps();
       appStateSub.remove();
       screenSubCancelled = true;

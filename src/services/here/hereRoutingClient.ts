@@ -134,18 +134,29 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
 // caller's normal retry path takes over.
 export const HERE_REQUEST_TIMEOUT_MS = 15 * 1000;
 
-async function fetchWithTimeout(url: string): Promise<Response> {
+// `externalSignal` lets a caller cancel the request itself — used by
+// useLiveSpeedZoneAlerts when it abandons a stalled request, so that
+// request is actually torn down instead of staying queued and firing (and
+// being billed) the moment the OS lets the app's network back through.
+async function fetchWithTimeout(url: string, externalSignal?: AbortSignal): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HERE_REQUEST_TIMEOUT_MS);
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort);
+  }
   try {
     return await fetch(url, { signal: controller.signal });
   } catch (err) {
+    if (externalSignal?.aborted) throw new Error('HERE request cancelled');
     if (controller.signal.aborted) {
       throw new Error(`HERE request timed out after ${HERE_REQUEST_TIMEOUT_MS / 1000}s`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -161,6 +172,7 @@ export async function fetchHereRoutes(
   destination: LatLng,
   alternatives = 0,
   isImperial = false,
+  signal?: AbortSignal,
 ): Promise<HereRouteResult[]> {
   const params = new URLSearchParams({
     transportMode: 'car',
@@ -180,7 +192,7 @@ export async function fetchHereRoutes(
     apiKey: HERE_API_KEY,
   });
 
-  const response = await fetchWithTimeout(`https://router.hereapi.com/v8/routes?${params.toString()}`);
+  const response = await fetchWithTimeout(`https://router.hereapi.com/v8/routes?${params.toString()}`, signal);
   if (!response.ok) {
     throw new Error(`HERE routing request failed (${response.status})`);
   }
@@ -192,8 +204,12 @@ export async function fetchHereRoutes(
 }
 
 // Back-compat single-route form, kept for call sites that only ever want HERE's optimal route.
-export async function fetchHereRoute(origin: LatLng, destination: LatLng): Promise<HereRouteResult | null> {
-  const routes = await fetchHereRoutes(origin, destination, 0);
+export async function fetchHereRoute(
+  origin: LatLng,
+  destination: LatLng,
+  signal?: AbortSignal,
+): Promise<HereRouteResult | null> {
+  const routes = await fetchHereRoutes(origin, destination, 0, false, signal);
   return routes[0] ?? null;
 }
 
@@ -235,9 +251,10 @@ export async function fetchSpeedLimitAheadRoute(
   origin: LatLng,
   headingDegrees: number,
   aheadMeters: number,
+  signal?: AbortSignal,
 ): Promise<HereRouteResult | null> {
   const destination = destinationPointFrom(origin, headingDegrees, aheadMeters);
-  return fetchHereRoute(origin, destination);
+  return fetchHereRoute(origin, destination, signal);
 }
 
 export interface AddressSuggestion {
