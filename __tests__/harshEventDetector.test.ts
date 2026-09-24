@@ -67,6 +67,42 @@ describe('createLongitudinalDetector (GPS speed)', () => {
     // 10 s between GPS speeds: too averaged to say anything about a short event.
     expect(runLongitudinal([{ atS: 0, mph: 50 }, { atS: 10, mph: 0 }])).toEqual([]);
   });
+
+  it('ignores a fake 0 reported as a normal GPS speed (the test phone does this)', () => {
+    // Today's trip, verbatim: 38 mph, "0", 40 mph, "0" — this phone reports
+    // a missing speed as 0, not -1, so nothing flags it upstream. The old
+    // code recorded -0.63g "brakes" and 0.54g "accelerations" from these.
+    expect(runLongitudinal([
+      { atS: 0, mph: 38 }, { atS: 3, mph: 0 }, { atS: 5, mph: 40 }, { atS: 9, mph: 0 }, { atS: 12, mph: 39 },
+    ])).toEqual([]);
+  });
+
+  it('records a hard brake to a real stop, once the next reading confirms the stop', () => {
+    const detector = createLongitudinalDetector();
+    const at = (s: number) => 1_700_000_000_000 + s * 1000;
+    expect(detector.update({ timestampMs: at(0), speedMs: 30 * MPH })).toBeNull();
+    // 30 -> 0 mph in 2 s = 0.68g, but not reported yet: could be a fake 0.
+    expect(detector.update({ timestampMs: at(2), speedMs: 0 })).toBeNull();
+    // Still stopped a second later — a real stop, so the brake is reported now.
+    expect(detector.update({ timestampMs: at(3), speedMs: 0 })).toMatchObject({ type: 'harsh_brake' });
+  });
+
+  it('records a hard start only when the car was really stopped before it', () => {
+    // Stopped, stopped, then 0 -> 25 mph in 3 s (0.38g).
+    expect(runLongitudinal([{ atS: 0, mph: 0 }, { atS: 2, mph: 0 }, { atS: 5, mph: 25 }]))
+      .toEqual([{ type: 'harsh_accel', g: expect.closeTo(0.38, 1) }]);
+  });
+
+  it('rejects a speed change that disagrees with the distance travelled', () => {
+    // Positions show the car covered 51 m in 3 s (17 m/s the whole time),
+    // but the speed readings claim 17 -> 0 m/s — impossible, so no brake.
+    const detector = createLongitudinalDetector();
+    const base = { latitude: 28.49, longitude: -81.77, accuracyM: 4 };
+    const metersNorth = (m: number) => base.latitude + m / 111_320;
+    expect(detector.update({ ...base, timestampMs: 0, speedMs: 17 })).toBeNull();
+    expect(detector.update({ ...base, latitude: metersNorth(51), timestampMs: 3000, speedMs: 0 })).toBeNull();
+    expect(detector.update({ ...base, latitude: metersNorth(102), timestampMs: 4000, speedMs: 0 })).toBeNull();
+  });
 });
 
 // Feeds fixes 1s apart (the real GPS cadence) through a fresh detector and

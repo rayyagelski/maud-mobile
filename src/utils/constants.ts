@@ -123,6 +123,9 @@ export const LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS = 15 * 1000;
 // useLiveSpeedZoneAlerts.ts for why a timer can't be relied on here).
 // Comfortably above the client's own 15s timeout so the two never fight.
 export const LIVE_SPEED_ZONE_FETCH_STALL_MS = 20 * 1000;
+// Upper bound on the wait between attempts after repeated stalls — see the
+// stall guard in useLiveSpeedZoneAlerts.ts.
+export const LIVE_SPEED_ZONE_MAX_STALL_BACKOFF_MS = 5 * 60 * 1000;
 // Below this speed, skip fetching — parked/idling/stop-and-go traffic
 // shouldn't burn HERE routing calls, and heading is unreliable at very low
 // speed anyway (the synthetic "ahead" projection needs a real heading).

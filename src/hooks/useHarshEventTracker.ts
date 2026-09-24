@@ -4,6 +4,7 @@ import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
 import { subscribeGpsFix } from '../services/gpsSpeedBus';
+import { subscribeUserTouch } from '../services/userTouchBus';
 import {
   resetHarshEventCounters,
   incrementHarshEventCount,
@@ -113,6 +114,9 @@ export function useHarshEventTracker(): void {
         timestampMs: timestamp,
         speedMs,
         speedEstimated: point.speedEstimated,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        accuracyM: point.accuracy,
       });
       if (longitudinalEvent) emitEvent(longitudinalEvent.type, point, longitudinalEvent.valueMs2);
 
@@ -181,7 +185,9 @@ export function useHarshEventTracker(): void {
           if (seconds >= MIN_PHONE_USAGE_EVENT_SECONDS && usageStartPoint) {
             emitEvent('phone_usage', usageStartPoint, seconds);
           }
-          logDiagnostic('Phone usage recorded.', { seconds, speedKmh: Math.round(lastGpsSpeedMs * 3.6) });
+          logDiagnostic('Phone usage recorded.', {
+            source: 'other app', seconds, speedKmh: Math.round(lastGpsSpeedMs * 3.6),
+          });
         }
         usageStartedAt = null;
         usageStartPoint = null;
@@ -200,16 +206,70 @@ export function useHarshEventTracker(): void {
       evaluatePhoneUsage();
     });
     const unsubscribeScreen = subscribeScreenInteractive((interactive) => {
+      const wasInteractive = screenInteractive;
       screenInteractive = interactive;
       evaluatePhoneUsage();
+      // Unlocking the phone straight back into MAUD is handling too, and
+      // the other-app check above can't see it (MAUD is the app on screen).
+      if (interactive && !wasInteractive && appActive) noteHandling();
     });
+
+    // Phone handling INSIDE MAUD while driving: touching the screen (and
+    // unlocking back into MAUD, above). Real-drive report: the driver
+    // touched the phone mid-drive, BT connected, and nothing was recorded —
+    // the check above only covers time spent in other apps. Touches within
+    // HANDLING_IDLE_MS of each other form one handling episode; the episode
+    // is recorded when the touches stop.
+    const HANDLING_IDLE_MS = 5000;
+    let handlingStartedAt: number | null = null;
+    let handlingLastAt = 0;
+    let handlingStartPoint: GpsPoint | null = null;
+
+    function noteHandling() {
+      const now = Date.now();
+      if (handlingStartedAt != null) {
+        handlingLastAt = now;
+        return;
+      }
+      // Same eligibility as other-app usage: moving, and in the paired car.
+      const eligible = lastGpsSpeedMs >= PHONE_USAGE_MIN_SPEED_MS
+        && isBluetoothGateSatisfiedWhereEnforceable(
+          isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connectedBluetoothDeviceRef.current,
+        );
+      if (!eligible) return;
+      handlingStartedAt = now;
+      handlingLastAt = now;
+      handlingStartPoint = lastGpsPoint;
+    }
+
+    function closeHandlingIfIdle(force: boolean) {
+      if (handlingStartedAt == null) return;
+      if (!force && Date.now() - handlingLastAt < HANDLING_IDLE_MS) return;
+      // A single tap is still handling the phone: at least 1 second.
+      const seconds = Math.max(1, Math.round((handlingLastAt - handlingStartedAt) / 1000));
+      addPhoneTextSeconds(seconds);
+      if (handlingStartPoint) emitEvent('phone_usage', handlingStartPoint, seconds);
+      logDiagnostic('Phone usage recorded.', {
+        source: 'touch in app', seconds, speedKmh: Math.round(lastGpsSpeedMs * 3.6),
+      });
+      handlingStartedAt = null;
+      handlingStartPoint = null;
+    }
+
+    const unsubscribeTouch = subscribeUserTouch(noteHandling);
+    // Episodes are closed on the GPS clock, which keeps ticking while
+    // driving even when JS timers are throttled.
+    const unsubscribeHandlingClock = subscribeGpsFix(() => closeHandlingIfIdle(false));
 
     return () => {
       unsubscribeGps();
       appStateSub.remove();
       screenSubCancelled = true;
       unsubscribeScreen();
-      // Trip ending mid-usage: close the window now rather than losing it.
+      unsubscribeTouch();
+      unsubscribeHandlingClock();
+      // Trip ending mid-usage: close the windows now rather than losing them.
+      closeHandlingIfIdle(true);
       appActive = true;
       evaluatePhoneUsage();
     };

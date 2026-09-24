@@ -20,6 +20,7 @@ import { addSpeedingSeconds } from '../services/harshEventCounters';
 import {
   LIVE_SPEED_ZONE_AHEAD_METERS, LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
   LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS, LIVE_SPEED_ZONE_FETCH_STALL_MS,
+  LIVE_SPEED_ZONE_MAX_STALL_BACKOFF_MS,
 } from '../utils/constants';
 
 /**
@@ -83,6 +84,9 @@ export function useLiveSpeedZoneAlerts(): void {
     let fetchGeneration = 0;
     // The in-flight request, so an abandoned one can actually be cancelled.
     let inFlight: AbortController | null = null;
+    // Stall backoff — see the stall guard in the fix handler.
+    let consecutiveStalls = 0;
+    let nextFetchAllowedAt = 0;
     let distanceAlongReference = 0;
     // Same off-route detection useSpeedZoneAlerts.ts needed — the reference
     // route here is a real HERE-routed path, but only ever toward a
@@ -128,6 +132,9 @@ export function useLiveSpeedZoneAlerts(): void {
           });
           return;
         }
+        // Network is getting through again.
+        consecutiveStalls = 0;
+        nextFetchAllowedAt = 0;
         if (route && route.speedLimitSpans.length > 0) {
           referenceCoords = route.coordinates;
           // Logged from the RAW spans, before filling — logging the filled
@@ -199,16 +206,28 @@ export function useLiveSpeedZoneAlerts(): void {
       // entire drive went without speed-limit data. Fixes keep arriving
       // every second while driving, so this check always runs on time.
       if (fetching && Date.now() - fetchStartedAt > LIVE_SPEED_ZONE_FETCH_STALL_MS) {
+        // Back off after each stall. Cancelling a stalled request does not
+        // stop it: real-drive logs show every abandoned request (60 across
+        // one morning, some 51 minutes old) completing the moment the app
+        // was reopened — so retrying every 20s while the OS blocks the
+        // app's network only queues up requests that all fire, and are all
+        // billed, at once later. Waits 15s, 30s, 60s... up to 5 min between
+        // attempts; the first successful response resets it.
+        consecutiveStalls++;
+        const backoffMs = Math.min(
+          LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS * 2 ** (consecutiveStalls - 1),
+          LIVE_SPEED_ZONE_MAX_STALL_BACKOFF_MS,
+        );
+        nextFetchAllowedAt = Date.now() + backoffMs;
         logDiagnostic('Speed-zone reference route request stalled — abandoning it.', {
           ageSeconds: Math.round((Date.now() - fetchStartedAt) / 1000),
+          consecutiveStalls,
+          nextTryInSeconds: Math.round(backoffMs / 1000),
         });
         inFlight?.abort();
         inFlight = null;
         fetchGeneration++;
         fetching = false;
-        // Let the refetch below go straight through rather than waiting
-        // out the rate floor again on top of the stall.
-        lastFetchAt = 0;
       }
 
       const wasOffRoute = offRouteStreak >= OFF_ROUTE_STREAK_THRESHOLD;
@@ -234,6 +253,7 @@ export function useLiveSpeedZoneAlerts(): void {
       if (
         refetchReason && point.heading != null
         && Date.now() - lastFetchAt >= LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS
+        && Date.now() >= nextFetchAllowedAt
       ) {
         refetch({ latitude: point.latitude, longitude: point.longitude }, point.heading, refetchReason);
       }

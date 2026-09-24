@@ -120,6 +120,22 @@ const PENDING_BLUETOOTH_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 // thrown away. A candidate older than this is stale (driver sat parked,
 // the car jittered a fix, then left much later) and gets replaced.
 const DEPARTURE_CANDIDATE_TTL_MS = 3 * 60 * 1000; // 3 min
+// GPS sampling while a trip records vs. while waiting for one. With a
+// non-zero distanceFilter the plugin ignores locationUpdateInterval and
+// also stretches the filter with speed ("elasticity"), which is why trips
+// were sampled every 3-7 s — too coarse to measure a short brake. During a
+// trip: every second regardless of distance. Otherwise: the original
+// battery-friendly 5 m filter.
+const TRIP_GPS_CONFIG = { distanceFilter: 0, locationUpdateInterval: 1000, fastestLocationUpdateInterval: 1000 };
+const IDLE_GPS_CONFIG = { distanceFilter: 5, locationUpdateInterval: 3000, fastestLocationUpdateInterval: 1000 };
+
+function applyGpsRate(tracking: boolean) {
+  BackgroundGeolocation.setConfig({ geolocation: tracking ? TRIP_GPS_CONFIG : IDLE_GPS_CONFIG })
+    .then(() => logDiagnostic('GPS sampling set.', { mode: tracking ? 'trip: every 1s' : 'idle: 5 m filter' }))
+    .catch((err: unknown) => logDiagnostic('Failed to set GPS sampling.', {
+      tracking, message: err instanceof Error ? err.message : String(err),
+    }));
+}
 // How long after a candidate is captured an accurate fix may still replace
 // an inaccurate one (a few fixes' worth — the car has barely moved).
 const DEPARTURE_CANDIDATE_UPGRADE_WINDOW_MS = 10 * 1000;
@@ -211,6 +227,17 @@ export function useTripAutoDetection() {
   const forcedMovingRef = useRef(false);
 
   useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
+  // Faster GPS while recording — see TRIP_GPS_CONFIG. Skips the very first
+  // run: at mount the plugin isn't ready yet (its ready() applies the base
+  // config, and re-applies the trip rate itself if a trip is in progress).
+  const gpsRateInitializedRef = useRef(false);
+  useEffect(() => {
+    if (!gpsRateInitializedRef.current) {
+      gpsRateInitializedRef.current = true;
+      return;
+    }
+    applyGpsRate(isTracking);
+  }, [isTracking]);
   useEffect(() => { activeTripRef.current = activeTrip; }, [activeTrip]);
   useEffect(() => {
     const previous = previousActiveTripRef.current;
@@ -532,23 +559,27 @@ export function useTripAutoDetection() {
       // For a non-GPS fix, speed is instead estimated from the distance to
       // the previous fix and flagged speedEstimated — usable for "is the car
       // moving", but excluded from anything that measures acceleration.
-      const hasGpsSpeed = coords.speed != null && coords.speed >= 0;
       const heading = coords.heading != null && coords.heading >= 0 ? coords.heading : undefined;
-      let speedMs: number;
-      if (hasGpsSpeed) {
-        speedMs = coords.speed as number;
-      } else {
-        speedMs = 0;
-        const prev = lastPositionRef.current;
-        const dtS = prev ? (timestamp - prev.timestamp) / 1000 : 0;
-        if (prev && dtS > 0 && dtS <= 15) {
-          const meters = haversineMeters(prev, { latitude: coords.latitude, longitude: coords.longitude });
-          // Below combined position uncertainty the "movement" is just
-          // noise between two fixes — no evidence of speed either way.
-          const noiseM = Math.max(10, (coords.accuracy ?? 0) + (prev.accuracy ?? 0));
-          if (meters > noiseM) speedMs = meters / dtS;
-        }
+
+      // Speed implied by the distance from the previous fix, 0 when that
+      // distance is within combined position uncertainty (just noise).
+      let positionSpeedMs = 0;
+      const prev = lastPositionRef.current;
+      const sincePrevS = prev ? (timestamp - prev.timestamp) / 1000 : 0;
+      if (prev && sincePrevS > 0 && sincePrevS <= 15) {
+        const meters = haversineMeters(prev, { latitude: coords.latitude, longitude: coords.longitude });
+        const noiseM = Math.max(10, (coords.accuracy ?? 0) + (prev.accuracy ?? 0));
+        if (meters > noiseM) positionSpeedMs = meters / sincePrevS;
       }
+
+      // The plugin documents a missing speed as -1, but the test phone
+      // reports it as exactly 0 — on a 12-minute drive, 60 fixes read 0 m/s
+      // while the position moved 3-20 m/s. So "no GPS speed" is -1, or 0
+      // while the car is plainly moving; a 0 with the car in place is a
+      // real stop and stays a GPS speed.
+      const reportedSpeed = coords.speed != null && coords.speed >= 0 ? coords.speed : null;
+      const hasGpsSpeed = reportedSpeed !== null && !(reportedSpeed === 0 && positionSpeedMs > 3);
+      const speedMs = hasGpsSpeed ? (reportedSpeed as number) : positionSpeedMs;
 
       // See lastFixIdentityRef — drop repeat deliveries of the same fix.
       // Keyed on timestamp+coords rather than the SDK's uuid: the stored
@@ -1079,9 +1110,8 @@ export function useTripAutoDetection() {
       reset: true,
       geolocation: {
         desiredAccuracy: BackgroundGeolocation.DesiredAccuracy.High,
-        distanceFilter: 5,        // update every 5 metres, matches prior config
-        locationUpdateInterval: 3000,
-        fastestLocationUpdateInterval: 1000,
+        // Idle sampling; switched to TRIP_GPS_CONFIG while a trip records.
+        ...IDLE_GPS_CONFIG,
         // Deliberately not using stopOnStationary/disableStopDetection — the
         // SDK's own motion-detection already reduces polling while parked;
         // our own SPEED_STOP_MS/STILL_MS state machine above still needs
@@ -1119,6 +1149,9 @@ export function useTripAutoDetection() {
       // how to tell "auto-detection never started at all" apart from
       // "started but a specific gate blocked it."
       logDiagnostic('Mounted, BackgroundGeolocation ready.', { alreadyEnabled: state.enabled });
+      // ready() just applied the idle config; a trip already in progress
+      // (app reopened mid-drive) needs the trip rate back.
+      if (isTrackingRef.current) applyGpsRate(true);
       if (!state.enabled) {
         BackgroundGeolocation.start().then(() => forceGpsOnForCar('ready')).catch(() => {});
       } else {

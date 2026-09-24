@@ -25,22 +25,29 @@ import {
 //
 // Acceleration = change in GPS (Doppler) speed between consecutive fixes.
 //
-// Only fixes whose speed came from GPS count. Android reports speed -1 for a
-// fix that came from Wi-Fi/cell positioning rather than GPS — 20-30% of
-// fixes on real drives — and the app used to record those as 0 m/s. A car
-// at 28 mph then "stopped" and "restarted" every few seconds, which is what
-// generated 94 of the week's 110 recorded harsh events. Such fixes arrive
-// flagged speedEstimated (see useTripAutoDetection) and are skipped here.
+// 20-30% of fixes on real drives come from Wi-Fi/cell positioning and carry
+// no speed. The plugin documents that as -1, but the test phone reports it
+// as exactly 0 (60 of one 12-minute trip's fixes read 0 m/s while the car
+// moved 3-20 m/s by position). Either way, a car at 38 mph appears to stop
+// and restart every few seconds, and those fake stops produced every harsh
+// braking/acceleration event on drives the driver describes as having none.
+// Three layers keep them out:
+//  1. useTripAutoDetection flags a fix speedEstimated when its speed is -1,
+//     or 0 while the position shows the car moving; those are skipped here.
+//  2. Each speed change must agree with the distance actually travelled
+//     (the average of the two speeds vs. distance/time) — see
+//     positionsConsistent.
+//  3. A fake reading is always exactly 0 between two moving readings, so a
+//     brake that ENDS at a standstill counts only once the next reading
+//     confirms the car stayed stopped, and an acceleration that STARTS at a
+//     standstill only if the reading before it was stopped too.
 //
-// Replayed over the same week with those fixes excluded: 110 events -> 6,
-// all genuine full-throttle accelerations (e.g. 23->45 mph in 2s); the two
-// drives reported as "extremely careful" went from 4 events to 0.
-//
-// Trade-off, stated plainly: fixes arrive roughly every 3 seconds, so this
-// measures the speed change averaged over that interval. A brake that is
-// both short (under ~2s) and only just over threshold can average out below
-// it; sustained harsh braking or acceleration is caught.
+// Replayed over the test vehicle's week (81 trips): 162 recorded
+// braking/acceleration events -> 1; the drive reported with zero events
+// went from 25 to 0.
 export const LONGITUDINAL_MIN_DT_S = 1;
+// At or below this, the car is treated as stopped.
+export const STOPPED_SPEED_MS = 1;
 // Longer gaps (typically around skipped non-GPS fixes) average too much to
 // judge a short event fairly — skipped rather than guessed at.
 export const LONGITUDINAL_MAX_DT_S = 5;
@@ -54,6 +61,10 @@ export interface SpeedFix {
   speedMs: number;
   // true = no GPS speed on this fix; speedMs was estimated from position.
   speedEstimated?: boolean;
+  // Position, when known — enables the distance consistency check.
+  latitude?: number;
+  longitude?: number;
+  accuracyM?: number;
 }
 
 export interface LongitudinalEventResult {
@@ -62,41 +73,108 @@ export interface LongitudinalEventResult {
   valueMs2: number;
 }
 
+const EARTH_RADIUS_M = 6371000;
+function distanceMeters(a: SpeedFix, b: SpeedFix): number {
+  const r = Math.PI / 180;
+  const dLat = ((b.latitude as number) - (a.latitude as number)) * r;
+  const dLon = ((b.longitude as number) - (a.longitude as number)) * r;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos((a.latitude as number) * r) * Math.cos((b.latitude as number) * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Whether two fixes' reported speeds agree with the distance between them:
+ * the car's average speed over the interval should be close to the mean of
+ * its two speed readings. Tolerance is 3 m/s plus both fixes' position
+ * uncertainty spread over the interval. True when positions are unknown.
+ */
+export function positionsConsistent(a: SpeedFix, b: SpeedFix): boolean {
+  if (a.latitude == null || a.longitude == null || b.latitude == null || b.longitude == null) return true;
+  const dtS = (b.timestampMs - a.timestampMs) / 1000;
+  if (dtS <= 0) return true;
+  const travelledAvg = distanceMeters(a, b) / dtS;
+  const reportedAvg = (a.speedMs + b.speedMs) / 2;
+  const toleranceMs = 3 + ((a.accuracyM ?? 5) + (b.accuracyM ?? 5)) / dtS;
+  return Math.abs(travelledAvg - reportedAvg) <= toleranceMs;
+}
+
 /**
  * Stateful per-trip braking/acceleration detector. Feed it every fix in
  * order; `update` returns an event once per harsh episode (a long hard
- * acceleration spanning several fixes is one event, not several).
+ * acceleration spanning several fixes is one event, not several). A brake
+ * that ends at a standstill is returned on the following fix, once that
+ * fix confirms the stop.
  */
 export function createLongitudinalDetector() {
   let anchor: SpeedFix | null = null;
+  // The GPS fix before the anchor — tells whether a 0 anchor was a real stop.
+  let beforeAnchor: SpeedFix | null = null;
   let activeType: LongitudinalEventResult['type'] | null = null;
+  let pendingStopBrake: LongitudinalEventResult | null = null;
+
+  function restartAt(fix: SpeedFix) {
+    beforeAnchor = null;
+    anchor = fix;
+    activeType = null;
+  }
 
   return {
     update(fix: SpeedFix): LongitudinalEventResult | null {
       if (fix.speedEstimated) return null;
+
+      // A brake that ended at 0 is real only if the car is still stopped now.
+      let confirmed: LongitudinalEventResult | null = null;
+      if (pendingStopBrake) {
+        if (fix.speedMs <= STOPPED_SPEED_MS) confirmed = pendingStopBrake;
+        pendingStopBrake = null;
+      }
+
       if (!anchor) {
         anchor = fix;
-        return null;
+        return confirmed;
       }
 
       const dtS = (fix.timestampMs - anchor.timestampMs) / 1000;
       if (dtS > LONGITUDINAL_MAX_DT_S) {
-        anchor = fix;
-        activeType = null;
-        return null;
+        restartAt(fix);
+        return confirmed;
       }
-      if (dtS < LONGITUDINAL_MIN_DT_S) return null; // keep the older anchor
+      if (dtS < LONGITUDINAL_MIN_DT_S) return confirmed; // keep the older anchor
 
       const accelMs2 = (fix.speedMs - anchor.speedMs) / dtS;
-      if (Math.abs(accelMs2) > PLAUSIBLE_MAX_ACCEL_MS2) return null; // glitch fix: drop it
+      if (Math.abs(accelMs2) > PLAUSIBLE_MAX_ACCEL_MS2) return confirmed; // glitch fix: drop it
+      if (!positionsConsistent(anchor, fix)) {
+        // One of the two speeds is wrong; which one isn't knowable, so
+        // judge nothing across this pair and start over from the new fix.
+        restartAt(fix);
+        return confirmed;
+      }
+
+      const from = anchor;
+      const fromPrevious = beforeAnchor;
+      beforeAnchor = anchor;
       anchor = fix;
 
-      const type = accelMs2 <= HARSH_BRAKE_THRESHOLD ? 'harsh_brake'
+      let type: LongitudinalEventResult['type'] | null = accelMs2 <= HARSH_BRAKE_THRESHOLD ? 'harsh_brake'
         : accelMs2 >= HARSH_ACCEL_THRESHOLD ? 'harsh_accel'
           : null;
+      // Pulling away from 0 counts only if the car was stopped before that 0.
+      if (type === 'harsh_accel' && from.speedMs <= STOPPED_SPEED_MS
+        && !(fromPrevious && fromPrevious.speedMs <= STOPPED_SPEED_MS)) {
+        type = null;
+      }
+
       const fired = type !== null && type !== activeType;
       activeType = type;
-      return fired ? { type, valueMs2: accelMs2 } : null;
+      if (!fired || !type) return confirmed;
+
+      const event: LongitudinalEventResult = { type, valueMs2: accelMs2 };
+      if (type === 'harsh_brake' && fix.speedMs <= STOPPED_SPEED_MS) {
+        pendingStopBrake = event;
+        return confirmed;
+      }
+      return event;
     },
   };
 }
