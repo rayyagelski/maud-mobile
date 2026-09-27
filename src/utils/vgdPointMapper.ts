@@ -1,7 +1,7 @@
 import type { GpsPoint, TelematicsEvent, TripType } from '../types/trip.types';
 import type { Driver } from '../types/driver.types';
 import type { VgdDriverRole, VgdPoint, VgdTripPurpose } from '../types/vgd.types';
-import { haversineDistanceKm, MIN_GPS_SEGMENT_KM } from './helpers';
+import { haversineDistanceKm, isReliableForDistance, MIN_GPS_SEGMENT_KM } from './helpers';
 import { MS2_PER_G } from './constants';
 
 // VGD's driver field is a fixed 3-slot family enum (main/spouse/child) —
@@ -34,6 +34,9 @@ export function toVgdTimeSeconds(epochMs: number): number {
 export interface GpsPointMappingResult {
   vgdPoints: VgdPoint[];
   endingCumulativeDistanceKm: number;
+  // The last position distance was measured from — pass it back in as
+  // previousPoint for the next batch (never an unreliable position).
+  endingAnchor?: GpsPoint;
 }
 
 // Converts a slice of not-yet-sent GPS fixes into VGD points, carrying
@@ -50,15 +53,20 @@ export function mapGpsPointsToVgdPoints(
   let anchor = previousPoint;
 
   const vgdPoints: VgdPoint[] = points.map((point) => {
-    if (anchor) {
-      const segmentKm = haversineDistanceKm(anchor, point);
-      if (segmentKm >= MIN_GPS_SEGMENT_KM) {
-        cumulativeKm += segmentKm;
+    // An unreliable position (see isReliableForDistance) still becomes a
+    // VGD point, carrying the cumulative distance so far — it just doesn't
+    // move the distance anchor.
+    if (isReliableForDistance(point)) {
+      if (anchor) {
+        const segmentKm = haversineDistanceKm(anchor, point);
+        if (segmentKm >= MIN_GPS_SEGMENT_KM) {
+          cumulativeKm += segmentKm;
+          anchor = point;
+        }
+        // else: within GPS noise floor — anchor stays put, no distance added.
+      } else {
         anchor = point;
       }
-      // else: within GPS noise floor — anchor stays put, no distance added.
-    } else {
-      anchor = point;
     }
 
     return {
@@ -72,7 +80,7 @@ export function mapGpsPointsToVgdPoints(
     };
   });
 
-  return { vgdPoints, endingCumulativeDistanceKm: cumulativeKm };
+  return { vgdPoints, endingCumulativeDistanceKm: cumulativeKm, endingAnchor: anchor };
 }
 
 const EVENT_TYPE_TO_VGD_PARAMETER: Partial<Record<TelematicsEvent['type'], 'acceleration' | 'cornering'>> = {

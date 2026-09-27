@@ -48,6 +48,33 @@ function point(lat: number, lon: number, timestamp: number, extra: Partial<GpsPo
 }
 
 describe('mapGpsPointsToVgdPoints', () => {
+  it('does not let a Wi-Fi/cell fix far off the road add a detour to the distance', () => {
+    // Straight line north ~111 m per point; the middle fix is a non-GPS
+    // position ~1 km east. Counted, it would add ~2 km of detour.
+    const points = [
+      point(52.520, 13.405, 1700000000000),
+      point(52.521, 13.420, 1700000003000, { speedEstimated: true }),
+      point(52.522, 13.405, 1700000006000),
+    ];
+    const { vgdPoints, endingAnchor } = mapGpsPointsToVgdPoints(points, 0);
+
+    expect(vgdPoints[2].parameters.distance).toBeGreaterThan(200);
+    expect(vgdPoints[2].parameters.distance).toBeLessThan(240);
+    // The unreliable point still produces a VGD point, it just adds nothing.
+    expect(vgdPoints[1].parameters.distance).toBe(0);
+    expect(endingAnchor).toBe(points[2]);
+  });
+
+  it('also ignores a fix with poor reported accuracy for distance', () => {
+    const points = [
+      point(52.520, 13.405, 1700000000000, { accuracy: 5 }),
+      point(52.521, 13.420, 1700000003000, { accuracy: 120 }),
+      point(52.522, 13.405, 1700000006000, { accuracy: 5 }),
+    ];
+    const { vgdPoints } = mapGpsPointsToVgdPoints(points, 0);
+    expect(vgdPoints[2].parameters.distance).toBeLessThan(240);
+  });
+
   it('maps GPS fields and carries speed/direction through as VGD parameters', () => {
     const points = [point(52.52, 13.405, 1700000000000, { speed: 10, heading: 90 })];
     const { vgdPoints } = mapGpsPointsToVgdPoints(points, 0);

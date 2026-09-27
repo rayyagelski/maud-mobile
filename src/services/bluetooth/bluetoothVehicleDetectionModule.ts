@@ -14,6 +14,7 @@ interface BluetoothVehicleDetectionNativeModule {
   startScreenStateUpdates(): void;
   isScreenInteractive(): Promise<boolean>;
   getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
+  startNetworkStatusUpdates(): void;
 }
 
 const nativeModule = NativeModules.BluetoothVehicleDetection as
@@ -115,6 +116,19 @@ export async function getBackgroundRestrictions(): Promise<BackgroundRestriction
   } catch {
     return unknown;
   }
+}
+
+// 'blocked' / 'allowed' = Android blocking or restoring THIS app's network
+// access; 'available' / 'lost' = the phone's connection itself. Android 10+.
+export type NetworkStatus = 'blocked' | 'allowed' | 'available' | 'lost';
+
+export function subscribeNetworkStatus(listener: (status: NetworkStatus) => void): () => void {
+  if (!emitter || !nativeModule?.startNetworkStatusUpdates) return () => {};
+  const subscription = emitter.addListener('onNetworkStatusChanged', (event: { status: NetworkStatus }) =>
+    listener(event.status),
+  );
+  nativeModule.startNetworkStatusUpdates();
+  return () => subscription.remove();
 }
 
 export function subscribeScreenInteractive(listener: (interactive: boolean) => void): () => void {

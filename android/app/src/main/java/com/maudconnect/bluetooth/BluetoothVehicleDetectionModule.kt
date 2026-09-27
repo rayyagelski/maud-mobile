@@ -117,6 +117,43 @@ class BluetoothVehicleDetectionModule(reactContext: ReactApplicationContext) :
   //    being off ("enabled" = this app IS restricted on mobile data).
   //  - backgroundRestricted: ActivityManager.isBackgroundRestricted() — the
   //    Android 9+ "Restricted" battery setting for this app.
+  // Whether Android is currently blocking THIS app's network access, as
+  // reported by the system itself (onBlockedStatusChanged, Android 10+).
+  // Real drives show requests hanging whenever the screen is off and all
+  // completing when the app is reopened; this tells apart "Android is
+  // blocking the app" (fixed in settings) from "something inside the app is
+  // holding the requests" (settings wouldn't help). Diagnostic only.
+  private var networkCallbackRegistered = false
+
+  @ReactMethod
+  fun startNetworkStatusUpdates() {
+    if (networkCallbackRegistered || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+    try {
+      val cm = reactApplicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+      cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onBlockedStatusChanged(network: android.net.Network, blocked: Boolean) {
+          emitNetworkStatus(if (blocked) "blocked" else "allowed")
+        }
+        override fun onAvailable(network: android.net.Network) {
+          emitNetworkStatus("available")
+        }
+        override fun onLost(network: android.net.Network) {
+          emitNetworkStatus("lost")
+        }
+      })
+      networkCallbackRegistered = true
+    } catch (e: Exception) {
+      // Diagnostic only — never fail the app over it.
+    }
+  }
+
+  private fun emitNetworkStatus(status: String) {
+    val params = Arguments.createMap().apply { putString("status", status) }
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("onNetworkStatusChanged", params)
+  }
+
   @ReactMethod
   fun getBackgroundRestrictions(promise: Promise) {
     val result = Arguments.createMap()

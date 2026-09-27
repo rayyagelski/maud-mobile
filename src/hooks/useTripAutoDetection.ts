@@ -176,6 +176,9 @@ export function useTripAutoDetection() {
   // never through this hook) is covered too — that manual path is exactly
   // the one the false start was reported on.
   const lastTripEndPointRef = useRef<GpsPoint | null>(null);
+  // Whether the paired car's Bluetooth connected again after the last trip
+  // ended (engine restarted) — lifts the parking-radius hold below.
+  const btReconnectedSinceTripEndRef = useRef(false);
   // Own copy of the previous render's activeTrip. activeTripRef is updated
   // by its own effect and may already hold the post-end value (null) by the
   // time the transition effect below runs, so it can't be read for the
@@ -244,6 +247,7 @@ export function useTripAutoDetection() {
     if (previous && !isTracking) {
       const last = previous.route[previous.route.length - 1];
       if (last) lastTripEndPointRef.current = last;
+      btReconnectedSinceTripEndRef.current = false;
       departureCandidateRef.current = null;
       // The one place every kind of trip end passes through — manual Stop
       // from the banner/Route Planner, stillness, BT disconnect, stale
@@ -333,6 +337,7 @@ export function useTripAutoDetection() {
     });
     const unsubConnect = subscribeBluetoothDeviceConnected((name) => {
       connectedBluetoothDeviceRef.current = name;
+      if (!isTrackingRef.current && lastTripEndPointRef.current) btReconnectedSinceTripEndRef.current = true;
       logDiagnostic('Bluetooth device connected.', { name });
       forceGpsOnForCar('bt-connected');
     });
@@ -898,8 +903,16 @@ export function useTripAutoDetection() {
             // launch has nothing to anchor to). Holds rather than resets,
             // same as the checks above: the moment the car is genuinely
             // driving away this clears on its own.
+            //
+            // Not applied when the car's Bluetooth reconnected after that
+            // trip ended: the engine was switched off and on again, so this
+            // is a new drive, not GPS drift. Real drive: a quick stop, then
+            // 43 s of manoeuvring at 12-19 km/h inside the 75 m radius (a
+            // parking lot) before recording started. The drift case this
+            // guard exists for — a trip stopped by hand while the phone
+            // stayed connected — never has a reconnect in between.
             const lastEnd = lastTripEndPointRef.current;
-            if (lastEnd) {
+            if (lastEnd && !btReconnectedSinceTripEndRef.current) {
               const metersFromLastTripEnd = haversineMeters(lastEnd, gpsPoint);
               if (metersFromLastTripEnd < MIN_DISTANCE_FROM_LAST_TRIP_END_M) {
                 if (Date.now() - movingSinceRef.current >= MOVING_CONFIRM_MS) {

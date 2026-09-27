@@ -10,6 +10,7 @@ import { vehiclesApi } from '../api/endpoints/vehicles';
 import { vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from '../api/endpoints/vgd';
 import { applySyncedTripReward, markVgdTripCreated } from '../store/slices/tripSlice';
 import { updateVehicleOdometer } from '../store/slices/vehicleSlice';
+import { applyTripToOdometer } from './odometerSync';
 import { dequeueSyncItem, syncStarted, syncFinished } from '../store/slices/syncQueueSlice';
 import type { RootState } from '../store';
 
@@ -54,14 +55,21 @@ export const flushSyncQueue = createAsyncThunk<
             // just a resend of the exact bytes.
             await vgdApi.patchTripPoints(item.vgdTripId, item.points);
           } else {
-            // odometer_update — the read-modify-write happens here, now that
-            // connectivity is actually back, rather than trusting a value
-            // computed while offline (see tripSlice.ts's
-            // updateOdometerAfterTrip for why only distanceKm is stored).
-            const res = await vehiclesApi.getOdometer(item.vehicleId);
-            const newOdometer = res.data.odometer + item.distanceKm;
-            await vehiclesApi.updateOdometer(item.vehicleId, newOdometer);
-            dispatch(updateVehicleOdometer({ vehicleId: item.vehicleId, odometer: newOdometer }));
+            // odometer_update — applied now that connectivity is back.
+            // With a tripId it's the exactly-once per-trip increment (see
+            // odometerSync.ts); an item queued by an older build has none,
+            // and keeps the old read-add-write.
+            let newOdometer: number | null;
+            if (item.tripId) {
+              newOdometer = await applyTripToOdometer(item.vehicleId, item.tripId, item.distanceKm);
+            } else {
+              const res = await vehiclesApi.getOdometer(item.vehicleId);
+              newOdometer = res.data.odometer + item.distanceKm;
+              await vehiclesApi.updateOdometer(item.vehicleId, newOdometer);
+            }
+            if (newOdometer != null) {
+              dispatch(updateVehicleOdometer({ vehicleId: item.vehicleId, odometer: newOdometer }));
+            }
           }
           dispatch(dequeueSyncItem(item.id));
         } catch (err: unknown) {

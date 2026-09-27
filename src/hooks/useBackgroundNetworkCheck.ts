@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundGeolocation from 'react-native-background-geolocation';
-import { getBackgroundRestrictions } from '../services/bluetooth/bluetoothVehicleDetectionModule';
+import { getBackgroundRestrictions, subscribeNetworkStatus } from '../services/bluetooth/bluetoothVehicleDetectionModule';
 import { logDiagnostic } from '../services/diagnosticsLog';
 
 // After "Not now", don't ask again for this long — the restriction is a
@@ -37,6 +37,25 @@ const DISMISSED_AT_KEY = 'backgroundNetworkPromptDismissedAt';
  * the earlier removal of those after they crashed on some devices.
  */
 export function useBackgroundNetworkCheck(): void {
+  // Logs every change in whether Android is letting the app use the
+  // network — see startNetworkStatusUpdates in the native module. The
+  // moments it turns "blocked" (and back) are what tie stalled speed-zone
+  // requests to the OS rather than to the app.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    let last: string | null = null;
+    return subscribeNetworkStatus((status) => {
+      if (status === last) return;
+      last = status;
+      logDiagnostic('Network status (Android).', {
+        status,
+        meaning: status === 'blocked' ? 'Android is blocking MAUD Connect\'s internet access'
+          : status === 'allowed' ? 'Android allows MAUD Connect\'s internet access again'
+            : status === 'lost' ? 'phone has no connection' : 'phone connected',
+      });
+    });
+  }, []);
+
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     let cancelled = false;

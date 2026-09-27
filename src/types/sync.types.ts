@@ -46,6 +46,9 @@ interface OdometerUpdateSyncItem {
   kind: 'odometer_update';
   createdAt: number;
   vehicleId: string;
+  // The trip this distance belongs to — makes the retry exactly-once (see
+  // odometerSync.ts). Absent on items queued by an older build.
+  tripId?: string;
   distanceKm: number;
 }
 

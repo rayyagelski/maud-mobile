@@ -10,5 +10,6 @@ RCT_EXTERN_METHOD(getBondedDevices:(RCTPromiseResolveBlock)resolve rejecter:(RCT
 RCT_EXTERN_METHOD(startScreenStateUpdates)
 RCT_EXTERN_METHOD(isScreenInteractive:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(getBackgroundRestrictions:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(startNetworkStatusUpdates)
 
 @end

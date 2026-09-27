@@ -74,6 +74,10 @@ class BluetoothVehicleDetection: RCTEventEmitter {
 
   // Android-only concept (Data Saver / restricted background) — iOS has no
   // equivalent per-app switch exposed to the app. Interface parity only.
+  // Android-only diagnostic; no equivalent per-app block status on iOS.
+  @objc(startNetworkStatusUpdates)
+  func startNetworkStatusUpdates() {}
+
   @objc(getBackgroundRestrictions:rejecter:)
   func getBackgroundRestrictions(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
     resolve(["dataSaver": "unknown", "backgroundRestricted": NSNull()])

@@ -51,8 +51,16 @@ export const vehiclesApi = {
   getOdometer: (vehicleId: string) =>
     client.get<OdometerResponse>(`/vehicles/${vehicleId}/odometer`),
 
+  // For a driver entering the car's actual reading.
   updateOdometer: (vehicleId: string, odometer: number) =>
     client.post(`/vehicles/${vehicleId}/odometer`, { odometer }),
+
+  // Adds one finished trip's distance, exactly once per tripId — safe to
+  // retry, and concurrent trips can't overwrite each other.
+  applyOdometerTrip: (vehicleId: string, tripId: string, distanceKm: number) =>
+    client.post<{ applied: boolean; odometer: number | null }>(
+      `/vehicles/${vehicleId}/odometer/trips`, { tripId, distanceKm },
+    ),
 
   getFuelPrice: (vehicleId: string) =>
     client.get<FuelPriceResponse>(`/vehicles/${vehicleId}/fuel-price`),

@@ -1,7 +1,9 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { tripsApi, vehiclesApi, vgdApi, VGD_TRIP_ID_EXISTS_STATUS } from '../../api';
 import type { SubmitTripRewardParams } from '../../api/endpoints/trips';
-import { generateId, generateUuidV4, haversineDistanceKm, MIN_GPS_SEGMENT_KM } from '../../utils/helpers';
+import {
+  generateId, generateUuidV4, haversineDistanceKm, isReliableForDistance, MIN_GPS_SEGMENT_KM,
+} from '../../utils/helpers';
 import { getHarshEventCounters } from '../../services/harshEventCounters';
 import {
   FUEL_BASELINE_MULTIPLIER,
@@ -15,6 +17,7 @@ import {
   EV_SEVERE_TEMP_HIGH_C,
 } from '../../utils/constants';
 import { enqueueSyncItem } from './syncQueueSlice';
+import { applyTripToOdometer } from '../../services/odometerSync';
 import { updateVehicleOdometer } from './vehicleSlice';
 import { isRainingAt, getTemperatureAt } from '../../services/weather/weatherClient';
 import {
@@ -169,12 +172,12 @@ export const submitVgdCreateTrip = createAsyncThunk(
 // endTrip, never blocks trip completion.
 export const updateOdometerAfterTrip = createAsyncThunk(
   'trips/updateOdometerAfterTrip',
-  async (args: { vehicleId: string; distanceKm: number }, { dispatch }) => {
+  async (args: { vehicleId: string; tripId: string; distanceKm: number }, { dispatch }) => {
     try {
-      const res = await vehiclesApi.getOdometer(args.vehicleId);
-      const newOdometer = res.data.odometer + args.distanceKm;
-      await vehiclesApi.updateOdometer(args.vehicleId, newOdometer);
-      dispatch(updateVehicleOdometer({ vehicleId: args.vehicleId, odometer: newOdometer }));
+      const newOdometer = await applyTripToOdometer(args.vehicleId, args.tripId, args.distanceKm);
+      if (newOdometer != null) {
+        dispatch(updateVehicleOdometer({ vehicleId: args.vehicleId, odometer: newOdometer }));
+      }
     } catch (err: unknown) {
       // Previously silently dropped on ANY failure ("best-effort") — for a
       // genuine offline failure this permanently lost the odometer update
@@ -188,7 +191,9 @@ export const updateOdometerAfterTrip = createAsyncThunk(
       // (see flushSyncQueue in syncEngine.ts), not now while offline.
       const status = (err as { status?: number } | undefined)?.status;
       if (status === undefined) {
-        dispatch(enqueueSyncItem({ kind: 'odometer_update', vehicleId: args.vehicleId, distanceKm: args.distanceKm }));
+        dispatch(enqueueSyncItem({
+          kind: 'odometer_update', vehicleId: args.vehicleId, tripId: args.tripId, distanceKm: args.distanceKm,
+        }));
       }
     }
   },
@@ -225,7 +230,7 @@ export const flushVgdPoints = createAsyncThunk(
     const newRoutePoints = trip.route.slice(trip.vgdSentRouteCount ?? 0);
     const newEvents = trip.events.slice(trip.vgdSentEventCount ?? 0);
 
-    const { vgdPoints: gpsVgdPoints, endingCumulativeDistanceKm } = mapGpsPointsToVgdPoints(
+    const { vgdPoints: gpsVgdPoints, endingCumulativeDistanceKm, endingAnchor } = mapGpsPointsToVgdPoints(
       newRoutePoints,
       trip.vgdCumulativeDistanceKm ?? 0,
       trip.vgdLastSentPoint,
@@ -255,7 +260,7 @@ export const flushVgdPoints = createAsyncThunk(
       sentRouteCount: trip.route.length,
       sentEventCount: trip.events.length,
       cumulativeDistanceKm: endingCumulativeDistanceKm,
-      lastSentPoint: newRoutePoints[newRoutePoints.length - 1] ?? trip.vgdLastSentPoint,
+      lastSentPoint: endingAnchor ?? trip.vgdLastSentPoint,
     };
 
     try {
@@ -444,10 +449,12 @@ export const endTrip = createAsyncThunk(
     // which drifted this trip's odometer contribution upward every time.
     // The anchor only advances once a fix is far enough away to represent
     // real movement, so jitter around one spot never accumulates.
+    // Only fixes with a trustworthy position count (see isReliableForDistance).
+    const distancePoints = trip.route.filter(isReliableForDistance);
     let distanceKm = 0;
-    let anchor = trip.route[0];
-    for (let i = 1; i < trip.route.length; i += 1) {
-      const point = trip.route[i];
+    let anchor = distancePoints[0];
+    for (let i = 1; i < distancePoints.length; i += 1) {
+      const point = distancePoints[i];
       const segmentKm = haversineDistanceKm(anchor, point);
       if (segmentKm >= MIN_GPS_SEGMENT_KM) {
         distanceKm += segmentKm;
@@ -489,7 +496,7 @@ export const endTrip = createAsyncThunk(
     // Final VGD flush and odometer update — both independent of trip_reward
     // above, dispatched (not awaited) so neither delays trip completion.
     dispatch(flushVgdPoints({ tripId, isTripEnd: true, endTime }));
-    dispatch(updateOdometerAfterTrip({ vehicleId: trip.vehicleId, distanceKm }));
+    dispatch(updateOdometerAfterTrip({ vehicleId: trip.vehicleId, tripId: trip.id, distanceKm }));
 
     try {
       const reward = await tripsApi.submitTripReward(rewardParams);

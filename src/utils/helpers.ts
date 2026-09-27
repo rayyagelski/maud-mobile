@@ -22,6 +22,18 @@ export function isTokenExpired(token: string): boolean {
 // segment below this floor is treated as noise rather than real movement.
 export const MIN_GPS_SEGMENT_KM = 0.005; // 5 metres
 
+// Whether a fix's position is good enough to count toward distance driven.
+// Fixes from Wi-Fi/cell positioning (speedEstimated) can sit 50-100 m off
+// the road; each one adds a detour to the measured path. On real drives
+// sampled every 3-6 s, 20-30% of fixes were like that and trips measured
+// 10-25% long (+10.9 mi over 13 trips vs. the car's speed-integrated
+// distance), which is what pushed the app's odometer above the car's.
+const MAX_DISTANCE_FIX_ACCURACY_M = 30;
+export function isReliableForDistance(point: { speedEstimated?: boolean; accuracy?: number }): boolean {
+  if (point.speedEstimated) return false;
+  return point.accuracy == null || point.accuracy <= MAX_DISTANCE_FIX_ACCURACY_M;
+}
+
 export function haversineDistanceKm(a: GpsPoint, b: GpsPoint): number {
   const R = 6371;
   const dLat = toRad(b.latitude - a.latitude);
