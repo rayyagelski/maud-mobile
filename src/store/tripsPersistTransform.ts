@@ -11,7 +11,9 @@ import type { Trip, TripState } from '../types/trip.types';
 // fields (helpers.ts), DriverScore/EcoScore/Rewards aggregate off summary*
 // and eventCounters (never off route), and MyTripScreen/TripDetailScreen
 // already fall back to VGD's own trip_start/trip_end events for map pins.
-const FULL_DETAIL_TRIP_COUNT = 10;
+// 3, not 10: with 1-second GPS a 30-minute trip is ~0.3 MB of route alone,
+// so ten full trips were ~3 MB of blob on their own.
+const FULL_DETAIL_TRIP_COUNT = 3;
 
 // Hard ceiling on persisted trip count. Older trips aren't lost — they live
 // in trip_reward/VGD server-side and come back via useTripHistorySync.

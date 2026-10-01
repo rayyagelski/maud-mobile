@@ -48,6 +48,72 @@ function warnIfOversized(value: string): void {
   });
 }
 
+// Android's AsyncStorage reads a value with one SQLite cursor, and a cursor
+// can't hold a row over ~2 MB (CursorWindow) — getItem on a bigger value
+// fails outright, and redux-persist then starts the app from EMPTY state
+// (trips, paired car, settings and the unsent sync queue all gone) and
+// overwrites the blob. 1-second GPS made route arrays ~3x denser, and a
+// failed upload keeps a second copy of the points in syncQueue, so the blob
+// can now reach that limit within a few drives. Values are therefore stored
+// in chunks well under it: the main key holds CHUNK_MARKER + chunk count,
+// the pieces live under `${key}${CHUNK_KEY_INFIX}${i}`. 500k chars stays
+// under 2 MB even at 3 bytes per char in UTF-8.
+export const CHUNK_CHARS = 500_000;
+export const CHUNK_MARKER = '__maud_chunked__:';
+const CHUNK_KEY_INFIX = '::chunk:';
+
+function chunkKey(key: string, index: number): string {
+  return `${key}${CHUNK_KEY_INFIX}${index}`;
+}
+
+async function removeChunksFrom(key: string, fromIndex: number): Promise<void> {
+  const prefix = `${key}${CHUNK_KEY_INFIX}`;
+  const stale = (await AsyncStorage.getAllKeys())
+    .filter(k => k.startsWith(prefix) && Number(k.slice(prefix.length)) >= fromIndex);
+  if (stale.length > 0) await AsyncStorage.multiRemove(stale);
+}
+
+async function writeValue(key: string, value: string): Promise<void> {
+  if (value.length <= CHUNK_CHARS) {
+    await AsyncStorage.setItem(key, value);
+    await removeChunksFrom(key, 0);
+    return;
+  }
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i * CHUNK_CHARS < value.length; i++) {
+    pairs.push([chunkKey(key, i), value.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS)]);
+  }
+  // multiSet is one SQLite transaction on Android — the marker and every
+  // chunk land together, so a kill mid-write can't leave a marker pointing
+  // at half-written chunks.
+  await AsyncStorage.multiSet([...pairs, [key, `${CHUNK_MARKER}${pairs.length}`]]);
+  await removeChunksFrom(key, pairs.length);
+}
+
+async function readValue(key: string): Promise<string | null> {
+  let head: string | null;
+  try {
+    head = await AsyncStorage.getItem(key);
+  } catch (err) {
+    // An unchunked blob written before this existed and already past the
+    // cursor limit — unreadable. Logged so a "everything reset" report can
+    // be told apart from a logout.
+    logDiagnostic('Persisted state could not be read.', {
+      key, error: (err as Error)?.message ?? String(err),
+    });
+    throw err;
+  }
+  if (head === null || !head.startsWith(CHUNK_MARKER)) return head;
+
+  const count = Number(head.slice(CHUNK_MARKER.length));
+  const rows = await AsyncStorage.multiGet(Array.from({ length: count }, (_, i) => chunkKey(key, i)));
+  if (rows.some(([, chunk]) => chunk === null)) {
+    logDiagnostic('Persisted state chunks missing.', { key, count });
+    return null;
+  }
+  return rows.map(([, chunk]) => chunk).join('');
+}
+
 function flush(): Promise<void> {
   if (pendingKey === null || pendingValue === null) return Promise.resolve();
   const key = pendingKey;
@@ -58,13 +124,20 @@ function flush(): Promise<void> {
   lastWriteAt = Date.now();
   const resolvers = pendingResolvers;
   pendingResolvers = [];
-  return AsyncStorage.setItem(key, value).then(() => {
+  return writeValue(key, value).then(() => {
     resolvers.forEach(resolve => resolve());
   });
 }
 
 export const throttledAsyncStorage = {
   ...AsyncStorage,
+  getItem(key: string): Promise<string | null> {
+    return readValue(key);
+  },
+  async removeItem(key: string): Promise<void> {
+    await AsyncStorage.removeItem(key);
+    await removeChunksFrom(key, 0);
+  },
   setItem(key: string, value: string): Promise<void> {
     const now = Date.now();
     pendingKey = key;

@@ -40,7 +40,7 @@ function state(trips: Trip[], activeTrip: Trip | null = null): TripState {
 
 describe('trimTripsForPersist', () => {
   it('keeps full point-by-point detail for the most recent trips', () => {
-    const trips = Array.from({ length: 5 }, (_, i) => trip({ id: `t${i}` }));
+    const trips = Array.from({ length: 3 }, (_, i) => trip({ id: `t${i}` }));
 
     const trimmed = trimTripsForPersist(state(trips));
 
@@ -52,9 +52,9 @@ describe('trimTripsForPersist', () => {
 
     const trimmed = trimTripsForPersist(state(trips));
 
-    // trips[] is newest-first (unshift), so the first 10 keep detail.
-    expect(trimmed.trips[9].route).toHaveLength(50);
-    expect(trimmed.trips[10].route).toHaveLength(0);
+    // trips[] is newest-first (unshift), so the first 3 keep detail.
+    expect(trimmed.trips[2].route).toHaveLength(50);
+    expect(trimmed.trips[3].route).toHaveLength(0);
     expect(trimmed.trips[13].route).toHaveLength(0);
   });
 
