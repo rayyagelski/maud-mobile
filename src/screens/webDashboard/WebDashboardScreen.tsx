@@ -13,7 +13,7 @@ import { logDiagnostic } from '../../services/diagnosticsLog';
 // Plain dashboard URL — used when a one-time sign-in link can't be had
 // (offline, or a backend without the endpoint yet). The user then signs in
 // on the web page once; the WebView keeps that session's cookie.
-export const WEB_DASHBOARD_URL = 'https://myautodata.com/dashboard';
+export const WEB_DASHBOARD_URL = 'https://app.myautodata.com/dashboard';
 
 // The WebView only ever shows MAUD's own site. Anything else the dashboard
 // links to (manufacturer pages, maps, mail) opens in the phone's browser, so
