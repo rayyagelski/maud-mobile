@@ -47,10 +47,6 @@ export default function WebViewScreen() {
         originWhitelist={['*']}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
-        onSslError={event => {
-          // Android only: proceed past SSL hostname mismatch for known trusted site
-          event.nativeEvent.handler.proceed();
-        }}
       />
       {loading && (
         <View style={styles.loadingOverlay}>

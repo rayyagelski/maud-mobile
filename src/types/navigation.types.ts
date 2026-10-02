@@ -31,6 +31,7 @@ export type MainStackParamList = {
   VehicleList: undefined;
   AddVehicle: undefined;
   WebView: { url: string; title?: string };
+  WebDashboard: undefined;
   Drivers: undefined;
   AddDriver: undefined;
   Rewards: undefined;

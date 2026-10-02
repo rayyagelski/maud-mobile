@@ -10,6 +10,7 @@ import TurnOnLocationScreen from '../screens/onboarding/TurnOnLocationScreen';
 import VehicleListScreen from '../screens/vehicles/VehicleListScreen';
 import AddVehicleScreen from '../screens/vehicles/AddVehicleScreen';
 import WebViewScreen from '../screens/auth/WebViewScreen';
+import WebDashboardScreen from '../screens/webDashboard/WebDashboardScreen';
 import RewardsScreen from '../screens/rewards/RewardsScreen';
 import RoutePlannerScreen from '../screens/routeplanner/RoutePlannerScreen';
 import TripSummaryScreen from '../screens/trip/TripSummaryScreen';
@@ -61,6 +62,7 @@ export default function MainStackNavigator() {
       <Stack.Screen name="VehicleList" component={VehicleListScreen} options={{ title: 'My Vehicles' }} />
       <Stack.Screen name="AddVehicle" component={AddVehicleScreen} options={{ title: 'Add Vehicle' }} />
       <Stack.Screen name="WebView" component={WebViewScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="WebDashboard" component={WebDashboardScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Rewards" component={RewardsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Expenses" component={ExpensesScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ headerShown: false }} />

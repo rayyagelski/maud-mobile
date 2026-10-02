@@ -325,6 +325,15 @@ export function RestaurantIcon({ color = '#3ABFBF', size = 28 }: { color?: strin
 
 // ── Breakdown screen icons ────────────────────────────────────────────────
 
+export function GlobeIcon({ color = 'white', size = 28 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.8} />
+      <Path d="M3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 export function UsersIcon({ color = 'white', size = 28 }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
