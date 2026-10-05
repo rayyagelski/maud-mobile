@@ -27,6 +27,11 @@ export function startStallWatchdog(): void {
   if (watchdogStarted) return;
   watchdogStarted = true;
   let last = Date.now();
+  // Any foreground/background switch restarts the measurement: time spent
+  // locked or in another app (when timers don't run) is not a stall. Without
+  // this, the first tick after unlocking reported the whole locked period
+  // (real log: "stalled" 31 min).
+  AppState.addEventListener('change', () => { last = Date.now(); });
   setInterval(() => {
     const now = Date.now();
     const stalledMs = now - last - TICK_MS;

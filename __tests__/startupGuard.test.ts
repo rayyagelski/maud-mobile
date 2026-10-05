@@ -14,7 +14,7 @@ function loadGuard(): typeof import('../src/services/startupGuard') {
 
 async function flushWrites() {
   for (let i = 0; i < 10; i++) await Promise.resolve();
-  await new Promise(r => setImmediate(r));
+  await new Promise<void>(r => setImmediate(r));
 }
 
 describe('startupGuard', () => {
