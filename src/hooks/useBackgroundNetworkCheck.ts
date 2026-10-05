@@ -44,15 +44,37 @@ export function useBackgroundNetworkCheck(): void {
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
     let last: string | null = null;
+    // Doze opens a short network window every ~1.5 min, so blocked/allowed
+    // flip ~80 times an hour in the background — logged one by one they
+    // pushed everything else out of the 100-entry log within ~2 hours. After
+    // the first few, flips are counted and summarized at most every 30 min.
+    const LOG_EACH_FIRST = 4;
+    const SUMMARY_EVERY_MS = 30 * 60 * 1000;
+    let logged = 0;
+    let unloggedFlips = 0;
+    let lastSummaryAt = 0;
     return subscribeNetworkStatus((status) => {
       if (status === last) return;
       last = status;
-      logDiagnostic('Network status (Android).', {
-        status,
-        meaning: status === 'blocked' ? 'Android is blocking MAUD Connect\'s internet access'
-          : status === 'allowed' ? 'Android allows MAUD Connect\'s internet access again'
-            : status === 'lost' ? 'phone has no connection' : 'phone connected',
+      if (logged < LOG_EACH_FIRST) {
+        logged += 1;
+        logDiagnostic('Network status (Android).', {
+          status,
+          meaning: status === 'blocked' ? 'Android is blocking MAUD Connect\'s internet access'
+            : status === 'allowed' ? 'Android allows MAUD Connect\'s internet access again'
+              : status === 'lost' ? 'phone has no connection' : 'phone connected',
+        });
+        return;
+      }
+      unloggedFlips += 1;
+      const now = Date.now();
+      if (now - lastSummaryAt < SUMMARY_EVERY_MS) return;
+      lastSummaryAt = now;
+      logDiagnostic('Network status (Android): still changing.', {
+        changesSinceLastEntry: unloggedFlips,
+        currentStatus: status,
       });
+      unloggedFlips = 0;
     });
   }, []);
 

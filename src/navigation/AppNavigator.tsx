@@ -28,6 +28,8 @@ import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehic
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
 import { refreshToken, setToken } from '../store/slices/authSlice';
+import { checkpoint, markStableWhenResponsive } from '../services/startupGuard';
+import { startStallWatchdog } from '../store/recentActions';
 import { setLocationOnboardingComplete } from '../store/slices/settingsSlice';
 import { loadToken } from '../services/secureTokenStorage';
 import { navigationRef } from './navigationRef';
@@ -119,6 +121,18 @@ export default function AppNavigator() {
     });
     return () => sub.remove();
   }, []);
+
+  // Startup guard (see startupGuard.ts): this component only mounts once
+  // persisted state has loaded; the launch counts as good once the JS thread
+  // then stays responsive for a few seconds.
+  useEffect(() => {
+    checkpoint('ui rendered');
+    startStallWatchdog();
+    markStableWhenResponsive();
+  }, []);
+  useEffect(() => {
+    if (isAuthenticated) checkpoint('signed in');
+  }, [isAuthenticated]);
 
   // The auth token now lives in encrypted storage (not redux-persist) — restore
   // it on cold start. Restored unconditionally, even if expired: the existing
