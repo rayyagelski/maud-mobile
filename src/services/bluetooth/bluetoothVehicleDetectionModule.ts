@@ -15,6 +15,7 @@ interface BluetoothVehicleDetectionNativeModule {
   isScreenInteractive(): Promise<boolean>;
   getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
   startNetworkStatusUpdates(): void;
+  requestIgnoreBatteryOptimizations(): Promise<boolean>;
 }
 
 const nativeModule = NativeModules.BluetoothVehicleDetection as
@@ -115,6 +116,17 @@ export async function getBackgroundRestrictions(): Promise<BackgroundRestriction
     return await nativeModule.getBackgroundRestrictions();
   } catch {
     return unknown;
+  }
+}
+
+// Shows Android's one-tap "always run in background" dialog (Android only).
+// Resolves false when it couldn't be shown — caller falls back to Settings.
+export async function requestIgnoreBatteryOptimizations(): Promise<boolean> {
+  if (!nativeModule?.requestIgnoreBatteryOptimizations) return false;
+  try {
+    return await nativeModule.requestIgnoreBatteryOptimizations();
+  } catch {
+    return false;
   }
 }
 

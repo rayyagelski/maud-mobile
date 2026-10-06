@@ -154,6 +154,39 @@ class BluetoothVehicleDetectionModule(reactContext: ReactApplicationContext) :
       .emit("onNetworkStatusChanged", params)
   }
 
+  // Android's own one-tap "Let app always run in background?" dialog —
+  // grants the battery-optimization exemption directly. The Settings route
+  // (App info > Battery > "Allow background usage") was reported to switch
+  // itself back off on the Moto G 5G (2024). Requires the
+  // REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest permission; resolves false
+  // when the dialog can't be shown, so JS can fall back to Settings.
+  @ReactMethod
+  fun requestIgnoreBatteryOptimizations(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(false)
+        return
+      }
+      val pm = reactApplicationContext.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+      if (pm.isIgnoringBatteryOptimizations(reactApplicationContext.packageName)) {
+        promise.resolve(true)
+        return
+      }
+      val intent = Intent(
+        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        android.net.Uri.parse("package:${reactApplicationContext.packageName}"),
+      ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      if (intent.resolveActivity(reactApplicationContext.packageManager) == null) {
+        promise.resolve(false)
+        return
+      }
+      reactApplicationContext.startActivity(intent)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   @ReactMethod
   fun getBackgroundRestrictions(promise: Promise) {
     val result = Arguments.createMap()

@@ -2,7 +2,9 @@ import { useEffect } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundGeolocation from 'react-native-background-geolocation';
-import { getBackgroundRestrictions, subscribeNetworkStatus } from '../services/bluetooth/bluetoothVehicleDetectionModule';
+import {
+  getBackgroundRestrictions, requestIgnoreBatteryOptimizations, subscribeNetworkStatus,
+} from '../services/bluetooth/bluetoothVehicleDetectionModule';
 import { logDiagnostic } from '../services/diagnosticsLog';
 
 // After "Not now", don't ask again for this long — the restriction is a
@@ -136,11 +138,18 @@ export function useBackgroundNetworkCheck(): void {
             onPress: () => {
               logDiagnostic('Background network prompt: opening settings.', { useBatteryPrompt });
               if (useBatteryPrompt) {
-                // showIgnoreBatteryOptimizations() only builds a request —
-                // show() is what actually opens the screen.
-                BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations()
-                  .then(request => BackgroundGeolocation.deviceSettings.show(request))
-                  .catch(() => { Linking.openSettings().catch(() => {}); });
+                // Android's direct "always run in background?" dialog first —
+                // the Settings toggle route was reported to switch itself back
+                // off. Falls back to the SDK's battery screen if the dialog
+                // can't be shown (showIgnoreBatteryOptimizations() only builds
+                // a request — show() is what actually opens the screen).
+                requestIgnoreBatteryOptimizations().then((shown) => {
+                  logDiagnostic('Battery exemption dialog.', { shown });
+                  if (shown) return;
+                  BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations()
+                    .then(request => BackgroundGeolocation.deviceSettings.show(request))
+                    .catch(() => { Linking.openSettings().catch(() => {}); });
+                });
               } else {
                 Linking.openSettings().catch(() => {});
               }

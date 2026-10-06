@@ -7,6 +7,9 @@
          (SRS-critical: this is the fix for foreground-only tracking losing most of a real drive). -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Direct "always run in background" dialog for trip recording and
+         speed-zone alerts (see requestIgnoreBatteryOptimizations). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Detect the car's Bluetooth hands-free connection to auto-select the
          paired vehicle for a trip (see useBluetoothVehicleDetection). Only

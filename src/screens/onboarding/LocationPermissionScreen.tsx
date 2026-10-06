@@ -16,6 +16,7 @@ import LocationPinIcon from '../../components/common/LocationPinIcon';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { setLocationOnboardingComplete } from '../../store/slices/settingsSlice';
+import { requestIgnoreBatteryOptimizations } from '../../services/bluetooth/bluetoothVehicleDetectionModule';
 
 export default function LocationPermissionScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
@@ -87,10 +88,12 @@ export default function LocationPermissionScreen() {
         );
       });
 
-      // showIgnoreBatteryOptimizations() only BUILDS the request (device
-      // info + whether it was seen before) — show() is what actually opens
-      // the settings screen. Calling only the former (as this used to) meant
-      // this step never opened anything, and the app ran battery-optimized.
+      // Android's direct one-tap dialog first (see
+      // requestIgnoreBatteryOptimizations); the SDK's settings screen only if
+      // that can't be shown. showIgnoreBatteryOptimizations() only BUILDS the
+      // request (device info + whether it was seen before) — show() is what
+      // actually opens the settings screen.
+      if (await requestIgnoreBatteryOptimizations()) return;
       const request = await BackgroundGeolocation.deviceSettings.showIgnoreBatteryOptimizations();
       await BackgroundGeolocation.deviceSettings.show(request);
     } catch {
