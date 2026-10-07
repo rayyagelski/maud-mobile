@@ -111,6 +111,10 @@ export const LIVE_SPEED_ZONE_AHEAD_METERS = 1200;
 // 700m gap to LIVE_SPEED_ZONE_AHEAD_METERS above comfortably covers the
 // ~457m announce window plus real margin for the fetch itself to complete.
 export const LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS = 500;
+// The reference is cut at HERE's first turn (truncateReferenceAtFirstTurn),
+// so it can be much shorter than LIVE_SPEED_ZONE_AHEAD_METERS — refetch this
+// far before its end so the next stretch is known before reaching it.
+export const LIVE_SPEED_ZONE_REFETCH_BEFORE_END_METERS = 150;
 // Floor between HERE requests regardless of distance traveled — bounds API
 // cost if GPS noise or a stop-and-go stretch would otherwise trigger
 // refetches too rapidly. Lowered alongside the distances above — at highway

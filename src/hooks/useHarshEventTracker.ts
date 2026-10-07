@@ -177,7 +177,9 @@ export function useHarshEventTracker(): void {
           );
       } else if (!inUse && usageStartedAt != null) {
         const seconds = Math.round((Date.now() - usageStartedAt) / 1000);
-        if (usageWasViolationEligible) {
+        // Under half a second (rounds to 0) is a screen flicker or app
+        // switch animation, not usage — nothing to count or log.
+        if (usageWasViolationEligible && seconds > 0) {
           addPhoneTextSeconds(seconds);
           // Location-tagged event (map markers) needs its own minimum
           // duration — a real distraction event, not every notification-

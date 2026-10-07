@@ -1,5 +1,5 @@
 import {
-  currentSpanIndex, nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, fillMissingSpeedLimits,
+  currentSpanIndex, nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, fillMissingSpeedLimits, speedLimitLabel, truncateReferenceAtFirstTurn,
   createSpeedZoneAnnouncementMemory, speedingSecondsForFix, speedZoneAnnouncementText,
   SPEED_ZONE_ANNOUNCE_DISTANCE_METERS, SPEED_ZONE_REANNOUNCE_COOLDOWN_MS,
 } from '../src/utils/speedZoneAlertLogic';
@@ -202,5 +202,71 @@ describe('fillMissingSpeedLimits', () => {
     fillMissingSpeedLimits(withGap);
 
     expect(withGap[1].speedLimitMps).toBeNull();
+  });
+});
+
+describe('implausible limits and spoken labels', () => {
+  const mph = (v: number) => v / 2.2369363;
+
+  it('treats parking/driveway limits (5 mph) as unknown and carries the road limit through', () => {
+    const filled = fillMissingSpeedLimits([
+      { distanceFromStartMeters: 0, speedLimitMps: mph(45) },
+      { distanceFromStartMeters: 200, speedLimitMps: 8 / 3.6 }, // HERE's 5 mph tag
+    ]);
+    expect(filled[1].speedLimitMps).toBeCloseTo(mph(45));
+  });
+
+  it('rounds US limits to 5 mph steps (HERE 25 km/h is a 15 mph sign, not "16 mph")', () => {
+    expect(speedLimitLabel(25 / 3.6, true)).toBe('15 mph');
+    expect(speedLimitLabel(56 / 3.6, true)).toBe('35 mph');
+    expect(speedLimitLabel(40 / 3.6, true)).toBe('25 mph');
+    expect(speedLimitLabel(50 / 3.6, false)).toBe('50 km/h');
+  });
+});
+
+describe('truncateReferenceAtFirstTurn', () => {
+  // A straight line north, one point every ~111 m (0.001 deg latitude).
+  const coords = Array.from({ length: 11 }, (_, i) => ({ latitude: 28.5 + i * 0.001, longitude: -81.7 }));
+  const cumulative = coords.map((_, i) => i * 111);
+  const spans = [
+    { distanceFromStartMeters: 0, speedLimitMps: 22 },   // main road
+    { distanceFromStartMeters: 500, speedLimitMps: 11 },  // side street after HERE's turn
+  ];
+
+  it('drops everything past HERE\'s first turn — the side street the driver may never take', () => {
+    const t = truncateReferenceAtFirstTurn(coords, cumulative, spans, [
+      { distanceFromStartMeters: 0, action: 'depart' },
+      { distanceFromStartMeters: 120, action: 'continue' },
+      { distanceFromStartMeters: 450, action: 'turn' },
+      { distanceFromStartMeters: 1100, action: 'arrive' },
+    ]);
+    expect(t.cutAtMeters).toBe(450);
+    expect(t.spans).toEqual([spans[0]]);
+    expect(t.coordinates).toHaveLength(5); // points at 0..444 m
+    expect(t.cumulativeDistances[t.cumulativeDistances.length - 1]).toBe(444);
+  });
+
+  it('keeps the whole reference when HERE stays on the road', () => {
+    const t = truncateReferenceAtFirstTurn(coords, cumulative, spans, [
+      { distanceFromStartMeters: 0, action: 'depart' },
+      { distanceFromStartMeters: 1100, action: 'arrive' },
+    ]);
+    expect(t.cutAtMeters).toBeNull();
+    expect(t.spans).toEqual(spans);
+  });
+
+  it('a fork (keep) or roundabout also ends the trusted stretch', () => {
+    for (const action of ['keep', 'roundaboutEnter', 'exit']) {
+      const t = truncateReferenceAtFirstTurn(coords, cumulative, spans, [
+        { distanceFromStartMeters: 0, action: 'depart' },
+        { distanceFromStartMeters: 300, action },
+      ]);
+      expect(t.cutAtMeters).toBe(300);
+    }
+  });
+
+  it('never cuts on maneuvers without an action type', () => {
+    const t = truncateReferenceAtFirstTurn(coords, cumulative, spans, [{ distanceFromStartMeters: 300 }]);
+    expect(t.cutAtMeters).toBeNull();
   });
 });

@@ -18,16 +18,65 @@ export const SPEED_ZONE_ANNOUNCE_DISTANCE_METERS = 457;
 // the exact point HERE's data happens to run out — the most recent known
 // value is a far better estimate than silence. A gap before the very first
 // known limit is left null; there's nothing earlier to estimate from.
+//
+// Limits below MIN_PLAUSIBLE_SPEED_LIMIT_MPS are treated as unknown too:
+// HERE tags parking aisles, driveways and service roads with 5 mph (8 km/h),
+// and a real drive announced those as zones ahead.
 export function fillMissingSpeedLimits(spans: SpeedLimitSpan[]): SpeedLimitSpan[] {
   let lastKnown: number | null = null;
   return spans.map((span) => {
-    if (span.speedLimitMps != null) {
+    if (span.speedLimitMps != null && span.speedLimitMps >= MIN_PLAUSIBLE_SPEED_LIMIT_MPS) {
       lastKnown = span.speedLimitMps;
       return span;
     }
-    if (lastKnown == null) return span;
     return { ...span, speedLimitMps: lastKnown };
   });
+}
+
+// 16 km/h (10 mph). Anything lower is a parking/driveway tag, not a posted
+// road limit worth a voice alert or a speeding count.
+export const MIN_PLAUSIBLE_SPEED_LIMIT_MPS = 16 / 3.6;
+
+// Spoken/displayed limit. US limits are posted in 5 mph steps, but HERE
+// stores them in km/h — a 15 mph sign came back as 25 km/h and was spoken as
+// "16 mph". Imperial rounds to the nearest 5 mph; metric to the nearest km/h.
+export function speedLimitLabel(speedLimitMps: number, isImperial: boolean): string {
+  if (isImperial) return `${Math.round((speedLimitMps * 2.2369363) / 5) * 5} mph`;
+  return `${Math.round(speedLimitMps * 3.6)} km/h`;
+}
+
+// HERE action types that keep the driver on the road being driven. Anything
+// else (turn, keep at a fork, roundabout, exit, U-turn) is a choice HERE
+// made to reach the synthetic "straight ahead" destination — see
+// truncateReferenceAtFirstTurn.
+const STAY_ON_ROAD_ACTIONS = new Set(['depart', 'continue', 'arrive']);
+
+// The live (no planned route) reference route is HERE's route to a point
+// 1.2 km straight ahead. When the road doesn't run straight, HERE turns onto
+// a side street to get there, and that side street's limits were announced
+// as "zone ahead" up to 457 m before the turn — while the driver, correctly,
+// stayed on the main road (real drive: "approaching 25 mph" four times on
+// 30–50 mph roads, one at 48 mph on a 50 mph highway). Only the stretch up to
+// the first turn is the road actually being driven, so the reference is cut
+// there. Maneuvers without an action type are treated as staying on road
+// (older responses), so this never removes data it can't reason about.
+export function truncateReferenceAtFirstTurn<T extends { distanceFromStartMeters: number }>(
+  coordinates: { latitude: number; longitude: number }[],
+  cumulativeDistances: number[],
+  spans: T[],
+  maneuvers: Array<{ distanceFromStartMeters: number; action?: string }>,
+): { coordinates: { latitude: number; longitude: number }[]; cumulativeDistances: number[]; spans: T[]; cutAtMeters: number | null } {
+  const firstTurn = maneuvers.find(m => m.action != null && !STAY_ON_ROAD_ACTIONS.has(m.action));
+  if (!firstTurn) return { coordinates, cumulativeDistances, spans, cutAtMeters: null };
+  const cut = firstTurn.distanceFromStartMeters;
+  let lastIndex = 0;
+  while (lastIndex + 1 < cumulativeDistances.length && cumulativeDistances[lastIndex + 1] <= cut) lastIndex++;
+  return {
+    coordinates: coordinates.slice(0, lastIndex + 1),
+    cumulativeDistances: cumulativeDistances.slice(0, lastIndex + 1),
+    spans: spans.filter(s => s.distanceFromStartMeters < cut),
+    cutAtMeters: cut,
+  };
 }
 
 export interface SpeedZoneAnnouncement {

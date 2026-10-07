@@ -11,16 +11,17 @@ import {
 import {
   nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, currentSpanIndex, fillMissingSpeedLimits,
   createSpeedZoneAnnouncementMemory, speedingSecondsForFix, speedZoneAnnouncementText,
+  speedLimitLabel, truncateReferenceAtFirstTurn,
   type SpeedZoneComplianceWatch,
 } from '../utils/speedZoneAlertLogic';
 import { fetchSpeedLimitAheadRoute, type LatLng, type SpeedLimitSpan } from '../services/here/hereRoutingClient';
-import { formatSpeed, generateId } from '../utils/helpers';
+import { generateId } from '../utils/helpers';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { addSpeedingSeconds } from '../services/harshEventCounters';
 import {
   LIVE_SPEED_ZONE_AHEAD_METERS, LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
   LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS, LIVE_SPEED_ZONE_FETCH_STALL_MS,
-  LIVE_SPEED_ZONE_MAX_STALL_BACKOFF_MS,
+  LIVE_SPEED_ZONE_MAX_STALL_BACKOFF_MS, LIVE_SPEED_ZONE_REFETCH_BEFORE_END_METERS,
 } from '../utils/constants';
 
 /**
@@ -88,6 +89,9 @@ export function useLiveSpeedZoneAlerts(): void {
     let consecutiveStalls = 0;
     let nextFetchAllowedAt = 0;
     let distanceAlongReference = 0;
+    // Length of the (turn-truncated) reference — refetch before running off
+    // its end, not after (see the 'distance' trigger below).
+    let referenceLengthMeters = 0;
     // Same off-route detection useSpeedZoneAlerts.ts needed — the reference
     // route here is a real HERE-routed path, but only ever toward a
     // synthetic "straight ahead from where we last fetched" destination
@@ -136,18 +140,25 @@ export function useLiveSpeedZoneAlerts(): void {
         consecutiveStalls = 0;
         nextFetchAllowedAt = 0;
         if (route && route.speedLimitSpans.length > 0) {
-          referenceCoords = route.coordinates;
+          // Only the road actually being driven — cut at HERE's first turn
+          // (see truncateReferenceAtFirstTurn).
+          const truncated = truncateReferenceAtFirstTurn(
+            route.coordinates, buildCumulativeRouteDistances(route.coordinates),
+            route.speedLimitSpans, route.maneuvers,
+          );
+          referenceCoords = truncated.coordinates;
+          referenceLengthMeters = truncated.cumulativeDistances[truncated.cumulativeDistances.length - 1] ?? 0;
           // Logged from the RAW spans, before filling — logging the filled
           // result here would silently hide whether HERE actually had any
           // gaps to begin with, which is the one thing this log exists to
           // answer. null in limitsKmh below means HERE genuinely returned no
           // value for that span.
-          const rawNullCount = route.speedLimitSpans.filter(s => s.speedLimitMps == null).length;
+          const rawNullCount = truncated.spans.filter(s => s.speedLimitMps == null).length;
           // See fillMissingSpeedLimits' own doc comment — a gap in HERE's
           // posted-limit data (common on minor/residential roads) is now
           // estimated from the last known value instead of going silent.
-          referenceSpans = fillMissingSpeedLimits(route.speedLimitSpans);
-          cumulativeRouteDistances = buildCumulativeRouteDistances(route.coordinates);
+          referenceSpans = fillMissingSpeedLimits(truncated.spans);
+          cumulativeRouteDistances = truncated.cumulativeDistances;
           lastMatchedIndex = null;
           distanceAlongReference = 0;
           // The fetch origin is (by construction) the driver's current
@@ -166,11 +177,14 @@ export function useLiveSpeedZoneAlerts(): void {
           // through them" from a real-drive report.
           logDiagnostic('Speed-zone reference route fetched.', {
             reason,
-            spans: route.speedLimitSpans.length,
+            spans: truncated.spans.length,
             spansMissingData: rawNullCount,
             limitsKmh: Array.from(new Set(
-              route.speedLimitSpans.map(s => (s.speedLimitMps == null ? null : Math.round(s.speedLimitMps * 3.6))),
+              truncated.spans.map(s => (s.speedLimitMps == null ? null : Math.round(s.speedLimitMps * 3.6))),
             )),
+            // Where HERE's route left the current road (null = it didn't).
+            cutAtFirstTurnMeters: truncated.cutAtMeters == null ? null : Math.round(truncated.cutAtMeters),
+            droppedSpans: route.speedLimitSpans.length - truncated.spans.length,
           });
         } else {
           logDiagnostic('Speed-zone reference route had no speed-limit data — nothing to announce here.', {
@@ -247,7 +261,10 @@ export function useLiveSpeedZoneAlerts(): void {
         ? 'off-route'
         : !referenceSpans
           ? 'initial'
-          : distanceAlongReference >= LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS
+          : distanceAlongReference >= Math.min(
+            LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
+            referenceLengthMeters - LIVE_SPEED_ZONE_REFETCH_BEFORE_END_METERS,
+          )
             ? 'distance'
             : null;
       if (
@@ -277,7 +294,7 @@ export function useLiveSpeedZoneAlerts(): void {
         lastAnnouncedSpanStartMeters = announcement.distanceFromStartMeters;
         lastAnnouncedSpeedLimitMps = announcement.speedLimitMps;
         announced.markAnnounced(announcement.speedLimitMps, timestamp);
-        const limitLabel = formatSpeed(announcement.speedLimitMps * 3.6, isImperialRef.current);
+        const limitLabel = speedLimitLabel(announcement.speedLimitMps, isImperialRef.current);
         logDiagnostic('Speed-zone announcement.', {
           limit: limitLabel,
           approaching: announcement.isApproaching,

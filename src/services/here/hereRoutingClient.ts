@@ -13,6 +13,9 @@ export interface LatLng {
 export interface Maneuver {
   instruction: string;
   distanceFromStartMeters: number;
+  // HERE's machine-readable action type ('depart', 'continue', 'turn',
+  // 'keep', 'roundaboutEnter', 'arrive', …) — undefined if not returned.
+  action?: string;
 }
 
 // A road-attribute segment starting at distanceFromStartMeters and running
@@ -46,6 +49,7 @@ interface HereRoutesResponse {
       polyline: string;
       summary: { length: number; duration: number; typicalDuration?: number };
       actions?: Array<{
+        action?: string;
         instruction: string;
         // Confirmed via a live request (2026-08-03): this is an index into
         // THIS section's own decoded polyline points, not a distance —
@@ -97,6 +101,7 @@ function routeFromSections(sections: HereRoutesResponse['routes'][number]['secti
       maneuvers.push({
         instruction: action.instruction,
         distanceFromStartMeters: distanceSoFarMeters + offsetToDistanceMeters(sectionCoords, action.offset),
+        action: action.action,
       });
     }
 

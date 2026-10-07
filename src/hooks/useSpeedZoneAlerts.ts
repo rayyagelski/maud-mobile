@@ -10,10 +10,10 @@ import {
 } from '../utils/turnByTurnLogic';
 import {
   nextSpeedZoneToAnnounce, advanceSpeedZoneCompliance, fillMissingSpeedLimits,
-  createSpeedZoneAnnouncementMemory, speedingSecondsForFix, speedZoneAnnouncementText,
+  createSpeedZoneAnnouncementMemory, speedingSecondsForFix, speedZoneAnnouncementText, speedLimitLabel,
   type SpeedZoneComplianceWatch,
 } from '../utils/speedZoneAlertLogic';
-import { formatSpeed, generateId } from '../utils/helpers';
+import { generateId } from '../utils/helpers';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { addSpeedingSeconds } from '../services/harshEventCounters';
 
@@ -95,7 +95,7 @@ export function useSpeedZoneAlerts(): void {
       if (announcement) {
         lastAnnouncedSpanStartMeters = announcement.distanceFromStartMeters;
         announced.markAnnounced(announcement.speedLimitMps, timestamp);
-        const limitLabel = formatSpeed(announcement.speedLimitMps * 3.6, isImperialRef.current);
+        const limitLabel = speedLimitLabel(announcement.speedLimitMps, isImperialRef.current);
         logDiagnostic('Speed-zone announcement.', {
           limit: limitLabel, approaching: announcement.isApproaching, speedKmh: Math.round(speedMs * 3.6),
           mutedByComplianceToggle: !alertsEnabledRef.current,
