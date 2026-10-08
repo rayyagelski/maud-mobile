@@ -272,7 +272,11 @@ export default function ExpensesScreen() {
     : (defaultFuelUnitPricePerLiter != null && isImperial
       ? pricePerLiterToPricePerGallon(defaultFuelUnitPricePerLiter, gallonLiters)
       : defaultFuelUnitPricePerLiter);
-  const fuelUnitLabel = isElectric ? 'Price per kWh' : (isImperial ? 'Price per Gallon' : 'Price per Liter');
+  // One label for every vehicle (product decision): drivers know which unit
+  // applies to their own car. Only the label is shared — the value is still
+  // treated as per-kWh for electric vehicles and per-gallon/liter otherwise
+  // (isElectric above), so the calculation doesn't depend on it.
+  const fuelUnitLabel = isImperial ? 'Price per Gallon / kWh' : 'Price per Liter / kWh';
 
   function selectTime(t: string) {
     setSelectedTime(t);
