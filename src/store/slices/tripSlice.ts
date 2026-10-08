@@ -484,7 +484,11 @@ export const endTrip = createAsyncThunk(
 
     const rewardParams: SubmitTripRewardParams = {
       vehicleUuid: trip.vehicleId,
-      externalTripId: trip.id,
+      // The VGD trip id, not the local id: trip-history sync and the
+      // backend's VGD backfill only know a trip by its VGD id, so a score
+      // filed under the local id was scored a second time after every
+      // reinstall (doubling the month's distance and trip count).
+      externalTripId: trip.vgdTripId ?? trip.id,
       tripDate: new Date(trip.startTime).toISOString().slice(0, 10),
       distanceKm,
       durationSeconds,
