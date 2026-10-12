@@ -1133,12 +1133,17 @@ export function useTripAutoDetection() {
       app: {
         stopOnTerminate: false, // keep tracking if the app is swiped away mid-trip
         startOnBoot: true,      // resume tracking after a device reboot
-        // Android-only: lets the plugin invoke index.js's registered
-        // headless task directly when the JS engine has been torn down
-        // while backgrounded, instead of silently dropping events until a
-        // full app restart brings a JS listener back — see index.js and the
-        // queue-drain below for the other half of this.
-        enableHeadless: true,
+        // OFF. With it on, every location/heartbeat event while the app was
+        // closed (all night, heartbeat every 60 s) started the app's whole
+        // React engine in the background, with no screen. Opening the app
+        // next morning attached the screen to that background-started
+        // engine, and it froze at the Welcome screen — every morning, not
+        // fixed by restarting (the tracking service keeps the process alive)
+        // only by reinstalling. The headless task only queued raw fixes for
+        // a short replay on the next open, so nothing real depends on it;
+        // the plugin itself keeps tracking with it off (stopOnTerminate
+        // false), per its own docs.
+        enableHeadless: false,
         // Drives the onHeartbeat-based stillness watchdog above — native
         // scheduler, not a JS timer, so it keeps firing even once Android
         // has throttled the JS thread in the background. 60s is Android's
