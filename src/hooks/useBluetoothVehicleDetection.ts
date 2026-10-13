@@ -32,6 +32,9 @@ async function ensureBluetoothPermission(): Promise<void> {
 }
 
 const PROMPT_TIMEOUT_MS = 15_000;
+// A reconnect of the same car within this window is the same arrival (the
+// car's second Bluetooth link, or a brief dropout), not a new one to announce.
+const REANNOUNCE_AFTER_MS = 2 * 60 * 1000;
 
 export interface BluetoothVehiclePrompt {
   vehicleName: string;
@@ -68,6 +71,7 @@ export function useBluetoothVehicleDetection(): {
   const vehiclesRef = useRef(vehicles);
   const selectedVehicleRef = useRef(selectedVehicle);
   const driverNameRef = useRef('you');
+  const lastAnnouncedRef = useRef<{ deviceName: string; at: number } | null>(null);
 
   useEffect(() => { pairingsRef.current = pairings; }, [pairings]);
   useEffect(() => { vehiclesRef.current = vehicles; }, [vehicles]);
@@ -123,6 +127,16 @@ export function useBluetoothVehicleDetection(): {
 
       const vehicleName = `${vehicle.make} ${vehicle.model}`;
       const driverName = driverNameRef.current;
+
+      // The car connects twice within seconds (calls and audio are separate
+      // Bluetooth links — real log: 8:46:52 and 8:46:56). One announcement
+      // per arrival: the second connect used to cut off the first message.
+      const now = Date.now();
+      if (lastAnnouncedRef.current?.deviceName === deviceName
+        && now - lastAnnouncedRef.current.at < REANNOUNCE_AFTER_MS) {
+        return;
+      }
+      lastAnnouncedRef.current = { deviceName, at: now };
 
       speak(
         justAutoPaired
