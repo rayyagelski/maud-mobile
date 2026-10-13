@@ -12,6 +12,8 @@ jest.mock('react-native-tts', () => ({
   stop: () => { stopped += 1; },
 }));
 
+jest.mock('../src/services/diagnosticsLog', () => ({ logDiagnostic: jest.fn() }));
+
 import { enqueueSpeech } from '../src/hooks/useVoicePlayback';
 
 const emit = (name: string, text: string) => (handlers[name] ?? []).forEach(h => h({ utteranceId: `id:${text}` }));

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Tts from 'react-native-tts';
+import { logDiagnostic } from '../services/diagnosticsLog';
 
 // getInitStatus() only needs to resolve once per app session — cached across
 // hook instances so every screen using voice playback doesn't re-trigger it.
@@ -41,7 +42,15 @@ interface QueuedMessage { text: string; priority: VoicePriority; queuedAt: numbe
 
 // id: the engine's utterance id (resolved by Tts.speak), so finish/cancel
 // events of an utterance we interrupted can't be mistaken for this one's.
-let current: { priority: VoicePriority; text: string; id: string | null } | null = null;
+let current: { priority: VoicePriority; text: string; id: string | null; startedAt: number; waitedMs: number } | null = null;
+
+// Every spoken message gets ONE log line when it ends (how, after how long,
+// how long it waited) so a drive's Diagnostics log shows whether an
+// announcement was actually spoken and finished, not just triggered —
+// without crowding other entries out of the 100-entry log.
+function logText(text: string): string {
+  return text.length > 70 ? `${text.slice(0, 70)}…` : text;
+}
 const queue: QueuedMessage[] = [];
 let watchdog: ReturnType<typeof setTimeout> | null = null;
 let listenersInstalled = false;
@@ -52,13 +61,18 @@ function notifySpeaking(speaking: boolean) {
 }
 
 function play(message: QueuedMessage) {
-  const playing = { priority: message.priority, text: message.text, id: null as string | null };
+  const playing = {
+    priority: message.priority, text: message.text, id: null as string | null,
+    startedAt: Date.now(), waitedMs: Date.now() - message.queuedAt,
+  };
   current = playing;
   if (watchdog) clearTimeout(watchdog);
-  watchdog = setTimeout(onUtteranceDone, estimatedDurationMs(message.text));
+  watchdog = setTimeout(() => onUtteranceDone('no end reported by speech engine'), estimatedDurationMs(message.text));
   Promise.resolve(Tts.speak(message.text) as unknown as Promise<string | number>)
     .then((id) => { if (current === playing) playing.id = String(id); })
-    .catch(() => { if (current === playing) onUtteranceDone(); });
+    .catch((err: unknown) => {
+      if (current === playing) onUtteranceDone('speech engine refused: ' + ((err as Error)?.message ?? String(err)));
+    });
 }
 
 function playNext() {
@@ -71,11 +85,20 @@ function playNext() {
       play(next);
       return;
     }
+    logDiagnostic('Voice message.', {
+      text: logText(next.text), priority: next.priority, how: 'dropped, waited too long', waitedMs: now - next.queuedAt,
+    });
   }
   notifySpeaking(false);
 }
 
-function onUtteranceDone() {
+function onUtteranceDone(how: string) {
+  if (current) {
+    logDiagnostic('Voice message.', {
+      text: logText(current.text), priority: current.priority, how,
+      spokeMs: Date.now() - current.startedAt, waitedMs: current.waitedMs,
+    });
+  }
   if (watchdog) {
     clearTimeout(watchdog);
     watchdog = null;
@@ -93,14 +116,14 @@ function installListeners() {
   // its id is known and differs.
   Tts.addEventListener('tts-finish', (event) => {
     if (current?.id != null && String(event?.utteranceId) !== current.id) return;
-    onUtteranceDone();
+    onUtteranceDone('finished');
   });
   // A cancel only ends the current message when it is provably that one;
   // the cancel of the message we just interrupted arrives after the more
   // urgent one already started. The watchdog covers anything missed.
   Tts.addEventListener('tts-cancel', (event) => {
     if (current?.id == null || String(event?.utteranceId) !== current.id) return;
-    onUtteranceDone();
+    onUtteranceDone('stopped');
   });
 }
 
@@ -121,6 +144,10 @@ export async function enqueueSpeech(text: string, priority: VoicePriority = 'nor
   if (PRIORITY_RANK[priority] > PRIORITY_RANK[current.priority]) {
     // More urgent: interrupt. What was playing is dropped, not resumed —
     // replaying it from the start after an interruption sounds broken.
+    logDiagnostic('Voice message.', {
+      text: logText(current.text), priority: current.priority,
+      how: 'interrupted by: ' + logText(text), spokeMs: Date.now() - current.startedAt, waitedMs: current.waitedMs,
+    });
     try { Tts.stop(); } catch { /* ignore */ }
     play(message);
     return;
