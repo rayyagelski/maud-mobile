@@ -102,6 +102,9 @@ const SUMMARY_TITLES: Record<string, string> = {
   needs_improvement: 'TRIP COMPLETE',
 };
 
+// Trips whose recap was already auto-played this app session.
+const autoPlayedTripIds = new Set<string>();
+
 export default function TripSummaryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const route = useRoute<TripSummaryRouteProp>();
@@ -118,8 +121,13 @@ export default function TripSummaryScreen() {
   // Auto-play the recap once per screen visit when the user has opted in
   // (Settings > Voice > "Auto-play trip summary") — otherwise it stays
   // manual-only via the "Listen" button below, same script either way.
+  // Once per trip, not per visit: coming back to the same trip's summary
+  // played the recap again (real log: twice, 23 s apart). "Listen" still
+  // replays it on request.
   useEffect(() => {
-    if (autoPlayTripSummaryVoice && reward?.voicePayload?.script) {
+    const tripId = route.params.tripId;
+    if (autoPlayTripSummaryVoice && reward?.voicePayload?.script && !autoPlayedTripIds.has(tripId)) {
+      autoPlayedTripIds.add(tripId);
       speak(reward.voicePayload.script);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

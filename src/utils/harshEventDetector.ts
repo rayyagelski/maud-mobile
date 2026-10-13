@@ -45,7 +45,15 @@ import {
 // Replayed over the test vehicle's week (81 trips): 162 recorded
 // braking/acceleration events -> 1; the drive reported with zero events
 // went from 25 to 0.
-export const LONGITUDINAL_MIN_DT_S = 1;
+//
+// Speed change is measured over at least 2 s. With 1-second GPS during trips
+// (since Oct 2) a 1 s window let ONE bad speed reading count as an event:
+// real drive 13 Oct, 14:43:29 -> :30, speed 15.8 -> 29.1 -> 33.6 km/h, i.e. a
+// single +13 km/h jump read as 0.38 g "hard acceleration" with no hard
+// acceleration in the car. Over 2 s that glitch is 0.20-0.25 g. Real harsh
+// braking/acceleration lasts well over 2 s, so it is still caught. (At the
+// old ~3 s fix spacing every window was already this long.)
+export const LONGITUDINAL_MIN_DT_S = 2;
 // At or below this, the car is treated as stopped.
 export const STOPPED_SPEED_MS = 1;
 // Longer gaps (typically around skipped non-GPS fixes) average too much to

@@ -22,6 +22,27 @@ function runLongitudinal(fixes: Array<{ atS: number; mph: number; estimated?: bo
 }
 
 describe('createLongitudinalDetector (GPS speed)', () => {
+  // 1-second GPS (trips since Oct 2): one bad speed reading must not count.
+  const KMH = 1 / 3.6 / MPH; // km/h expressed in this helper's mph unit
+  it('ignores a single GPS speed jump at 1-second fixes (real drive 13 Oct, 14:43)', () => {
+    const kmh = [14.0, 14.5, 15.0, 15.8, 29.1, 33.6, 38.3, 40.6, 40.2, 42.4, 44.6, 45.8, 49.2];
+    expect(runLongitudinal(kmh.map((v, i) => ({ atS: i, mph: v * KMH })))).toEqual([]);
+  });
+
+  it('still flags a real hard acceleration at 1-second fixes', () => {
+    // 0.4 g for 4 s: about 14 km/h gained every second.
+    const kmh = [0, 0, 14, 28, 42, 56, 60];
+    const events = runLongitudinal(kmh.map((v, i) => ({ atS: i, mph: v * KMH })));
+    expect(events.map(e => e.type)).toEqual(['harsh_accel']);
+  });
+
+  it('still flags a real hard stop at 1-second fixes', () => {
+    // 0.55 g: about 19.4 km/h lost every second, to a standstill.
+    const kmh = [60, 60, 40.6, 21.2, 1.8, 0, 0, 0];
+    const events = runLongitudinal(kmh.map((v, i) => ({ atS: i, mph: v * KMH })));
+    expect(events.map(e => e.type)).toEqual(['harsh_brake']);
+  });
+
   it('ignores the fake 0 mph of a non-GPS fix between two moving fixes', () => {
     // Real data (09-23 16:51): 28 mph, "0" (Wi-Fi fix, speed -1), 30 mph,
     // "0", 33 mph — the old code read this as repeated hard braking and
