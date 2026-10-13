@@ -11,73 +11,144 @@ function ensureTtsReady(): Promise<void> {
   return ttsReady;
 }
 
-// Every screen/hook that calls speak() shares the same underlying Tts
-// singleton, but each used to call Tts.stop()+Tts.speak() with no idea
-// whether anything else was already talking — whichever call happened to
-// land last always won. Real-drive symptom this caused: a speed-zone
-// warning or AI-recommendation announcement firing on the same GPS fix a
-// turn-by-turn maneuver ("turn left") was spoken could silently stomp it a
-// fraction of a second later, and the one-time "Trip recording started"
-// confirmation could just as easily be cut off by whatever else happened to
-// speak next. `currentPriority` is module-level (not per-hook-instance
-// state) because it has to be shared across every independent
-// useVoicePlayback() call site to mean anything.
+// One speech queue for the whole app. Every screen/hook shares the same Tts
+// engine, so the rules have to live at module level:
+//  - A MORE urgent message interrupts what is playing.
+//  - An equally or less urgent one WAITS for it to finish, then plays —
+//    unless it has gone stale by then (see MAX_WAIT_MS).
+//
+// Interrupting on equal priority (the previous rule) cut messages off in
+// real use: "Trip recording started" was stopped within a second by the
+// first turn-by-turn instruction, spoken on the very next GPS fix (fixes
+// come every second during a trip), and the Bluetooth "Trip will be
+// recorded under …" message was cut off by the Route Planner's route
+// recommendation.
 export type VoicePriority = 'critical' | 'high' | 'normal';
 const PRIORITY_RANK: Record<VoicePriority, number> = { critical: 2, high: 1, normal: 0 };
-let currentPriority: VoicePriority | null = null;
+
+// How long a message may wait in the queue before it is dropped as no longer
+// relevant: a turn instruction or speed-zone warning played much later would
+// come at the wrong place; information like the Bluetooth message can wait.
+const MAX_WAIT_MS: Record<VoicePriority, number> = { critical: 8000, high: 5000, normal: 20000 };
+
+// If the engine never reports the end of an utterance, the queue must not
+// stall forever: assume it is done after a generous estimate of its length.
+function estimatedDurationMs(text: string): number {
+  return 3000 + text.length * 90;
+}
+
+interface QueuedMessage { text: string; priority: VoicePriority; queuedAt: number }
+
+// id: the engine's utterance id (resolved by Tts.speak), so finish/cancel
+// events of an utterance we interrupted can't be mistaken for this one's.
+let current: { priority: VoicePriority; text: string; id: string | null } | null = null;
+const queue: QueuedMessage[] = [];
+let watchdog: ReturnType<typeof setTimeout> | null = null;
+let listenersInstalled = false;
+const speakingListeners = new Set<(speaking: boolean) => void>();
+
+function notifySpeaking(speaking: boolean) {
+  speakingListeners.forEach(listener => listener(speaking));
+}
+
+function play(message: QueuedMessage) {
+  const playing = { priority: message.priority, text: message.text, id: null as string | null };
+  current = playing;
+  if (watchdog) clearTimeout(watchdog);
+  watchdog = setTimeout(onUtteranceDone, estimatedDurationMs(message.text));
+  Promise.resolve(Tts.speak(message.text) as unknown as Promise<string | number>)
+    .then((id) => { if (current === playing) playing.id = String(id); })
+    .catch(() => { if (current === playing) onUtteranceDone(); });
+}
+
+function playNext() {
+  const now = Date.now();
+  while (queue.length > 0) {
+    // Most urgent first; among equals, oldest first.
+    queue.sort((a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority] || a.queuedAt - b.queuedAt);
+    const next = queue.shift() as QueuedMessage;
+    if (now - next.queuedAt <= MAX_WAIT_MS[next.priority]) {
+      play(next);
+      return;
+    }
+  }
+  notifySpeaking(false);
+}
+
+function onUtteranceDone() {
+  if (watchdog) {
+    clearTimeout(watchdog);
+    watchdog = null;
+  }
+  current = null;
+  playNext();
+}
+
+function installListeners() {
+  if (listenersInstalled) return;
+  listenersInstalled = true;
+  Tts.addEventListener('tts-start', () => notifySpeaking(true));
+  // Interrupted utterances report 'tts-cancel' (Android onStop), never
+  // 'tts-finish', so a finish always belongs to what is playing — unless
+  // its id is known and differs.
+  Tts.addEventListener('tts-finish', (event) => {
+    if (current?.id != null && String(event?.utteranceId) !== current.id) return;
+    onUtteranceDone();
+  });
+  // A cancel only ends the current message when it is provably that one;
+  // the cancel of the message we just interrupted arrives after the more
+  // urgent one already started. The watchdog covers anything missed.
+  Tts.addEventListener('tts-cancel', (event) => {
+    if (current?.id == null || String(event?.utteranceId) !== current.id) return;
+    onUtteranceDone();
+  });
+}
+
+export async function enqueueSpeech(text: string, priority: VoicePriority = 'normal'): Promise<void> {
+  if (!text) return;
+  try {
+    await ensureTtsReady();
+    installListeners();
+  } catch {
+    return; // Fail-soft — see the hook's doc comment.
+  }
+  const message: QueuedMessage = { text, priority, queuedAt: Date.now() };
+
+  if (current == null) {
+    play(message);
+    return;
+  }
+  if (PRIORITY_RANK[priority] > PRIORITY_RANK[current.priority]) {
+    // More urgent: interrupt. What was playing is dropped, not resumed —
+    // replaying it from the start after an interruption sounds broken.
+    try { Tts.stop(); } catch { /* ignore */ }
+    play(message);
+    return;
+  }
+  queue.push(message);
+}
 
 /**
  * Thin wrapper around react-native-tts — used to speak the AI route
  * recommendation (Route Planner), turn-by-turn maneuvers, speed-zone
  * warnings, trip lifecycle announcements, and the trip-end
  * voice_payload.script the backend generates. Fail-soft throughout: a TTS
- * engine/init failure just means nothing plays, never crashes the screen —
- * same convention as every other auxiliary feature in this app (weather, AI
- * tip, reward submission).
+ * engine/init failure just means nothing plays, never crashes the screen.
+ *
+ * Priorities: turn-by-turn and trip start/end announcements pass 'critical',
+ * speed-zone/compliance warnings 'high', everything else 'normal'. See the
+ * queue rules above.
  */
 export function useVoicePlayback() {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   useEffect(() => {
-    const onStart = () => setIsSpeaking(true);
-    const onFinish = () => { setIsSpeaking(false); currentPriority = null; };
-    const onCancel = () => { setIsSpeaking(false); currentPriority = null; };
-
-    Tts.addEventListener('tts-start', onStart);
-    Tts.addEventListener('tts-finish', onFinish);
-    Tts.addEventListener('tts-cancel', onCancel);
-
-    return () => {
-      Tts.removeEventListener('tts-start', onStart);
-      Tts.removeEventListener('tts-finish', onFinish);
-      Tts.removeEventListener('tts-cancel', onCancel);
-    };
+    speakingListeners.add(setIsSpeaking);
+    return () => { speakingListeners.delete(setIsSpeaking); };
   }, []);
 
-  // priority defaults to 'normal' (the old, unprioritized behavior) for
-  // every caller that hasn't been given a reason to ask for more — turn-by-
-  // turn maneuvers and trip start/end announcements pass 'critical',
-  // speed-zone/compliance warnings pass 'high'. A lower-priority call that
-  // arrives while something higher-priority is still likely playing is
-  // dropped outright rather than queued — a speed-zone warning replayed a
-  // few seconds late, after whatever it interrupted finishes, would land at
-  // the wrong moment/distance anyway (same "skip it, don't queue stale
-  // context" reasoning as turnByTurnLogic.ts's off-route muting), so
-  // silently losing that one announcement is the better failure mode.
-  async function speak(text: string, priority: VoicePriority = 'normal') {
-    if (!text) return;
-    if (currentPriority != null && PRIORITY_RANK[priority] < PRIORITY_RANK[currentPriority]) {
-      return;
-    }
-    try {
-      await ensureTtsReady();
-      currentPriority = priority;
-      Tts.stop(); // interrupt any in-progress utterance rather than queueing
-      Tts.speak(text);
-    } catch {
-      currentPriority = null;
-      // Fail-soft — see file doc comment.
-    }
+  function speak(text: string, priority: VoicePriority = 'normal') {
+    return enqueueSpeech(text, priority);
   }
 
   return { speak, isSpeaking };
