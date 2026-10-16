@@ -1,0 +1,213 @@
+diff --git a/node_modules/react-native-encrypted-storage/android/src/main/java/com/emeraldsanto/encryptedstorage/RNEncryptedStorageModule.java b/node_modules/react-native-encrypted-storage/android/src/main/java/com/emeraldsanto/encryptedstorage/RNEncryptedStorageModule.java
+index 68a6c9b..3a59a28 100644
+--- a/node_modules/react-native-encrypted-storage/android/src/main/java/com/emeraldsanto/encryptedstorage/RNEncryptedStorageModule.java
++++ b/node_modules/react-native-encrypted-storage/android/src/main/java/com/emeraldsanto/encryptedstorage/RNEncryptedStorageModule.java
+@@ -10,34 +10,34 @@ import com.facebook.react.bridge.ReactApplicationContext;
+ import com.facebook.react.bridge.ReactContextBaseJavaModule;
+ import com.facebook.react.bridge.ReactMethod;
+ 
++/**
++ * MAUD patch (patch-package): the original created the Keystore-backed
++ * EncryptedSharedPreferences in the constructor — i.e. on whatever thread
++ * first touches the module, the JS thread at app start — and called
++ * getString()/edit() without catching anything. When the app's Keystore
++ * entry becomes unusable (a known Android EncryptedSharedPreferences
++ * failure: the key can no longer decrypt the stored file, or Keystore
++ * calls hang), every launch either threw an unhandled exception or blocked
++ * reading the saved login: the app sat frozen at the Welcome screen on every
++ * start (force stop did not help), and only a reinstall — new key, new
++ * file — recovered it.
++ *
++ * Now: the store is opened lazily inside the methods (they run on the
++ * native-modules thread, never the JS thread), every Keystore operation is
++ * caught, and a store that can't be opened or read is deleted and recreated
++ * once. Worst case the user has to log in again — never a frozen app.
++ */
+ public class RNEncryptedStorageModule extends ReactContextBaseJavaModule {
+ 
+     private static final String NATIVE_MODULE_NAME = "RNEncryptedStorage";
+     private static final String SHARED_PREFERENCES_FILENAME = "RN_ENCRYPTED_STORAGE_SHARED_PREF";
+ 
++    private final ReactApplicationContext context;
+     private SharedPreferences sharedPreferences;
+ 
+     public RNEncryptedStorageModule(ReactApplicationContext context) {
+         super(context);
+-
+-        try {
+-            MasterKey key = new MasterKey.Builder(context)
+-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+-                    .build();
+-
+-            this.sharedPreferences = EncryptedSharedPreferences.create(
+-                context,
+-                RNEncryptedStorageModule.SHARED_PREFERENCES_FILENAME,
+-                key,
+-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+-            );
+-        }
+-
+-        catch (Exception ex) {
+-            Log.e(NATIVE_MODULE_NAME, "Failed to create encrypted shared preferences! Failing back to standard SharedPreferences", ex);
+-            this.sharedPreferences = context.getSharedPreferences(RNEncryptedStorageModule.SHARED_PREFERENCES_FILENAME, Context.MODE_PRIVATE);
+-        }
++        this.context = context;
+     }
+ 
+     @Override
+@@ -45,75 +45,106 @@ public class RNEncryptedStorageModule extends ReactContextBaseJavaModule {
+         return RNEncryptedStorageModule.NATIVE_MODULE_NAME;
+     }
+ 
+-    @ReactMethod
+-    public void setItem(String key, String value, Promise promise) {
+-        if (this.sharedPreferences == null) {
+-            promise.reject(new NullPointerException("Could not initialize SharedPreferences"));
+-            return;
+-        }
++    private SharedPreferences openEncrypted() throws Exception {
++        MasterKey key = new MasterKey.Builder(context)
++                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
++                .build();
++        return EncryptedSharedPreferences.create(
++            context,
++            SHARED_PREFERENCES_FILENAME,
++            key,
++            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
++            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
++        );
++    }
+ 
+-        SharedPreferences.Editor editor = this.sharedPreferences.edit();
+-        editor.putString(key, value);
+-        boolean saved = editor.commit();
++    // Deletes the unreadable encrypted file so a fresh one (with a fresh key
++    // set) can be created. Stored values are lost — the saved login only.
++    private void resetStore() {
++        sharedPreferences = null;
++        try {
++            context.deleteSharedPreferences(SHARED_PREFERENCES_FILENAME);
++        } catch (Exception ex) {
++            Log.e(NATIVE_MODULE_NAME, "Could not delete unreadable encrypted storage", ex);
++        }
++    }
+ 
+-        if (saved) {
+-            promise.resolve(value);
++    private synchronized SharedPreferences prefs() {
++        if (sharedPreferences != null) return sharedPreferences;
++        try {
++            sharedPreferences = openEncrypted();
++        } catch (Exception first) {
++            Log.e(NATIVE_MODULE_NAME, "Encrypted storage unreadable, resetting it", first);
++            resetStore();
++            try {
++                sharedPreferences = openEncrypted();
++            } catch (Exception second) {
++                Log.e(NATIVE_MODULE_NAME, "Encrypted storage still unavailable", second);
++                sharedPreferences = null;
++            }
+         }
++        return sharedPreferences;
++    }
+ 
+-        else {
+-            promise.reject(new Exception(String.format("An error occurred while saving %s", key)));
++    @ReactMethod
++    public void setItem(String key, String value, Promise promise) {
++        try {
++            SharedPreferences p = prefs();
++            if (p == null) {
++                promise.reject("E_STORAGE", "Encrypted storage unavailable");
++                return;
++            }
++            boolean saved = p.edit().putString(key, value).commit();
++            if (saved) promise.resolve(value);
++            else promise.reject("E_STORAGE", String.format("An error occurred while saving %s", key));
++        } catch (Exception ex) {
++            resetStore();
++            promise.reject("E_STORAGE", ex);
+         }
+     }
+ 
+     @ReactMethod
+     public void getItem(String key, Promise promise) {
+-        if (this.sharedPreferences == null) {
+-            promise.reject(new NullPointerException("Could not initialize SharedPreferences"));
+-            return;
++        try {
++            SharedPreferences p = prefs();
++            if (p == null) {
++                promise.resolve(null);
++                return;
++            }
++            promise.resolve(p.getString(key, null));
++        } catch (Exception ex) {
++            // Stored value can't be decrypted: drop the store, report "nothing saved".
++            Log.e(NATIVE_MODULE_NAME, "Could not read " + key + ", resetting encrypted storage", ex);
++            resetStore();
++            promise.resolve(null);
+         }
+-
+-        String value = this.sharedPreferences.getString(key, null);
+-
+-        promise.resolve(value);
+     }
+ 
+     @ReactMethod
+     public void removeItem(String key, Promise promise) {
+-        if (this.sharedPreferences == null) {
+-            promise.reject(new NullPointerException("Could not initialize SharedPreferences"));
+-            return;
+-        }
+-
+-        SharedPreferences.Editor editor = this.sharedPreferences.edit();
+-        editor.remove(key);
+-        boolean saved = editor.commit();
+-
+-        if (saved) {
++        try {
++            SharedPreferences p = prefs();
++            if (p == null) {
++                promise.resolve(key);
++                return;
++            }
++            p.edit().remove(key).commit();
++            promise.resolve(key);
++        } catch (Exception ex) {
++            resetStore();
+             promise.resolve(key);
+-        }
+-
+-        else {
+-            promise.reject(new Exception(String.format("An error occured while removing %s", key)));
+         }
+     }
+ 
+     @ReactMethod
+     public void clear(Promise promise) {
+-        if (this.sharedPreferences == null) {
+-            promise.reject(new NullPointerException("Could not initialize SharedPreferences"));
+-            return;
+-        }
+-
+-        SharedPreferences.Editor editor = this.sharedPreferences.edit();
+-        editor.clear();
+-        boolean saved = editor.commit();
+-
+-        if (saved) {
++        try {
++            SharedPreferences p = prefs();
++            if (p != null) p.edit().clear().commit();
++            promise.resolve(null);
++        } catch (Exception ex) {
++            resetStore();
+             promise.resolve(null);
+-        }
+-
+-        else {
+-            promise.reject(new Exception("An error occured while clearing SharedPreferences"));
+         }
+     }
+ }

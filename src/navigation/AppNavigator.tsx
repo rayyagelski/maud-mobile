@@ -139,7 +139,9 @@ export default function AppNavigator() {
   // request interceptor in api/client.ts already refreshes expired tokens
   // transparently on the next API call, same as before this change.
   useEffect(() => {
+    checkpoint('reading saved login');
     loadToken().then(saved => {
+      checkpoint(saved ? 'saved login read' : 'no saved login');
       if (saved) dispatch(setToken(saved));
     });
   }, [dispatch]);

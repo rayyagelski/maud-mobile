@@ -251,6 +251,16 @@ export default function WelcomeScreen() {
             Already registered? <Text style={styles.signInLink}>Sign in</Text>
           </Text>
         </TouchableOpacity>
+
+        {/* Reachable before login: when the app stalls at this screen, the
+            Diagnostics log is the only way to report why. */}
+        <TouchableOpacity
+          style={styles.diagnosticsRow}
+          onPress={() => navigation.navigate('Diagnostics')}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.diagnosticsText}>Diagnostics</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -387,4 +397,6 @@ const styles = StyleSheet.create({
   signInRow: { marginTop: 16, alignItems: 'center' },
   signInText: { color: '#C7CCD6', fontSize: 14 },
   signInLink: { color: TEAL, fontWeight: '700' },
+  diagnosticsRow: { marginTop: 28, alignItems: 'center', paddingVertical: 8 },
+  diagnosticsText: { color: '#5C6575', fontSize: 12 },
 });

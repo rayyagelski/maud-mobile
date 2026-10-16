@@ -12,6 +12,7 @@ export type AuthStackParamList = {
   VerifyEmail: { email: string; mode: 'reset' | 'signup' };
   CreateNewPassword: { email: string; code: string };
   PasswordResetSuccess: undefined;
+  Diagnostics: undefined;
 };
 
 export type MainTabParamList = {
