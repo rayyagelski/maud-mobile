@@ -19,6 +19,7 @@ import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import { tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
+import { markSummarySpoken, wasSummarySpoken } from '../../services/tripSummaryVoice';
 
 const TEAL = '#3ABFBF';
 
@@ -102,9 +103,6 @@ const SUMMARY_TITLES: Record<string, string> = {
   needs_improvement: 'TRIP COMPLETE',
 };
 
-// Trips whose recap was already auto-played this app session.
-const autoPlayedTripIds = new Set<string>();
-
 export default function TripSummaryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
   const route = useRoute<TripSummaryRouteProp>();
@@ -126,8 +124,8 @@ export default function TripSummaryScreen() {
   // replays it on request.
   useEffect(() => {
     const tripId = route.params.tripId;
-    if (autoPlayTripSummaryVoice && reward?.voicePayload?.script && !autoPlayedTripIds.has(tripId)) {
-      autoPlayedTripIds.add(tripId);
+    if (autoPlayTripSummaryVoice && reward?.voicePayload?.script && !wasSummarySpoken(tripId)) {
+      markSummarySpoken(tripId);
       speak(reward.voicePayload.script);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

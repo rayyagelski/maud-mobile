@@ -11,6 +11,7 @@ import { useAppSelector } from '../hooks/useAppSelector';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useTripAutoDetection } from '../hooks/useTripAutoDetection';
 import { useTripStartAnnouncement } from '../hooks/useTripStartAnnouncement';
+import { useTripResultAnnouncement } from '../hooks/useTripResultAnnouncement';
 import { useDriveFocusReminder } from '../hooks/useDriveFocusReminder';
 import { useHarshEventTracker } from '../hooks/useHarshEventTracker';
 import { useComplianceMonitor } from '../hooks/useComplianceMonitor';
@@ -43,6 +44,7 @@ function TripDetectionRunner() {
   useAutoSelectVehicle();
   useTripAutoDetection();
   useTripStartAnnouncement();
+  useTripResultAnnouncement();
   useDriveFocusReminder();
   useHarshEventTracker();
   useComplianceMonitor();
