@@ -127,6 +127,30 @@ const DEPARTURE_CANDIDATE_TTL_MS = 3 * 60 * 1000; // 3 min
 // trip: every second regardless of distance. Otherwise: the original
 // battery-friendly 5 m filter.
 const TRIP_GPS_CONFIG = { distanceFilter: 0, locationUpdateInterval: 1000, fastestLocationUpdateInterval: 1000 };
+
+// Once per app process: report how many fixes the plugin had stored in its
+// database (the number that tells whether that database was the cause of the
+// morning freeze) and delete them — nothing in the app reads them. Runs
+// after ready(), never in the way of the first screen; failures are only
+// logged.
+let storedLocationsCleared = false;
+function clearStoredLocationsOnce(): void {
+  if (storedLocationsCleared) return;
+  storedLocationsCleared = true;
+  const startedAt = Date.now();
+  BackgroundGeolocation.getCount()
+    .then((count: number) => {
+      if (count === 0) return;
+      return BackgroundGeolocation.destroyLocations().then(() => {
+        logDiagnostic('Location library database cleared.', { storedFixes: count, tookMs: Date.now() - startedAt });
+      });
+    })
+    .catch((err: unknown) => {
+      logDiagnostic('Location library database could not be cleared.', {
+        message: (err as Error)?.message ?? String(err),
+      });
+    });
+}
 const IDLE_GPS_CONFIG = { distanceFilter: 5, locationUpdateInterval: 3000, fastestLocationUpdateInterval: 1000 };
 
 function applyGpsRate(tracking: boolean) {
@@ -1156,7 +1180,19 @@ export function useTripAutoDetection() {
           text: 'Tracking your trip',
         },
       },
+      // Store NO fixes in the plugin's own SQLite database. The app only
+      // uses live onLocation events and never reads that database, but by
+      // default the plugin kept every fix (up to a day, no record limit) —
+      // since trips record one fix per second (early October) that is tens
+      // of thousands of rows a day, maintained by the plugin on its own.
+      // The morning freeze became daily at the same time, survives force
+      // stop and is cured by reinstalling (which wipes this database).
+      persistence: {
+        persistMode: BackgroundGeolocation.PersistMode.None,
+        maxRecordsToPersist: 0,
+      },
     }).then((state) => {
+      clearStoredLocationsOnce();
       if (cancelled) return;
       // Diagnostic only — confirms this whole hook actually mounted and
       // reached BackgroundGeolocation setup at all. This effect only runs
