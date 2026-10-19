@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundGeolocation from 'react-native-background-geolocation';
@@ -6,6 +6,7 @@ import {
   getBackgroundRestrictions, requestIgnoreBatteryOptimizations, subscribeNetworkStatus,
 } from '../services/bluetooth/bluetoothVehicleDetectionModule';
 import { logDiagnostic } from '../services/diagnosticsLog';
+import { useAppSelector } from './useAppSelector';
 
 // After "Not now", don't ask again for this long — the restriction is a
 // real functional problem, so it comes back, but not on every app open.
@@ -39,6 +40,10 @@ const DISMISSED_AT_KEY = 'backgroundNetworkPromptDismissedAt';
  * the earlier removal of those after they crashed on some devices.
  */
 export function useBackgroundNetworkCheck(): void {
+  const isTracking = useAppSelector(s => s.trips.isTracking);
+  const isTrackingRef = useRef(isTracking);
+  useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
+
   // Logs every change in whether Android is letting the app use the
   // network — see startNetworkStatusUpdates in the native module. The
   // moments it turns "blocked" (and back) are what tie stalled speed-zone
@@ -55,9 +60,34 @@ export function useBackgroundNetworkCheck(): void {
     let logged = 0;
     let unloggedFlips = 0;
     let lastSummaryAt = 0;
+    // During a trip, the first block and the first recovery are always
+    // logged (once each per trip), however many flips came before: real
+    // drives lost all internet 5-20 min in until the phone was woken, and
+    // the summary above hid exactly that moment.
+    let tripLoggedBlocked = false;
+    let tripLoggedAllowed = false;
+    let wasTracking = false;
     return subscribeNetworkStatus((status) => {
       if (status === last) return;
       last = status;
+      const tracking = isTrackingRef.current;
+      if (tracking && !wasTracking) {
+        tripLoggedBlocked = false;
+        tripLoggedAllowed = false;
+      }
+      wasTracking = tracking;
+      if (tracking && status === 'blocked' && !tripLoggedBlocked) {
+        tripLoggedBlocked = true;
+        logDiagnostic('Network blocked by Android during a trip.', {
+          meaning: 'Android is blocking MAUD Connect\'s internet access (speed zones and live upload stop)',
+        });
+        return;
+      }
+      if (tracking && status === 'allowed' && tripLoggedBlocked && !tripLoggedAllowed) {
+        tripLoggedAllowed = true;
+        logDiagnostic('Network allowed again during the trip.', {});
+        return;
+      }
       if (logged < LOG_EACH_FIRST) {
         logged += 1;
         logDiagnostic('Network status (Android).', {
