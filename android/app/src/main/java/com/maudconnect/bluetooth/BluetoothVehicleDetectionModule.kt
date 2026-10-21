@@ -147,6 +147,56 @@ class BluetoothVehicleDetectionModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // Keeps the app's JavaScript timers running while the screen is off.
+  // React Native (JavaTimerManager) stops ALL JS timers — setTimeout and
+  // setInterval, even 0 ms ones — as soon as the app's screen is paused,
+  // unless a headless JS task is active. fetch() hands its response to the
+  // app through setTimeout(0), so with the phone locked every HERE/backend
+  // answer arrived but was only delivered once the phone was unlocked (real
+  // drive: 12 stalled speed-zone requests all "answered" the second the
+  // screen came on; trip results likewise). Starting a do-nothing headless
+  // task ("MaudKeepTimersRunning", registered in index.js) for the length of
+  // a trip is RN's own supported way to keep timers running. It does not
+  // start anything new: the app is already running; this only flips the
+  // timer manager's "tasks running" flag until stopJsTimersKeepAlive().
+  private var keepAliveTaskId: Int? = null
+
+  @ReactMethod
+  fun startJsTimersKeepAlive(promise: Promise) {
+    com.facebook.react.bridge.UiThreadUtil.runOnUiThread {
+      try {
+        val ctx = com.facebook.react.jstasks.HeadlessJsTaskContext.getInstance(reactApplicationContext)
+        val running = keepAliveTaskId
+        if (running != null && ctx.isTaskRunning(running)) {
+          promise.resolve(true)
+          return@runOnUiThread
+        }
+        keepAliveTaskId = ctx.startTask(
+          com.facebook.react.jstasks.HeadlessJsTaskConfig(
+            "MaudKeepTimersRunning", Arguments.createMap(), 0, true,
+          ),
+        )
+        promise.resolve(true)
+      } catch (e: Exception) {
+        keepAliveTaskId = null
+        promise.resolve(false)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun stopJsTimersKeepAlive() {
+    com.facebook.react.bridge.UiThreadUtil.runOnUiThread {
+      val id = keepAliveTaskId ?: return@runOnUiThread
+      keepAliveTaskId = null
+      try {
+        com.facebook.react.jstasks.HeadlessJsTaskContext.getInstance(reactApplicationContext).finishTask(id)
+      } catch (e: Exception) {
+        // Nothing to undo — the task bookkeeping is all that exists.
+      }
+    }
+  }
+
   private fun emitNetworkStatus(status: String) {
     val params = Arguments.createMap().apply { putString("status", status) }
     reactApplicationContext

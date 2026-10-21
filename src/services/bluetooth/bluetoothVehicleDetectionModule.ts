@@ -16,6 +16,8 @@ interface BluetoothVehicleDetectionNativeModule {
   getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
   startNetworkStatusUpdates(): void;
   requestIgnoreBatteryOptimizations(): Promise<boolean>;
+  startJsTimersKeepAlive?(): Promise<boolean>;
+  stopJsTimersKeepAlive?(): void;
 }
 
 const nativeModule = NativeModules.BluetoothVehicleDetection as
@@ -128,6 +130,22 @@ export async function requestIgnoreBatteryOptimizations(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Keeps JS timers (and with them fetch() responses) running while the screen
+// is off — see startJsTimersKeepAlive in BluetoothVehicleDetectionModule.kt.
+// Android only; resolves false where unavailable (iOS, module not linked).
+export async function startJsTimersKeepAlive(): Promise<boolean> {
+  if (!nativeModule?.startJsTimersKeepAlive) return false;
+  try {
+    return await nativeModule.startJsTimersKeepAlive();
+  } catch {
+    return false;
+  }
+}
+
+export function stopJsTimersKeepAlive(): void {
+  nativeModule?.stopJsTimersKeepAlive?.();
 }
 
 // 'blocked' / 'allowed' = Android blocking or restoring THIS app's network

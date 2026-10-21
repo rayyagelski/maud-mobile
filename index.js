@@ -30,9 +30,17 @@ ErrorUtils.setGlobalHandler((error, isFatal) => {
   defaultErrorHandler(error, isFatal);
 });
 
-// No Android headless task: enableHeadless is off (see useTripAutoDetection.ts).
-// Starting the app engine in the background for overnight location events
-// left the app frozen at the Welcome screen the next morning.
+// No Android headless task for location events: enableHeadless is off (see
+// useTripAutoDetection.ts). Starting the app engine in the background for
+// overnight location events left the app frozen at the Welcome screen the
+// next morning.
+//
+// The task below is different: Android never starts it and it never starts
+// the app engine. The already-running app starts it itself during a trip
+// (useKeepTimersRunningDuringTrips) purely so React Native keeps running JS
+// timers while the screen is off — see BluetoothVehicleDetectionModule.kt.
+// It does nothing and stays "running" until the app finishes it natively.
+AppRegistry.registerHeadlessTask('MaudKeepTimersRunning', () => () => new Promise(() => {}));
 
 // App is require()'d lazily inside the component provider rather than
 // imported at the top of this file, and that detail is load-bearing.

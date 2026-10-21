@@ -25,6 +25,7 @@ import { useAutoSelectVehicle } from '../hooks/useAutoSelectVehicle';
 import { useTripHistorySync } from '../hooks/useTripHistorySync';
 import { useSyncEngine } from '../services/syncEngine';
 import { useBackgroundNetworkCheck } from '../hooks/useBackgroundNetworkCheck';
+import { useKeepTimersRunningDuringTrips } from '../hooks/useKeepTimersRunningDuringTrips';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
@@ -41,6 +42,7 @@ const Root = createStackNavigator<RootStackParamList>();
 // Null-render component so the hook can call useAppSelector / useAppDispatch
 // while living inside the Redux Provider and NavigationContainer.
 function TripDetectionRunner() {
+  useKeepTimersRunningDuringTrips();
   useAutoSelectVehicle();
   useTripAutoDetection();
   useTripStartAnnouncement();
