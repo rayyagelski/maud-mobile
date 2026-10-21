@@ -64,6 +64,20 @@ export function subscribeDiagnostics(listener: (entries: DiagnosticLogEntry[]) =
   };
 }
 
+export function formatDiagnosticEntry(entry: DiagnosticLogEntry): string {
+  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const data = entry.data ? ` ${JSON.stringify(entry.data)}` : '';
+  return `${time} — ${entry.message}${data}`;
+}
+
+// The whole log as shareable text, oldest first — same format as the
+// Diagnostics screen's Share. Usable before the app's UI is up (the startup
+// recovery prompt), since it only reads this module's own storage key.
+export async function getDiagnosticsReport(): Promise<string> {
+  await ensureLoaded();
+  return entries.map(formatDiagnosticEntry).reverse().join('\n');
+}
+
 export function clearDiagnostics(): void {
   entries = [];
   persist();

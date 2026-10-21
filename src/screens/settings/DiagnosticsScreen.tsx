@@ -3,16 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Share, Alert } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
-import { subscribeDiagnostics, clearDiagnostics, type DiagnosticLogEntry } from '../../services/diagnosticsLog';
+import {
+  subscribeDiagnostics, clearDiagnostics, formatDiagnosticEntry as formatEntry, type DiagnosticLogEntry,
+} from '../../services/diagnosticsLog';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 
 const HIT = { top: 12, bottom: 12, left: 12, right: 12 };
-
-function formatEntry(entry: DiagnosticLogEntry): string {
-  const time = new Date(entry.timestamp).toLocaleTimeString();
-  const data = entry.data ? ` ${JSON.stringify(entry.data)}` : '';
-  return `${time} — ${entry.message}${data}`;
-}
 
 // Standalone/QA debug builds have no Metro or adb access to read
 // console.warn output — this screen surfaces the same trip-auto-start

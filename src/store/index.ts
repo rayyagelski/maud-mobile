@@ -1,8 +1,5 @@
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
-import {
-  persistStore, persistReducer, type PersistConfig,
-  FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER,
-} from 'redux-persist';
+import { persistStore, persistReducer, type PersistConfig } from 'redux-persist';
 import { throttledAsyncStorage } from './throttledAsyncStorage';
 import { tripsPersistTransform } from './tripsPersistTransform';
 import authReducer from './slices/authSlice';
@@ -19,11 +16,11 @@ import bluetoothPairingReducer from './slices/bluetoothPairingSlice';
 import settingsReducer from './slices/settingsSlice';
 import { tokenPersistMiddleware } from './tokenPersistMiddleware';
 import { recentActionsMiddleware } from './recentActions';
-import { Alert } from 'react-native';
+import { Alert, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createTransform, type PersistorOptions } from 'redux-persist';
 import { beginLaunch, checkpoint, resetFailureCount, FAILED_LAUNCHES_BEFORE_RECOVERY } from '../services/startupGuard';
-import { logDiagnostic } from '../services/diagnosticsLog';
+import { getDiagnosticsReport, logDiagnostic } from '../services/diagnosticsLog';
 import { HEADLESS_LOCATION_QUEUE_KEY } from '../utils/constants';
 import type { SyncQueueState } from '../types/sync.types';
 
@@ -81,13 +78,20 @@ const persistConfig: PersistConfig<ReturnType<typeof rootReducer>> = {
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
+// Redux Toolkit's immutability and serializability checks are dev-mode-only
+// bug detectors that walk the ENTIRE state on every dispatch (immutability:
+// twice). Field-test APKs ship a --dev true bundle (yarn debug-apk-standalone),
+// so they ran on the phone too, and their cost grows with every recorded trip:
+// measured ~35x the cost of the dispatch itself at a 0.9 MB state, before
+// dev-mode JS slowness on a phone. Freezes logged right after REHYDRATE and
+// after bursts of sync/reward actions match that. They never change behavior
+// (production builds strip them), so turning them off is safe.
 export const store = configureStore({
   reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: {
-        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
-      },
+      immutableCheck: false,
+      serializableCheck: false,
     }).concat(tokenPersistMiddleware, recentActionsMiddleware),
 });
 
@@ -111,20 +115,50 @@ const unsubscribeBootstrap = persistor.subscribe(() => {
 const RECOVERY_PROMPT_DELAY_MS = 500;
 const RECOVERY_PROMPT_TIMEOUT_MS = 60_000;
 
+// "Send report" shares the Diagnostics log — which by now holds where the
+// stuck launches stopped (startupGuard) — then asks again. It's offered here
+// because this prompt runs before saved data loads, so it still responds
+// even when the launches after it freeze, and a reinstall wipes the log.
 function askToResetLocalData(failedLaunches: number): Promise<boolean> {
   return new Promise((resolve) => {
-    setTimeout(() => resolve(false), RECOVERY_PROMPT_TIMEOUT_MS);
-    setTimeout(() => Alert.alert(
-      'MAUD Connect didn\'t start correctly',
-      `The app got stuck while starting the last ${failedLaunches} times. Resetting its local data usually fixes this `
-        + 'without reinstalling.\n\nYour recorded trips are kept on the server and come back automatically. '
-        + 'You\'ll stay logged in, but you may need to pair your car again.',
-      [
-        { text: 'Try again', style: 'cancel', onPress: () => resolve(false) },
-        { text: 'Reset local data', style: 'destructive', onPress: () => resolve(true) },
-      ],
-      { cancelable: false },
-    ), RECOVERY_PROMPT_DELAY_MS);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const answer = (reset: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(reset);
+    };
+    const ask = () => {
+      if (settled) return;
+      clearTimeout(timeout);
+      // Also runs while the share sheet is open, so a share that never
+      // returns can't hold startup either.
+      timeout = setTimeout(() => answer(false), RECOVERY_PROMPT_TIMEOUT_MS);
+      Alert.alert(
+        'MAUD Connect didn\'t start correctly',
+        `The app got stuck while starting the last ${failedLaunches} times. Resetting its local data usually fixes this `
+          + 'without reinstalling.\n\nYour recorded trips are kept on the server and come back automatically. '
+          + 'You\'ll stay logged in, but you may need to pair your car again.\n\n'
+          + 'Please tap "Send report" first, so we can see why it got stuck.',
+        [
+          {
+            text: 'Send report',
+            onPress: () => {
+              logDiagnostic('Startup recovery: report sent.', { failedLaunches });
+              getDiagnosticsReport()
+                .then(message => Share.share({ message }))
+                .catch(() => {})
+                .finally(ask);
+            },
+          },
+          { text: 'Try again', style: 'cancel', onPress: () => answer(false) },
+          { text: 'Reset local data', style: 'destructive', onPress: () => answer(true) },
+        ],
+        { cancelable: false },
+      );
+    };
+    setTimeout(ask, RECOVERY_PROMPT_DELAY_MS);
   });
 }
 
