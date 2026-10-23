@@ -29,6 +29,22 @@ interface GuardState {
 
 let state: GuardState = { failedInARow: 0, openLaunch: null };
 let writeChain: Promise<unknown> = Promise.resolve();
+let previousLaunchSummary: string | null = null;
+
+// One line saying where the last stuck launch stopped, e.g. "ui rendered,
+// 2.4 s after start (launch 0 s > ... > ui rendered 2.4 s)". Shown in the
+// recovery prompt itself, so a screenshot is enough even when nothing after
+// the prompt works.
+export function summarizeLaunch(launch: LaunchRecord): string {
+  const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const last = launch.checkpoints[launch.checkpoints.length - 1];
+  const steps = launch.checkpoints.map(c => `${c.name} ${secs(c.atMs)}`).join(' > ');
+  return `${last?.name ?? 'launch'}, ${secs(last?.atMs ?? 0)} after start (${steps})`;
+}
+
+export function getPreviousLaunchSummary(): string | null {
+  return previousLaunchSummary;
+}
 
 function save(): void {
   const snapshot = JSON.stringify(state);
@@ -49,6 +65,7 @@ export async function beginLaunch(): Promise<number> {
   let failedInARow = previous.failedInARow;
   if (previous.openLaunch) {
     failedInARow += 1;
+    previousLaunchSummary = summarizeLaunch(previous.openLaunch);
     const last = previous.openLaunch.checkpoints[previous.openLaunch.checkpoints.length - 1];
     logDiagnostic('Previous launch never finished starting.', {
       startedAt: new Date(previous.openLaunch.startedAt).toISOString(),

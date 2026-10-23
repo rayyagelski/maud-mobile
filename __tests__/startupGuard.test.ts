@@ -40,6 +40,26 @@ describe('startupGuard', () => {
     expect(await guard.beginLaunch()).toBe(2);
   });
 
+  it('summarizes where the previous stuck launch stopped, for the recovery prompt', async () => {
+    let guard = loadGuard();
+    await guard.beginLaunch();
+    expect(guard.getPreviousLaunchSummary()).toBeNull();
+    guard.checkpoint('persisted state loaded');
+    await flushWrites();
+
+    guard = loadGuard();
+    await guard.beginLaunch();
+    expect(guard.getPreviousLaunchSummary()).toMatch(/^persisted state loaded, \d+\.\d s after start \(launch 0\.0 s > persisted state loaded \d+\.\d s\)$/);
+  });
+
+  it('summarizeLaunch formats steps in seconds', () => {
+    const guard = loadGuard();
+    expect(guard.summarizeLaunch({
+      startedAt: 0,
+      checkpoints: [{ name: 'launch', atMs: 0 }, { name: 'ui rendered', atMs: 2400 }],
+    })).toBe('ui rendered, 2.4 s after start (launch 0.0 s > ui rendered 2.4 s)');
+  });
+
   it('a responsive launch resets the count', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {

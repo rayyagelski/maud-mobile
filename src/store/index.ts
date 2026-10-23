@@ -19,7 +19,9 @@ import { recentActionsMiddleware } from './recentActions';
 import { Alert, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createTransform, type PersistorOptions } from 'redux-persist';
-import { beginLaunch, checkpoint, resetFailureCount, FAILED_LAUNCHES_BEFORE_RECOVERY } from '../services/startupGuard';
+import {
+  beginLaunch, checkpoint, getPreviousLaunchSummary, resetFailureCount, FAILED_LAUNCHES_BEFORE_RECOVERY,
+} from '../services/startupGuard';
 import { getDiagnosticsReport, logDiagnostic } from '../services/diagnosticsLog';
 import { HEADLESS_LOCATION_QUEUE_KEY } from '../utils/constants';
 import type { SyncQueueState } from '../types/sync.types';
@@ -113,13 +115,23 @@ const unsubscribeBootstrap = persistor.subscribe(() => {
 // runs while the first screen is still being set up), and treated as "Try
 // again" if no answer comes — e.g. the dialog couldn't be shown at all.
 const RECOVERY_PROMPT_DELAY_MS = 500;
-const RECOVERY_PROMPT_TIMEOUT_MS = 60_000;
+// Long enough to read the prompt, take a screenshot and share the report.
+// It was 60 s: a driver still reading it had startup carry on (and freeze)
+// behind the open prompt, after which its buttons no longer responded.
+const RECOVERY_PROMPT_TIMEOUT_MS = 5 * 60_000;
+// Share sends the text through an Android Intent, whose size is limited.
+const MAX_REPORT_CHARS = 60_000;
 
-// "Send report" shares the Diagnostics log — which by now holds where the
-// stuck launches stopped (startupGuard) — then asks again. It's offered here
-// because this prompt runs before saved data loads, so it still responds
-// even when the launches after it freeze, and a reinstall wipes the log.
+// The prompt itself says where the last stuck launch stopped, so a
+// screenshot is enough even if nothing after it works. "Send report" shares
+// the whole Diagnostics log, prepared before the prompt is shown so the tap
+// only has to open the share sheet; then the prompt comes back. A reinstall
+// would wipe that log, which is why it is offered here.
 function askToResetLocalData(failedLaunches: number): Promise<boolean> {
+  const stuckAt = getPreviousLaunchSummary();
+  const reportReady = getDiagnosticsReport()
+    .then(report => report.slice(-MAX_REPORT_CHARS))
+    .catch(() => '');
   return new Promise((resolve) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
@@ -140,14 +152,17 @@ function askToResetLocalData(failedLaunches: number): Promise<boolean> {
         `The app got stuck while starting the last ${failedLaunches} times. Resetting its local data usually fixes this `
           + 'without reinstalling.\n\nYour recorded trips are kept on the server and come back automatically. '
           + 'You\'ll stay logged in, but you may need to pair your car again.\n\n'
-          + 'Please tap "Send report" first, so we can see why it got stuck.',
+          + (stuckAt ? `Last start stopped at: ${stuckAt}\n\n` : '')
+          + 'Please take a screenshot of this message and tap "Send report" before resetting.',
         [
           {
             text: 'Send report',
             onPress: () => {
               logDiagnostic('Startup recovery: report sent.', { failedLaunches });
-              getDiagnosticsReport()
-                .then(message => Share.share({ message }))
+              reportReady
+                .then(report => Share.share({
+                  message: `${stuckAt ? `Last start stopped at: ${stuckAt}\n\n` : ''}${report}`,
+                }))
                 .catch(() => {})
                 .finally(ask);
             },
