@@ -26,6 +26,7 @@ import { useTripHistorySync } from '../hooks/useTripHistorySync';
 import { useSyncEngine } from '../services/syncEngine';
 import { useBackgroundNetworkCheck } from '../hooks/useBackgroundNetworkCheck';
 import { useKeepTimersRunningDuringTrips } from '../hooks/useKeepTimersRunningDuringTrips';
+import { useDriversRefresh } from '../hooks/useDriversRefresh';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
@@ -44,6 +45,7 @@ const Root = createStackNavigator<RootStackParamList>();
 function TripDetectionRunner() {
   useKeepTimersRunningDuringTrips();
   useAutoSelectVehicle();
+  useDriversRefresh();
   useTripAutoDetection();
   useTripStartAnnouncement();
   useTripResultAnnouncement();

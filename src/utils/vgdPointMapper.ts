@@ -3,19 +3,13 @@ import type { Driver } from '../types/driver.types';
 import type { VgdDriverRole, VgdPoint, VgdTripPurpose } from '../types/vgd.types';
 import { haversineDistanceKm, isReliableForDistance, MIN_GPS_SEGMENT_KM } from './helpers';
 import { MS2_PER_G } from './constants';
+import { driverSlot } from './driverRoles';
 
-// VGD's driver field is a fixed 3-slot family enum (main/spouse/child) —
-// coarser than mobile's self/family/other model. 'other' has no true
-// equivalent, so it folds to 'child' as the closest of the two non-primary
-// slots, same lossy-fold precedent as vehicles.ts's ENGINE_TYPE_TO_FUEL_TYPE.
-const DRIVER_ROLE_TO_VGD: Record<Driver['role'], VgdDriverRole> = {
-  self: 'main',
-  family: 'spouse',
-  other: 'child',
-};
-
+// VGD's driver field is a fixed 3-slot enum (main/spouse/child); driver
+// roles now name those slots directly — see driverRoles.ts (which also
+// keeps the legacy 'family' = spouse and 'other' = child).
 export function mapDriverRoleToVgd(role: Driver['role']): VgdDriverRole {
-  return DRIVER_ROLE_TO_VGD[role];
+  return driverSlot(role);
 }
 
 // Mobile only distinguishes business/private/commute; VGD has no "commute" —

@@ -66,6 +66,12 @@ const driverSlice = createSlice({
       .addCase(fetchDrivers.fulfilled, (state, action: PayloadAction<Driver[]>) => {
         state.isLoading = false;
         state.drivers = action.payload;
+        // Keep the selected driver's details (e.g. a role changed on the
+        // server) in step with the fresh list.
+        const fresh = state.selectedDriver
+          ? action.payload.find(d => d.id === state.selectedDriver?.id)
+          : undefined;
+        if (fresh) state.selectedDriver = fresh;
         if (!state.selectedDriver && action.payload.length > 0) {
           state.selectedDriver = action.payload.find(d => d.isDefault) ?? action.payload[0];
         }

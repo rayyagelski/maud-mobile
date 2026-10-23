@@ -8,6 +8,7 @@ import { fetchDrivers, selectDriver, removeDriver } from '../../store/slices/dri
 import Button from '../../components/common/Button';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Driver } from '../../types/driver.types';
+import { driverRoleLabel } from '../../utils/driverRoles';
 
 export default function DriversScreen() {
   const dispatch = useAppDispatch();
@@ -54,7 +55,7 @@ export default function DriversScreen() {
               {item.id === selectedDriver?.id && <Text style={styles.activeBadge}>Selected</Text>}
             </View>
             <Text style={styles.driverSub}>
-              {item.role}{item.isDefault ? ' · Default' : ''}
+              {driverRoleLabel(item.role)}{item.isDefault ? ' · Default' : ''}
             </Text>
           </TouchableOpacity>
         )}

@@ -8,16 +8,27 @@ import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { createDriver } from '../../store/slices/driverSlice';
 import type { Driver } from '../../types/driver.types';
+import { SELECTABLE_DRIVER_ROLES, driverRoleLabel, takenDriverSlots } from '../../utils/driverRoles';
 
-const ROLES: Driver['role'][] = ['self', 'family', 'other'];
+// Backend refusal codes (CreateDriverHandler / DriverController) in words.
+const CREATE_ERRORS: Record<string, string> = {
+  role_taken: 'There is already a driver with this role. Each account has one main driver, one spouse and one child.',
+  driver_limit_reached: 'No more drivers can be added to this account.',
+};
 
 export default function AddDriverScreen() {
   const dispatch = useAppDispatch();
   const navigation = useNavigation();
-  const { isLoading } = useAppSelector(s => s.drivers);
+  const { isLoading, drivers } = useAppSelector(s => s.drivers);
+
+  // One driver per role (VGD has exactly one main, spouse and child slot).
+  const taken = takenDriverSlots(drivers);
+  const freeRoles = SELECTABLE_DRIVER_ROLES.filter(r => !taken.has(r.slot));
 
   const [name, setName] = useState('');
-  const [role, setRole] = useState<Driver['role']>('family');
+  const [role, setRole] = useState<Driver['role'] | null>(
+    (freeRoles.find(r => r.slot !== 'main') ?? freeRoles[0])?.role ?? null,
+  );
   const [isDefault, setIsDefault] = useState(false);
   const [error, setError] = useState('');
 
@@ -26,13 +37,18 @@ export default function AddDriverScreen() {
       setError('Required');
       return;
     }
+    if (!role) {
+      Alert.alert('No role left', CREATE_ERRORS.role_taken);
+      return;
+    }
     setError('');
 
     const result = await dispatch(createDriver({ name: name.trim(), role, isDefault }));
     if (createDriver.fulfilled.match(result)) {
       navigation.goBack();
     } else {
-      Alert.alert('Error', result.payload as string);
+      const code = result.payload as string;
+      Alert.alert('Error', CREATE_ERRORS[code] ?? code);
     }
   }
 
@@ -43,11 +59,21 @@ export default function AddDriverScreen() {
 
         <Text style={styles.groupLabel}>Role</Text>
         <View style={styles.chips}>
-          {ROLES.map(r => (
-            <TouchableOpacity key={r} style={[styles.chip, role === r && styles.chipSelected]} onPress={() => setRole(r)}>
-              <Text style={[styles.chipText, role === r && styles.chipTextSelected]}>{r}</Text>
-            </TouchableOpacity>
-          ))}
+          {SELECTABLE_DRIVER_ROLES.map(({ role: r, slot }) => {
+            const isTaken = taken.has(slot);
+            return (
+              <TouchableOpacity
+                key={r}
+                disabled={isTaken}
+                style={[styles.chip, role === r && styles.chipSelected, isTaken && styles.chipTaken]}
+                onPress={() => setRole(r)}
+              >
+                <Text style={[styles.chipText, role === r && styles.chipTextSelected, isTaken && styles.chipTextTaken]}>
+                  {driverRoleLabel(r)}{isTaken ? ' (taken)' : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <TouchableOpacity style={styles.defaultRow} onPress={() => setIsDefault(v => !v)} activeOpacity={0.7}>
@@ -70,6 +96,8 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: '#E8EFF8', borderColor: '#1E4E8C' },
   chipText: { fontSize: 14, color: '#3A3A3C', textTransform: 'capitalize' },
   chipTextSelected: { color: '#1E4E8C', fontWeight: '600' },
+  chipTaken: { opacity: 0.5 },
+  chipTextTaken: { color: '#8E8E93' },
   defaultRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#C7C7CC', marginRight: 10 },
   checkboxChecked: { backgroundColor: '#1E4E8C', borderColor: '#1E4E8C' },

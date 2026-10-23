@@ -1,7 +1,9 @@
 export interface Driver {
   id: string;
   name: string;
-  role: 'self' | 'family' | 'other';
+  // VGD driver slot: self = main, spouse, child. 'family' (= spouse) and
+  // 'other' (= child) are legacy values on older drivers — see driverRoles.ts.
+  role: 'self' | 'spouse' | 'child' | 'family' | 'other';
   isDefault: boolean;
 }
 
