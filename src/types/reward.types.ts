@@ -1,3 +1,5 @@
+import type { VgdDriverRole } from './vgd.types';
+
 export type RewardStatus = 'none' | 'bronze' | 'silver' | 'gold';
 
 export interface MonthlyRewardSummary {
@@ -25,6 +27,10 @@ export interface MonthlyRewardSummary {
 export interface RewardState {
   currentMonth: MonthlyRewardSummary | null;
   previousMonth: MonthlyRewardSummary | null;
+  // Whose months these are (rewards are per driver; unset = account holder).
+  driverSlot?: VgdDriverRole;
+  // Only the latest request's answer is kept (screens can ask for different drivers).
+  latestRequestId?: string;
   isLoading: boolean;
   error: string | null;
 }

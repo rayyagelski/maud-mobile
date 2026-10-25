@@ -493,6 +493,8 @@ export const endTrip = createAsyncThunk(
       // filed under the local id was scored a second time after every
       // reinstall (doubling the month's distance and trip count).
       externalTripId: trip.vgdTripId ?? trip.id,
+      // Rewards are per driver; the backend confirms the slot from VGD.
+      driverSlot: trip.driverSlot,
       tripDate: new Date(trip.startTime).toISOString().slice(0, 10),
       distanceKm,
       durationSeconds,

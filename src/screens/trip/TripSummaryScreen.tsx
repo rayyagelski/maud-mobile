@@ -17,6 +17,7 @@ import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
+import { tripDriverSlot } from '../../utils/tripDriver';
 import { tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 import { markSummarySpoken, wasSummarySpoken } from '../../services/tripSummaryVoice';
@@ -114,7 +115,10 @@ export default function TripSummaryScreen() {
   const isImperial = useIsImperialUnits();
   const { speak, isSpeaking } = useVoicePlayback();
   const autoPlayTripSummaryVoice = useAppSelector(s => s.settings.autoPlayTripSummaryVoice);
-  const monthlyReward = useAppSelector(s => s.rewards.currentMonth);
+  // The month of whoever drove this trip (rewards are per driver).
+  const drivers = useAppSelector(s => s.drivers.drivers);
+  const tripSlot = trip ? tripDriverSlot(trip, drivers) : 'main';
+  const monthlyReward = useAppSelector(s => (s.rewards.driverSlot === tripSlot ? s.rewards.currentMonth : null));
 
   // Auto-play the recap once per screen visit when the user has opted in
   // (Settings > Voice > "Auto-play trip summary") — otherwise it stays
@@ -134,8 +138,8 @@ export default function TripSummaryScreen() {
   // Needed for the "points away from next reward status" card below —
   // monthly progress isn't part of the trip_reward response itself.
   useEffect(() => {
-    dispatch(fetchRewardOverview());
-  }, [dispatch]);
+    dispatch(fetchRewardOverview(tripSlot));
+  }, [dispatch, tripSlot]);
 
   const distanceKm = trip ? tripDistanceKm(trip) : reward?.distanceKm ?? 0;
   const durationSeconds = trip ? tripDurationSeconds(trip) : 0;

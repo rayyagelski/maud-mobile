@@ -1,11 +1,14 @@
 import client from '../client';
 import type { TripContext, TripEventCounters, TripEnergy, TripRewardResult } from '../../types/trip.types';
+import type { VgdDriverRole } from '../../types/vgd.types';
 
 // Request/response shapes exactly as documented in
 // App\Controller\API\Rewards\TripRewardController (POST /api/v1/trips/reward).
 interface TripRewardRequestDto {
   vehicle_uuid: string;
   external_trip_id: string | null;
+  // Who drove (VGD slot) — rewards are per driver; the backend confirms it from VGD.
+  driver_slot?: VgdDriverRole;
   trip_date: string; // YYYY-MM-DD
   distance_km: number;
   duration_seconds: number;
@@ -57,6 +60,7 @@ interface TripRewardResponseDto {
 export interface SubmitTripRewardParams {
   vehicleUuid: string;
   externalTripId: string;
+  driverSlot?: VgdDriverRole;
   tripDate: string;
   distanceKm: number;
   durationSeconds: number;
@@ -69,6 +73,7 @@ function toRequestDto(params: SubmitTripRewardParams): TripRewardRequestDto {
   return {
     vehicle_uuid: params.vehicleUuid,
     external_trip_id: params.externalTripId,
+    ...(params.driverSlot ? { driver_slot: params.driverSlot } : {}),
     trip_date: params.tripDate,
     distance_km: params.distanceKm,
     duration_seconds: params.durationSeconds,

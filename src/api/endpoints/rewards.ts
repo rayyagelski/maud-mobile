@@ -1,5 +1,6 @@
 import client from '../client';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
+import type { VgdDriverRole } from '../../types/vgd.types';
 
 interface MonthlyRewardDto {
   year_month: string;
@@ -54,9 +55,13 @@ function fromDto(dto: MonthlyRewardDto): MonthlyRewardSummary {
 }
 
 export const rewardsApi = {
-  monthly: async (month?: string) => {
+  // driver = whose rewards (VGD slot); the backend defaults to the account holder.
+  monthly: async (month?: string, driver?: VgdDriverRole) => {
+    const params: Record<string, string> = {};
+    if (month) params.month = month;
+    if (driver) params.driver = driver;
     const res = await client.get<MonthlyRewardDto>('/rewards/monthly', {
-      params: month ? { month } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return fromDto(res.data);
   },

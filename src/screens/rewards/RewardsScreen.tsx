@@ -18,6 +18,8 @@ import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { useCurrencySymbol } from '../../hooks/useCurrencySymbol';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
+import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
+import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import { kmToMiles } from '../../utils/helpers';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 
@@ -254,14 +256,19 @@ function RedeemCard({ Icon, color, value, label, pts }: {
 export default function RewardsScreen() {
   const navigation = useNavigation();
   const dispatch = useAppDispatch();
-  const { currentMonth, previousMonth } = useAppSelector(s => s.rewards);
-  const trips = useAppSelector(s => s.trips.trips);
+  // Rewards are per driver: the viewed driver's (Drivers screen; account
+  // holder by default) months and trips.
+  const { trips, slot } = useViewedDriverTrips();
+  const rewards = useAppSelector(s => s.rewards);
+  const isViewedDriversData = rewards.driverSlot === slot;
+  const currentMonth = isViewedDriversData ? rewards.currentMonth : null;
+  const previousMonth = isViewedDriversData ? rewards.previousMonth : null;
   const currencySymbol = useCurrencySymbol();
   const isImperial = useIsImperialUnits();
 
   useEffect(() => {
-    dispatch(fetchRewardOverview());
-  }, [dispatch]);
+    dispatch(fetchRewardOverview(slot));
+  }, [dispatch, slot]);
 
   const monthlyTripMetrics = useMemo(() => {
     const now = new Date();
@@ -332,6 +339,7 @@ export default function RewardsScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      <ViewedDriverBar />
       <View style={styles.headerSeparator} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
