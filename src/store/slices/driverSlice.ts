@@ -2,6 +2,7 @@ import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/tool
 import { driversApi } from '../../api';
 import { logout } from './authSlice';
 import type { Driver, DriverState } from '../../types/driver.types';
+import type { VgdDriverRole } from '../../types/vgd.types';
 
 const initialState: DriverState = {
   drivers: [],
@@ -56,6 +57,9 @@ const driverSlice = createSlice({
     selectDriver(state, action: PayloadAction<Driver | null>) {
       state.selectedDriver = action.payload;
     },
+    viewDriverSlot(state, action: PayloadAction<VgdDriverRole>) {
+      state.viewedSlot = action.payload;
+    },
     clearDriverError(state) {
       state.error = null;
     },
@@ -96,5 +100,5 @@ const driverSlice = createSlice({
   },
 });
 
-export const { selectDriver, clearDriverError } = driverSlice.actions;
+export const { selectDriver, viewDriverSlot, clearDriverError } = driverSlice.actions;
 export default driverSlice.reducer;

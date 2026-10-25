@@ -72,9 +72,11 @@ export const startTrip = createAsyncThunk(
       // driven to by the following GPS update.
       initialPoint?: GpsPoint;
     },
-    { dispatch },
+    { dispatch, getState },
   ) => {
     const { initialPoint, ...tripParams } = params;
+    const drivers = (getState() as { drivers: { drivers: Driver[] } }).drivers.drivers;
+    const driver = drivers.find(d => d.id === params.driverId);
     // trip_reward (App\Controller\API\Rewards\TripRewardController) is still
     // a single write-once POST submitted at trip-end (§0.1) — unchanged.
     // Vehicle Generated Data is a separate destination that DOES need a
@@ -82,6 +84,8 @@ export const startTrip = createAsyncThunk(
     // itself never blocks on network.
     const trip: Trip = {
       ...tripParams,
+      // Same slot submitVgdCreateTrip sends to VGD for this driver.
+      driverSlot: mapDriverRoleToVgd(driver?.role ?? 'self'),
       id: generateId(),
       startTime: Date.now(),
       status: 'active',

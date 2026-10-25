@@ -4,21 +4,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
-import { fetchDrivers, selectDriver, removeDriver } from '../../store/slices/driverSlice';
+import { fetchDrivers, selectDriver, removeDriver, viewDriverSlot } from '../../store/slices/driverSlice';
+import { effectiveViewedSlot } from '../../utils/tripDriver';
 import Button from '../../components/common/Button';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Driver } from '../../types/driver.types';
-import { driverRoleLabel } from '../../utils/driverRoles';
+import { driverRoleLabel, driverSlot } from '../../utils/driverRoles';
+
+const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export default function DriversScreen() {
   const dispatch = useAppDispatch();
   const navigation = useNavigation<MainStackNavigationProp>();
-  const { drivers, selectedDriver, isLoading } = useAppSelector(s => s.drivers);
+  const { drivers, selectedDriver, isLoading, viewedSlot } = useAppSelector(s => s.drivers);
+  const viewing = effectiveViewedSlot(drivers, viewedSlot);
 
   useEffect(() => {
     dispatch(fetchDrivers());
   }, [dispatch]);
 
+  // Tap = look at this driver's Driver Score, Eco Score and Trip History.
+  function handleView(driver: Driver) {
+    dispatch(viewDriverSlot(driverSlot(driver.role)));
+  }
+
+  // Separate, explicit action: who records the next trip.
   function handleSelect(driver: Driver) {
     dispatch(selectDriver(driver));
   }
@@ -38,27 +48,44 @@ export default function DriversScreen() {
         contentContainerStyle={styles.list}
         refreshing={isLoading}
         onRefresh={() => dispatch(fetchDrivers())}
+        ListHeaderComponent={drivers.length > 1 ? (
+          <Text style={styles.hint}>
+            Tap a driver to see their Driver Score, Eco Score and trips.
+          </Text>
+        ) : null}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>No drivers yet. Add a driver profile.</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.card, item.id === selectedDriver?.id && styles.cardSelected]}
-            onPress={() => handleSelect(item)}
-            onLongPress={() => handleRemove(item)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.cardRow}>
-              <Text style={styles.driverName}>{item.name}</Text>
-              {item.id === selectedDriver?.id && <Text style={styles.activeBadge}>Selected</Text>}
-            </View>
-            <Text style={styles.driverSub}>
-              {driverRoleLabel(item.role)}{item.isDefault ? ' · Default' : ''}
-            </Text>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const isViewed = driverSlot(item.role) === viewing;
+          const isDriving = item.id === selectedDriver?.id;
+          return (
+            <TouchableOpacity
+              style={[styles.card, isViewed && styles.cardSelected]}
+              onPress={() => handleView(item)}
+              onLongPress={() => handleRemove(item)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.cardRow}>
+                <Text style={styles.driverName}>{item.name}</Text>
+                <View style={styles.badges}>
+                  {isViewed && <Text style={styles.viewingBadge}>Viewing</Text>}
+                  {isDriving && <Text style={styles.activeBadge}>Driving</Text>}
+                </View>
+              </View>
+              <Text style={styles.driverSub}>
+                {driverRoleLabel(item.role)}{item.isDefault ? ' · Default' : ''}
+              </Text>
+              {!isDriving && (
+                <TouchableOpacity onPress={() => handleSelect(item)} hitSlop={HIT} style={styles.useButton}>
+                  <Text style={styles.useButtonText}>Use for my trips</Text>
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
+          );
+        }}
         ListFooterComponent={
           <Button
             title="Add New Driver"
@@ -94,5 +121,10 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   driverName: { fontSize: 17, fontWeight: '700', color: '#1C1C1E' },
   activeBadge: { fontSize: 12, color: '#FFFFFF', backgroundColor: '#1E4E8C', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
+  viewingBadge: { fontSize: 12, color: '#1E4E8C', backgroundColor: '#E8EFF8', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, marginRight: 6 },
+  badges: { flexDirection: 'row', alignItems: 'center' },
+  hint: { fontSize: 13, color: '#6D6D72', marginBottom: 12 },
+  useButton: { alignSelf: 'flex-start', marginTop: 10 },
+  useButtonText: { fontSize: 14, fontWeight: '600', color: '#1E4E8C' },
   driverSub: { fontSize: 14, color: '#6D6D72', marginTop: 4, textTransform: 'capitalize' },
 });

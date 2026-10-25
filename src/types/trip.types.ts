@@ -1,4 +1,5 @@
 import type { LatLng, Maneuver, SpeedLimitSpan } from '../services/here/hereRoutingClient';
+import type { VgdDriverRole } from './vgd.types';
 
 export type TripType = 'business' | 'private' | 'commute';
 export type TransportMode = 'car' | 'truck' | 'scooter' | 'cycling' | 'walking';
@@ -117,6 +118,11 @@ export interface Trip {
   id: string;
   vehicleId: string;
   driverId: string;
+  // VGD driver slot the trip belongs to (main/spouse/child). Set when
+  // recording starts and taken from VGD on every history sync (VGD is the
+  // authority, e.g. after a correction). Absent on older trips — see
+  // tripDriverSlot() in utils/tripDriver.ts for how those are resolved.
+  driverSlot?: VgdDriverRole;
   tripType: TripType;
   transportMode: TransportMode;
   status: TripStatus;

@@ -115,7 +115,11 @@ describe('reconcileTripHistory', () => {
     const local = makeLocalTrip({ vgdTripId: 'vgd-trip-1' });
     const result = reconcileTripHistory([local], [makeSummary()], [], VEHICLE_ID, DRIVER_ID);
     expect(result).toHaveLength(1);
-    expect(result[0]).toBe(local); // untouched, not replaced
+    // Not replaced: only VGD's driver slot is filled in; route, events and
+    // every other field stay exactly as recorded.
+    expect(result[0]).toEqual({ ...local, driverSlot: 'main' });
+    expect(result[0].route).toBe(local.route);
+    expect(result[0].events).toBe(local.events);
   });
 
   it('leaves other local trips completely untouched', () => {

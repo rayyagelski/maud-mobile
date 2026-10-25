@@ -1,6 +1,13 @@
 import type { Trip } from '../types/trip.types';
-import type { VgdTripSummary } from '../types/vgd.types';
+import type { VgdDriverRole, VgdTripSummary } from '../types/vgd.types';
 import type { TripRewardHistoryEntry } from '../api/endpoints/trips';
+
+const VGD_DRIVER_SLOTS: VgdDriverRole[] = ['main', 'spouse', 'child'];
+
+// VGD's driver value, if it is one of the three known slots.
+export function vgdDriverSlot(value: unknown): VgdDriverRole | undefined {
+  return VGD_DRIVER_SLOTS.includes(value as VgdDriverRole) ? (value as VgdDriverRole) : undefined;
+}
 
 // Synthesizes a local Trip record from a VGD trip summary — used to backfill
 // trip history the app never recorded itself (reinstall/new device; see
@@ -39,6 +46,9 @@ export function mapVgdSummaryToTrip(
     id: `vgd-${summary.tripId}`,
     vehicleId,
     driverId: fallbackDriverId,
+    // Who actually drove (VGD's main/spouse/child) — what per-driver views
+    // filter on; driverId above stays an approximation.
+    driverSlot: vgdDriverSlot(summary.driver),
     // VgdTripPurpose ('business'|'private') is a strict subset of TripType
     // ('business'|'private'|'commute') — assignable as-is, no mapper needed.
     tripType: summary.purpose,
@@ -88,10 +98,23 @@ export function reconcileTripHistory(
   // same as a first-time restore would — additive-only still holds since
   // this only touches trips with no `reward` yet, never overwrites an
   // already-scored trip or a locally-recorded trip's own route/events.
+  // VGD's driver for each trip it has. It is the authority on who drove: a
+  // trip filed under the wrong slot and corrected in VGD (Alex's trips of
+  // 22 Oct, moved from spouse to child) gets corrected here too.
+  const driverSlotByVgdTripId = new Map(
+    vgdSummaries.map(s => [s.tripId, vgdDriverSlot(s.driver)] as const),
+  );
+
   const localTripsWithRewardsFilledIn = localTrips.map((trip) => {
-    if (trip.reward || !trip.vgdTripId) return trip;
-    const reward = rewardsByExternalTripId.get(trip.vgdTripId);
-    return reward ? { ...trip, reward } : trip;
+    if (!trip.vgdTripId) return trip;
+    let updated = trip;
+    const vgdSlot = driverSlotByVgdTripId.get(trip.vgdTripId);
+    if (vgdSlot && vgdSlot !== trip.driverSlot) updated = { ...updated, driverSlot: vgdSlot };
+    if (!updated.reward) {
+      const reward = rewardsByExternalTripId.get(trip.vgdTripId);
+      if (reward) updated = { ...updated, reward };
+    }
+    return updated;
   });
 
   const restored = vgdSummaries

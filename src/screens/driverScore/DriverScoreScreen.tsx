@@ -11,10 +11,11 @@ import {
   RefreshIcon, MoonIcon, DropletIcon, CalendarIcon,
   ChevronIcon, TrendUpIcon, RouteIcon, FlagIcon, BuildingIcon, HomeIcon,
 } from '../../components/icons';
-import { useAppSelector } from '../../hooks/useAppSelector';
 import { useVgdRoadTypeBreakdown } from '../../hooks/useVgdRoadTypeBreakdown';
 import { useVgdBehaviorAggregate } from '../../hooks/useVgdBehaviorAggregate';
 import { tripDistanceKm, tripDurationSeconds, tripIsNight, tripIsAfterMidnight } from '../../utils/helpers';
+import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
+import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip } from '../../types/trip.types';
 
@@ -214,7 +215,8 @@ function BehaviorRow({
 
 export default function DriverScoreScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
-  const allTrips = useAppSelector(s => s.trips.trips);
+  // The viewed driver's trips only (Drivers screen; account holder by default).
+  const { trips: allTrips } = useViewedDriverTrips();
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -393,6 +395,7 @@ export default function DriverScoreScreen() {
           <View style={styles.headerSpacer} />
         </View>
       </SafeAreaView>
+      <ViewedDriverBar />
       <View style={styles.divider} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>

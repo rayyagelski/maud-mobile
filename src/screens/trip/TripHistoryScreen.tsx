@@ -10,12 +10,13 @@ import {
   ClockIcon, MountainIcon, PinIcon, LeafIcon,
   LightbulbIcon, ChevronIcon, ArrowUpIcon,
 } from '../../components/icons';
-import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdEndAddresses } from '../../hooks/useVgdEndAddresses';
 import {
   formatDuration, formatDistance, formatSpeed, tripDistanceKm, tripDurationSeconds,
 } from '../../utils/helpers';
+import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
+import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { TripType as TripTypeValue } from '../../types/trip.types';
 
@@ -103,7 +104,8 @@ function CostCard({ icon, label, value }: {
 
 export default function TripHistoryScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
-  const allTrips = useAppSelector(s => s.trips.trips);
+  // The viewed driver's trips only (Drivers screen; account holder by default).
+  const { trips: allTrips } = useViewedDriverTrips();
   const isImperial = useIsImperialUnits();
   const [tripType, setTripType] = useState<TripTypeFilter>('All');
   const [selectedTime, setSelectedTime] = useState('7 Days');
@@ -161,6 +163,7 @@ export default function TripHistoryScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      <ViewedDriverBar />
       <View style={styles.divider} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>

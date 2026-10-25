@@ -9,8 +9,9 @@ import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
   LeafIcon, StarOutlineIcon, TrendUpIcon, ChevronIcon, DollarIcon, FlashIcon,
 } from '../../components/icons';
-import { useAppSelector } from '../../hooks/useAppSelector';
 import { useVgdEndAddresses } from '../../hooks/useVgdEndAddresses';
+import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
+import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Trip } from '../../types/trip.types';
 
@@ -228,7 +229,8 @@ const baselineSt = StyleSheet.create({
 
 export default function EcoScoreScreen() {
   const navigation = useNavigation<MainStackNavigationProp>();
-  const allTrips = useAppSelector(s => s.trips.trips);
+  // The viewed driver's trips only (Drivers screen; account holder by default).
+  const { trips: allTrips } = useViewedDriverTrips();
   const [selectedTime, setSelectedTime] = useState('7 Days');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [trendTab, setTrendTab] = useState<TrendTab>('Eco Score');
@@ -317,6 +319,7 @@ export default function EcoScoreScreen() {
           <View style={{ width: 22 }} />
         </View>
       </SafeAreaView>
+      <ViewedDriverBar />
       <View style={styles.divider} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
