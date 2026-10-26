@@ -192,20 +192,22 @@ export function nextSpeedZoneToAnnounce(
 
 // Seconds of this fix's interval to count as speeding — the whole interval
 // when the fix is above the posted limit of the span it falls in, else 0.
-// Same criterion vgd_analytics' speedLimitPointsFilter.js applies server-
-// side (any speed above the limit, no tolerance), so the Driver Score's
-// "Speeding" minutes agree with the speed-limit events VGD reports instead
-// of the flat 120 km/h placeholder that used to feed this (which is why it
-// read 0 min on drives with a dozen VGD speeding events).
+// Feeds the Driver Score's "Speeding" minutes and the trip's reward score,
+// so `countsForScore` applies the fair-scoring allowance (speedingAllowance.ts:
+// e.g. only above 30 on a 25 mph sign). Without it, any speed above the
+// limit counts — vgd_analytics' own criterion for the speeding events shown
+// in trip details, which this does not affect.
 export function speedingSecondsForFix(
   spans: SpeedLimitSpan[],
   distanceAlongRouteMeters: number,
   speedMs: number,
   intervalSeconds: number,
+  countsForScore?: (speedMs: number, limitMps: number) => boolean,
 ): number {
   const index = currentSpanIndex(spans, distanceAlongRouteMeters);
   const limit = index >= 0 ? spans[index].speedLimitMps : null;
   if (limit == null || speedMs <= limit || intervalSeconds <= 0) return 0;
+  if (countsForScore && !countsForScore(speedMs, limit)) return 0;
   return intervalSeconds;
 }
 

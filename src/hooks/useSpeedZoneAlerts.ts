@@ -16,6 +16,8 @@ import {
 import { generateId } from '../utils/helpers';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { addSpeedingSeconds } from '../services/harshEventCounters';
+import { useSpeedingAllowanceRows } from './useSpeedingAllowances';
+import { countsForScore } from '../utils/speedingAllowance';
 
 /**
  * Voice-only reduced-speed-zone warnings for a Route-Planner-originated trip
@@ -43,6 +45,10 @@ export function useSpeedZoneAlerts(): void {
   const alertsEnabledRef = useRef(alertsEnabled);
   useEffect(() => { alertsEnabledRef.current = alertsEnabled; }, [alertsEnabled]);
   useEffect(() => { isImperialRef.current = isImperial; }, [isImperial]);
+  // Fair-scoring allowance for the Driver Score speeding minutes.
+  const { rows: allowanceRows } = useSpeedingAllowanceRows();
+  const allowanceRowsRef = useRef(allowanceRows);
+  useEffect(() => { allowanceRowsRef.current = allowanceRows; }, [allowanceRows]);
 
   useEffect(() => {
     // Filled once here rather than at every nextSpeedZoneToAnnounce call —
@@ -110,7 +116,10 @@ export function useSpeedZoneAlerts(): void {
 
       // Driver Score "Speeding" minutes — see speedingSecondsForFix.
       if (lastFixTimestamp != null) {
-        const over = speedingSecondsForFix(spans, distanceTraveledMeters, speedMs, (timestamp - lastFixTimestamp) / 1000);
+        const over = speedingSecondsForFix(
+          spans, distanceTraveledMeters, speedMs, (timestamp - lastFixTimestamp) / 1000,
+          (s, limit) => countsForScore(s, limit, isImperialRef.current, allowanceRowsRef.current),
+        );
         if (over > 0) addSpeedingSeconds(over);
       }
       lastFixTimestamp = timestamp;

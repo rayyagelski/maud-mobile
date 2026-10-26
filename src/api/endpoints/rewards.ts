@@ -1,6 +1,7 @@
 import client from '../client';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 import type { VgdDriverRole } from '../../types/vgd.types';
+import { normalizeAllowanceRows, type SpeedingAllowanceTables } from '../../utils/speedingAllowance';
 
 interface MonthlyRewardDto {
   year_month: string;
@@ -64,5 +65,14 @@ export const rewardsApi = {
       params: Object.keys(params).length > 0 ? params : undefined,
     });
     return fromDto(res.data);
+  },
+
+  // Fair-scoring tables (Sonata: Reward Settings) — see speedingAllowance.ts.
+  speedingAllowances: async (): Promise<SpeedingAllowanceTables> => {
+    const res = await client.get<Partial<SpeedingAllowanceTables>>('/rewards/speeding-allowances');
+    return {
+      mph: normalizeAllowanceRows(res.data.mph),
+      kmh: normalizeAllowanceRows(res.data.kmh),
+    };
   },
 };

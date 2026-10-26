@@ -18,6 +18,8 @@ import { fetchSpeedLimitAheadRoute, type LatLng, type SpeedLimitSpan } from '../
 import { generateId } from '../utils/helpers';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { addSpeedingSeconds } from '../services/harshEventCounters';
+import { useSpeedingAllowanceRows } from './useSpeedingAllowances';
+import { countsForScore } from '../utils/speedingAllowance';
 import {
   LIVE_SPEED_ZONE_AHEAD_METERS, LIVE_SPEED_ZONE_REFETCH_DISTANCE_METERS,
   LIVE_SPEED_ZONE_MIN_REFETCH_INTERVAL_MS, LIVE_SPEED_ZONE_MIN_SPEED_MS, LIVE_SPEED_ZONE_FETCH_STALL_MS,
@@ -50,6 +52,10 @@ export function useLiveSpeedZoneAlerts(): void {
   const alertsEnabledRef = useRef(alertsEnabled);
   useEffect(() => { alertsEnabledRef.current = alertsEnabled; }, [alertsEnabled]);
   useEffect(() => { isImperialRef.current = isImperial; }, [isImperial]);
+  // Fair-scoring allowance for the Driver Score speeding minutes.
+  const { rows: allowanceRows } = useSpeedingAllowanceRows();
+  const allowanceRowsRef = useRef(allowanceRows);
+  useEffect(() => { allowanceRowsRef.current = allowanceRows; }, [allowanceRows]);
 
   useEffect(() => {
     const tripId = activeTrip?.id;
@@ -312,6 +318,7 @@ export function useLiveSpeedZoneAlerts(): void {
       if (lastFixTimestamp != null) {
         const over = speedingSecondsForFix(
           referenceSpans, distanceTraveledMeters, speedMs, (timestamp - lastFixTimestamp) / 1000,
+          (s, limit) => countsForScore(s, limit, isImperialRef.current, allowanceRowsRef.current),
         );
         if (over > 0) addSpeedingSeconds(over);
       }

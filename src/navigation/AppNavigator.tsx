@@ -27,6 +27,7 @@ import { useSyncEngine } from '../services/syncEngine';
 import { useBackgroundNetworkCheck } from '../hooks/useBackgroundNetworkCheck';
 import { useKeepTimersRunningDuringTrips } from '../hooks/useKeepTimersRunningDuringTrips';
 import { useDriversRefresh } from '../hooks/useDriversRefresh';
+import { useSpeedingAllowancesRefresh } from '../hooks/useSpeedingAllowances';
 import BluetoothVehiclePromptBanner from '../components/bluetooth/BluetoothVehiclePromptBanner';
 import TripRecordingBanner from '../components/trip/TripRecordingBanner';
 import { configureClient } from '../api/client';
@@ -46,6 +47,7 @@ function TripDetectionRunner() {
   useKeepTimersRunningDuringTrips();
   useAutoSelectVehicle();
   useDriversRefresh();
+  useSpeedingAllowancesRefresh();
   useTripAutoDetection();
   useTripStartAnnouncement();
   useTripResultAnnouncement();

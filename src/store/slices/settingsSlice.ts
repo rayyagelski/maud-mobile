@@ -1,4 +1,6 @@
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { rewardsApi } from '../../api/endpoints/rewards';
+import type { SpeedingAllowanceTables } from '../../utils/speedingAllowance';
 
 export interface SettingsState {
   // When true, TripSummaryScreen speaks the trip's voice recap automatically
@@ -22,6 +24,11 @@ export interface SettingsState {
   // Default trip purpose applied to every new trip — previously hardcoded
   // per-trip in RoutePlannerScreen with no way to change it globally.
   defaultTripType: 'private' | 'business';
+  // Fair-scoring speeding allowances from the server (Sonata), kept so the
+  // Driver Score works offline. Optional: state saved before this existed
+  // has none — read it through allowanceRowsFor(), which falls back to the
+  // built-in defaults.
+  speedingAllowances?: SpeedingAllowanceTables;
 }
 
 const initialState: SettingsState = {
@@ -30,6 +37,11 @@ const initialState: SettingsState = {
   locationOnboardingComplete: false,
   defaultTripType: 'private',
 };
+
+export const fetchSpeedingAllowances = createAsyncThunk(
+  'settings/fetchSpeedingAllowances',
+  () => rewardsApi.speedingAllowances(),
+);
 
 const settingsSlice = createSlice({
   name: 'settings',
@@ -47,6 +59,15 @@ const settingsSlice = createSlice({
     setDefaultTripType(state, action: PayloadAction<'private' | 'business'>) {
       state.defaultTripType = action.payload;
     },
+  },
+  extraReducers: (builder) => {
+    builder.addCase(fetchSpeedingAllowances.fulfilled, (state, action) => {
+      // An empty table from the server would mean "count everything" —
+      // keep what we have instead (allowanceRowsFor falls back per unit).
+      if (action.payload.mph.length > 0 || action.payload.kmh.length > 0) {
+        state.speedingAllowances = action.payload;
+      }
+    });
   },
 });
 

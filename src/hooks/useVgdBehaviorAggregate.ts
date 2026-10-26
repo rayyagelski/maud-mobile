@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { vgdApi } from '../api';
 import type { Trip } from '../types/trip.types';
 import type { VgdTripEvent } from '../types/vgd.types';
+import { useSpeedingAllowanceRows } from './useSpeedingAllowances';
+import { countsForScore } from '../utils/speedingAllowance';
 
 export interface VgdBehaviorCounts {
   harshBrakeCount: number;
@@ -37,7 +39,11 @@ async function listAllTripEvents(vgdTripId: string, vehicleId: string): Promise<
 
 // Two things from VGD's per-trip events:
 //
-// 1. Speeding minutes, for EVERY trip with a VGD record. vgd_analytics
+// 1. Speeding minutes, for EVERY trip with a VGD record — only events whose
+//    peak speed is above the fair-scoring allowance (speedingAllowance.ts;
+//    VGD gives each event's peak speed and its time above the posted limit,
+//    so a counted event counts whole). Trip Details still list every event.
+//    vgd_analytics
 //    computes speed_limit events server-side after each trip ends — HERE
 //    map-matching of the uploaded route, then every stretch driven above the
 //    posted limit, with its duration in `minutes` (speedLimitPointsFilter.js).
@@ -60,8 +66,11 @@ export function useVgdBehaviorAggregate(trips: Trip[]): VgdBehaviorCounts {
   const [isLoading, setIsLoading] = useState(false);
   const cancelledRef = useRef(false);
 
+  const { rows: allowanceRows, imperial } = useSpeedingAllowanceRows();
+
   const vgdTrips = trips.filter(t => t.vgdTripId && t.vgdTripCreated);
-  const key = vgdTrips.map(t => `${t.vgdTripId}:${t.eventCounters ? 'l' : 'v'}`).join(',');
+  const key = vgdTrips.map(t => `${t.vgdTripId}:${t.eventCounters ? 'l' : 'v'}`).join(',')
+    + `|${imperial ? 'mph' : 'kmh'}:${allowanceRows.map(r => `${r.sign}-${r.allowed}`).join(',')}`;
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -85,7 +94,8 @@ export function useVgdBehaviorAggregate(trips: Trip[]): VgdBehaviorCounts {
         const { trip, events } = s.value;
         let speedingMinutes = 0;
         events.forEach((event) => {
-          if (event.indicator === 'speed_limit') {
+          if (event.indicator === 'speed_limit'
+            && countsForScore(event.parameters.speed, event.parameters.speedLimit, imperial, allowanceRows)) {
             speedingMinutes += Number(event.parameters.minutes ?? 0);
           }
           if (trip.eventCounters) return; // local counters own harsh events
