@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logDiagnostic } from './diagnosticsLog';
+import { noteForHangReport } from './hangWatchdog';
 
 // Detects launches that never got the app into a usable state — the
 // "frozen at the Welcome screen, every restart, until reinstall" failure —
@@ -84,6 +85,7 @@ export function checkpoint(name: string): void {
   const launch = state.openLaunch;
   if (!launch) return;
   launch.checkpoints.push({ name, atMs: Date.now() - launch.startedAt });
+  noteForHangReport(`step: ${name}`);
   save();
 }
 

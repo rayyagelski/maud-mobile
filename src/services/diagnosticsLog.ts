@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { noteForHangReport } from './hangWatchdog';
 
 export interface DiagnosticLogEntry {
   timestamp: number;
@@ -46,6 +47,7 @@ function persist() {
 // and viewable via Settings > Diagnostics (DiagnosticsScreen.tsx).
 export function logDiagnostic(message: string, data?: Record<string, unknown>): void {
   console.warn(`[Diagnostics] ${message}`, data);
+  noteForHangReport(`log: ${message}`);
   ensureLoaded().then(() => {
     entries = [{ timestamp: Date.now(), message, data }, ...entries].slice(0, MAX_ENTRIES);
     persist();

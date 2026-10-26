@@ -2,6 +2,7 @@ import { AppState } from 'react-native';
 import type { Middleware } from '@reduxjs/toolkit';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { checkpoint } from '../services/startupGuard';
+import { noteForHangReport } from '../services/hangWatchdog';
 
 // Last few dispatched action types, so a JS-thread stall can be logged with
 // what the app was doing right before it — the only clue a freeze leaves.
@@ -13,6 +14,7 @@ export const recentActionsMiddleware: Middleware = () => next => (action) => {
   if (typeof type === 'string') {
     recent.push(type);
     if (recent.length > RECENT_MAX) recent.shift();
+    noteForHangReport(`action: ${type}`);
   }
   return next(action);
 };

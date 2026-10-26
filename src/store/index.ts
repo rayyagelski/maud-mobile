@@ -23,6 +23,7 @@ import {
   beginLaunch, checkpoint, getPreviousLaunchSummary, resetFailureCount, FAILED_LAUNCHES_BEFORE_RECOVERY,
 } from '../services/startupGuard';
 import { getDiagnosticsReport, logDiagnostic } from '../services/diagnosticsLog';
+import { installHangWatchdog, takeHangReports } from '../services/hangWatchdog';
 import { HEADLESS_LOCATION_QUEUE_KEY } from '../utils/constants';
 import type { SyncQueueState } from '../types/sync.types';
 
@@ -177,7 +178,16 @@ function askToResetLocalData(failedLaunches: number): Promise<boolean> {
   });
 }
 
-beginLaunch()
+// Started before anything else so a freeze anywhere in startup is recorded
+// (see hangWatchdog.ts). A report from an earlier run goes into the
+// Diagnostics log before the recovery prompt, so "Send report" includes it.
+installHangWatchdog();
+
+takeHangReports()
+  .then((report) => {
+    if (report) logDiagnostic('Freeze report from an earlier run (native watchdog).', { report });
+  })
+  .then(() => beginLaunch())
   .then(async (failedLaunches) => {
     if (failedLaunches < FAILED_LAUNCHES_BEFORE_RECOVERY) return;
     const reset = await askToResetLocalData(failedLaunches);
