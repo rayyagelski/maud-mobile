@@ -12,11 +12,17 @@ export function HomeIcon({ color }: { color: string }) {
   );
 }
 
-export function ComplianceIcon({ color }: { color: string }) {
+// Speed Zones tab: a family (two adults and a child) — replaced the video
+// camera (2026-10-26, user's mock-up).
+export function SpeedZonesIcon({ color }: { color: string }) {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path d="M23 7L16 12 23 17V7z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-      <Rect x={1} y={5} width={15} height={14} rx={2} stroke={color} strokeWidth={1.8} />
+      <Circle cx={6} cy={4.5} r={2} stroke={color} strokeWidth={1.6} />
+      <Path d="M3.5 21v-10.5a2.5 2.5 0 015 0V21" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx={13} cy={4.5} r={2} stroke={color} strokeWidth={1.6} />
+      <Path d="M10.5 21v-10.5a2.5 2.5 0 015 0V21" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx={20} cy={12} r={1.5} stroke={color} strokeWidth={1.6} />
+      <Path d="M18.3 21v-4.7a1.7 1.7 0 013.4 0V21" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }

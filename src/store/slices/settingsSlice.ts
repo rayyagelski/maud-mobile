@@ -31,9 +31,11 @@ export interface SettingsState {
   speedingAllowances?: SpeedingAllowanceTables;
 }
 
+// Defaults changed 2026-10-26 (auto-play on, Focus reminder off); existing
+// installs got them once through persistMigrations.ts.
 const initialState: SettingsState = {
-  autoPlayTripSummaryVoice: false,
-  driveFocusReminderEnabled: true,
+  autoPlayTripSummaryVoice: true,
+  driveFocusReminderEnabled: false,
   locationOnboardingComplete: false,
   defaultTripType: 'private',
 };

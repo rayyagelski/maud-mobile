@@ -35,7 +35,7 @@ export default function ComplianceScreen() {
           >
             <BackArrowIcon size={22} color="#1A1A1A" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Compliance</Text>
+          <Text style={styles.headerTitle}>Speed Zones</Text>
           <View style={styles.headerSpacer} />
         </View>
       </SafeAreaView>
@@ -45,11 +45,11 @@ export default function ComplianceScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Compliance Intelligence card */}
+        {/* Speed Zone Intelligence card */}
         <View style={styles.card}>
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>Compliance Intelligence</Text>
+              <Text style={styles.cardTitle}>Speed Zone Intelligence</Text>
               <Text style={styles.cardSub}>
                 {alertsEnabled ? 'Alerts are active' : 'Alerts are inactive'}
               </Text>
@@ -84,7 +84,7 @@ export default function ComplianceScreen() {
             </Text>
             <Text style={styles.cardSub}>
               {!alertsEnabled
-                ? 'Turn on Compliance Intelligence to get warned near enforcement zones.'
+                ? 'Turn on Speed Zone Intelligence to get warned near enforcement zones.'
                 : !isTracking
                   ? "Alerts monitor your route once a trip is being tracked."
                   : "You'll be alerted here if you approach a known enforcement zone."}

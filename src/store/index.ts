@@ -18,7 +18,8 @@ import { tokenPersistMiddleware } from './tokenPersistMiddleware';
 import { recentActionsMiddleware } from './recentActions';
 import { Alert, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createTransform, type PersistorOptions } from 'redux-persist';
+import { createMigrate, createTransform, type PersistorOptions } from 'redux-persist';
+import { PERSIST_VERSION, persistMigrations } from './persistMigrations';
 import {
   beginLaunch, checkpoint, getPreviousLaunchSummary, resetFailureCount, FAILED_LAUNCHES_BEFORE_RECOVERY,
 } from '../services/startupGuard';
@@ -77,6 +78,9 @@ const persistConfig: PersistConfig<ReturnType<typeof rootReducer>> = {
   // tripsPersistTransform.ts. Throttling (above) reduced how OFTEN the blob
   // is written; this caps how BIG it gets.
   transforms: [tripsPersistTransform, syncQueueTransientTransform],
+  // One-time changes to saved state, e.g. new defaults for existing installs.
+  version: PERSIST_VERSION,
+  migrate: createMigrate(persistMigrations, { debug: false }),
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

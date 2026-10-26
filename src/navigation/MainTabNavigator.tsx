@@ -5,7 +5,7 @@ import HomeScreen from '../screens/home/HomeScreen';
 import ComplianceScreen from '../screens/compliance/ComplianceScreen';
 import BreakdownScreen from '../screens/breakdown/BreakdownScreen';
 import EmergencyScreen from '../screens/emergency/EmergencyScreen';
-import { HomeIcon, ComplianceIcon, BreakdownIcon, EmergencyIcon } from '../components/icons';
+import { HomeIcon, SpeedZonesIcon, BreakdownIcon, EmergencyIcon } from '../components/icons';
 import type { MainTabParamList } from '../types/navigation.types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -14,7 +14,7 @@ const TEAL = '#3ABFBF';
 const GRAY = '#9E9E9E';
 
 const homeTabIcon = ({ color }: { color: string }) => <HomeIcon color={color} />;
-const complianceTabIcon = ({ color }: { color: string }) => <ComplianceIcon color={color} />;
+const complianceTabIcon = ({ color }: { color: string }) => <SpeedZonesIcon color={color} />;
 const breakdownTabIcon = ({ color }: { color: string }) => <BreakdownIcon color={color} />;
 const emergencyTabIcon = ({ color }: { color: string }) => <EmergencyIcon color={color} />;
 
@@ -64,7 +64,9 @@ export default function MainTabNavigator() {
         name="Compliance"
         component={ComplianceScreen}
         options={{
-          tabBarLabel: 'Compliance',
+          // Route name stays "Compliance" (navigation calls use it); the
+          // tab is shown as Speed Zones.
+          tabBarLabel: 'Speed Zones',
           tabBarIcon: complianceTabIcon,
         }}
       />
