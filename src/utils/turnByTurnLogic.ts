@@ -6,8 +6,9 @@ import type { Maneuver } from '../services/here/hereRoutingClient';
 
 // How far ahead of a maneuver to speak it.
 export const TURN_ANNOUNCE_DISTANCE_METERS = 400;
-// How far from the planned route counts as "no longer following it" —
-// fixed-route v1 has no re-routing, so past this it just stops announcing.
+// How far from the planned route the speed-zone alerts stop treating it as
+// the road being driven. (Turn-by-turn recalculates the route much sooner,
+// see rerouteLogic.ts.)
 export const OFF_ROUTE_DISTANCE_METERS = 150;
 // Consecutive off-route fixes required before guidance actually gives up —
 // absorbs a single noisy GPS blip rather than silencing guidance on one bad
@@ -117,18 +118,44 @@ export function nextManeuverToAnnounce(
   return null;
 }
 
-// True once the current position is farther than thresholdMeters from every
-// point on the planned route.
+// Distance (metres) from a position to the nearest point of a segment, on a
+// local flat projection around the position — accurate to well under a
+// metre at the few-hundred-metre scale this is used for.
+function distanceToSegmentMeters(position: Coordinate, a: Coordinate, b: Coordinate): number {
+  const metersPerDegLat = 111_320;
+  const metersPerDegLon = 111_320 * Math.cos((position.latitude * Math.PI) / 180);
+  const ax = (a.longitude - position.longitude) * metersPerDegLon;
+  const ay = (a.latitude - position.latitude) * metersPerDegLat;
+  const bx = (b.longitude - position.longitude) * metersPerDegLon;
+  const by = (b.latitude - position.latitude) * metersPerDegLat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSq)) : 0;
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+
+// Distance (metres) from a position to the route LINE, not just its vertices:
+// HERE polylines can have vertices hundreds of metres apart on straight
+// roads, where the nearest vertex is far away although the car is on the road.
+export function distanceToRouteMeters(position: Coordinate, routeCoordinates: Coordinate[]): number {
+  if (routeCoordinates.length === 0) return Infinity;
+  if (routeCoordinates.length === 1) return haversineMeters(position, routeCoordinates[0]);
+  let nearest = Infinity;
+  for (let i = 1; i < routeCoordinates.length; i++) {
+    const d = distanceToSegmentMeters(position, routeCoordinates[i - 1], routeCoordinates[i]);
+    if (d < nearest) nearest = d;
+  }
+  return nearest;
+}
+
+// True once the current position is farther than thresholdMeters from the
+// planned route (its line, see distanceToRouteMeters).
 export function isOffRoute(
   position: Coordinate,
   routeCoordinates: Coordinate[],
   thresholdMeters = OFF_ROUTE_DISTANCE_METERS,
 ): boolean {
   if (routeCoordinates.length === 0) return false;
-  let nearestMeters = Infinity;
-  for (const point of routeCoordinates) {
-    const distance = haversineMeters(position, point);
-    if (distance < nearestMeters) nearestMeters = distance;
-  }
-  return nearestMeters > thresholdMeters;
+  return distanceToRouteMeters(position, routeCoordinates) > thresholdMeters;
 }

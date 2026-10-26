@@ -72,6 +72,12 @@ export interface PlannedRoute {
   // that predate this field — speed-zone alerts (useSpeedZoneAlerts.ts) just
   // see no spans for those rather than crashing.
   speedLimitSpans?: SpeedLimitSpan[];
+  // Set when the route was recalculated mid-drive after the driver left it
+  // (useTurnByTurnGuidance) — RoutePlannerScreen then shows this route and
+  // its distance/duration instead of the one originally planned.
+  recalculatedAt?: number;
+  distanceMeters?: number;
+  durationSeconds?: number;
 }
 
 export interface TripVoicePayload {

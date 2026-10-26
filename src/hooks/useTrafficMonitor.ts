@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAppSelector } from './useAppSelector';
 import { useAppDispatch } from './useAppDispatch';
 import { useVoicePlayback } from './useVoicePlayback';
+import { useIsImperialUnits } from './useIsImperialUnits';
 import { subscribeGpsFix } from '../services/gpsSpeedBus';
 import { fetchHereRoutes, type LatLng, type HereRouteResult } from '../services/here/hereRoutingClient';
 import { shouldRefreshCache, type Coordinate } from '../utils/complianceAlertLogic';
@@ -41,6 +42,9 @@ export function useTrafficMonitor(): void {
   useEffect(() => { speakRef.current = speak; }, [speak]);
   const dismissedDelayRef = useRef(dismissedDelaySeconds);
   useEffect(() => { dismissedDelayRef.current = dismissedDelaySeconds; }, [dismissedDelaySeconds]);
+  const isImperial = useIsImperialUnits();
+  const isImperialRef = useRef(isImperial);
+  useEffect(() => { isImperialRef.current = isImperial; }, [isImperial]);
 
   const destination = plannedRoute?.coordinates[plannedRoute.coordinates.length - 1] ?? null;
 
@@ -59,7 +63,9 @@ export function useTrafficMonitor(): void {
       isFetching = true;
       lastQueryPoint = position;
 
-      fetchHereRoutes(position, destination, 0)
+      // Units matter: the accepted alternative's instructions are spoken
+      // verbatim ("Go for 0.5 mi"); without them US drivers heard metres.
+      fetchHereRoutes(position, destination, 0, isImperialRef.current)
         .then(async ([primary]: HereRouteResult[]) => {
           if (!primary) return;
           const backup = detectTrafficBackup(primary);
@@ -67,7 +73,7 @@ export function useTrafficMonitor(): void {
 
           // Only spend the extra API calls on alternatives once a real
           // backup is confirmed on the route the driver is already on.
-          const routes = await fetchHereRoutes(position, destination, ALTERNATIVES_ON_BACKUP);
+          const routes = await fetchHereRoutes(position, destination, ALTERNATIVES_ON_BACKUP, isImperialRef.current);
           const alternatives = routes.slice(1);
           const better = findBetterAlternative(primary.durationSeconds, alternatives);
           if (!better) return;

@@ -264,6 +264,28 @@ export default function RoutePlannerScreen() {
     );
   }, []);
 
+  // The driver left the route and guidance recalculated it
+  // (useTurnByTurnGuidance): show the new route and its distance/time
+  // instead of the one planned here. The alternatives no longer apply.
+  const recalculatedRoute = isTracking && activeTrip?.plannedRoute?.recalculatedAt != null
+    ? activeTrip.plannedRoute
+    : null;
+  useEffect(() => {
+    if (!recalculatedRoute) return;
+    setRoutes([{
+      coordinates: recalculatedRoute.coordinates,
+      maneuvers: recalculatedRoute.maneuvers,
+      speedLimitSpans: recalculatedRoute.speedLimitSpans ?? [],
+      distanceMeters: recalculatedRoute.distanceMeters ?? 0,
+      durationSeconds: recalculatedRoute.durationSeconds ?? 0,
+    }]);
+    setSelectedRouteIndex(0);
+    setRouteRecommendation(null);
+    // recalculatedAt identifies the recalculation; the route object itself
+    // is the same for its lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recalculatedRoute?.recalculatedAt]);
+
   // Keeps the map centered on the driver's actual live position while a
   // trip is tracking — previously the map's region was seeded once from the
   // route-planning origin above and never updated again, so the camera

@@ -172,16 +172,24 @@ async function fetchWithTimeout(url: string, externalSignal?: AbortSignal): Prom
 // `alternatives` requests up to N additional routes beyond the optimal one
 // (HERE's own documented range is 0–5) — the first entry in the returned
 // array is always HERE's optimal route.
+//
+// `courseDegrees` (0 = north, clockwise) is the direction the car is already
+// moving — used when recalculating mid-drive, so the new route continues
+// ahead instead of starting with a U-turn (HERE waypoint option `course`).
 export async function fetchHereRoutes(
   origin: LatLng,
   destination: LatLng,
   alternatives = 0,
   isImperial = false,
   signal?: AbortSignal,
+  courseDegrees?: number,
 ): Promise<HereRouteResult[]> {
+  const course = courseDegrees != null && Number.isFinite(courseDegrees)
+    ? `;course=${Math.round(((courseDegrees % 360) + 360) % 360)}`
+    : '';
   const params = new URLSearchParams({
     transportMode: 'car',
-    origin: `${origin.latitude},${origin.longitude}`,
+    origin: `${origin.latitude},${origin.longitude}${course}`,
     destination: `${destination.latitude},${destination.longitude}`,
     return: 'polyline,summary,actions,instructions,typicalDuration',
     // speedLimit spans — same param already confirmed working server-side
