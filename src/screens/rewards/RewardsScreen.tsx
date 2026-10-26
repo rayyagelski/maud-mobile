@@ -15,12 +15,12 @@ import {
 } from '../../components/icons';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
-import { useCurrencySymbol } from '../../hooks/useCurrencySymbol';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
 import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import { kmToMiles } from '../../utils/helpers';
+import { formatRewardPoints } from '../../utils/rewardFormat';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 
 const TEAL = '#3ABFBF';
@@ -205,9 +205,10 @@ function ScoreItem({ Icon, score, label, iconBg }: {
 
 // ── Rewards summary row ────────────────────────────────────────────────────
 
-function SummaryRow({ icon, iconBg, label, dollars, dollarColor, highlighted, divider }: {
-  icon: React.ReactNode; iconBg: string; label: string; dollars: string;
-  dollarColor: string; highlighted?: boolean; divider?: boolean;
+// Values are reward points (formatRewardPoints), not money.
+function SummaryRow({ icon, iconBg, label, value, valueColor, highlighted, divider }: {
+  icon: React.ReactNode; iconBg: string; label: string; value: string;
+  valueColor: string; highlighted?: boolean; divider?: boolean;
 }) {
   return (
     <View style={[styles.summaryRow, divider && styles.rowDivider, highlighted && styles.summaryRowHighlighted]}>
@@ -217,12 +218,16 @@ function SummaryRow({ icon, iconBg, label, dollars, dollarColor, highlighted, di
       <Text style={[styles.summaryLabel, highlighted && { color: TEAL, fontWeight: '700' }]}>
         {label}
       </Text>
-      <Text style={[styles.summaryDollar, { color: dollarColor }]}>{dollars}</Text>
+      <Text style={[styles.summaryDollar, { color: valueColor }]}>{value}</Text>
     </View>
   );
 }
 
 // ── Redeem points ──────────────────────────────────────────────────────────
+
+// Hidden for the time being (2026-10-26): reward partners aren't chosen
+// yet, so nothing can actually be redeemed. Set to true to show it again.
+const SHOW_REDEEM_SECTION = false;
 
 const REDEEM_ITEMS: {
   key: string; Icon: React.ComponentType<{ color?: string; size?: number }>;
@@ -263,7 +268,6 @@ export default function RewardsScreen() {
   const isViewedDriversData = rewards.driverSlot === slot;
   const currentMonth = isViewedDriversData ? rewards.currentMonth : null;
   const previousMonth = isViewedDriversData ? rewards.previousMonth : null;
-  const currencySymbol = useCurrencySymbol();
   const isImperial = useIsImperialUnits();
 
   useEffect(() => {
@@ -317,10 +321,10 @@ export default function RewardsScreen() {
     ? Math.round(((currentMonth.monthlyRewardScore - previousMonth.monthlyRewardScore) / previousMonth.monthlyRewardScore) * 100)
     : null;
   const tips = buildTips(currentMonth, isImperial);
-  const earnedLabel = `${currencySymbol}${(currentMonth.cashRewardCents / 100).toFixed(2)}`;
-  const accruedLabel = `${currencySymbol}${((currentMonth.lifetimeEarnedCents ?? 0) / 100).toFixed(2)}`;
-  const redeemedLabel = `${currencySymbol}${((currentMonth.lifetimeRedeemedCents ?? 0) / 100).toFixed(2)}`;
-  const balanceLabel = `${currencySymbol}${((currentMonth.balanceCents ?? 0) / 100).toFixed(2)}`;
+  const earnedLabel = formatRewardPoints(currentMonth.monthlyPoints);
+  const accruedLabel = formatRewardPoints(currentMonth.lifetimeEarnedPoints);
+  const redeemedLabel = formatRewardPoints(currentMonth.lifetimeRedeemedPoints);
+  const balanceLabel = formatRewardPoints(currentMonth.balancePoints);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
@@ -421,53 +425,57 @@ export default function RewardsScreen() {
             icon={<StarOutlineIcon color={EARNED_GREEN} size={20} />}
             iconBg="#E3F5E9"
             label="Earned This Month"
-            dollars={earnedLabel}
-            dollarColor={EARNED_GREEN}
+            value={earnedLabel}
+            valueColor={EARNED_GREEN}
             divider
           />
           <SummaryRow
             icon={<SparkleIcon color={ACCRUED_BLUE} size={20} />}
             iconBg="#E6EEFE"
             label="Accrued (Lifetime)"
-            dollars={accruedLabel}
-            dollarColor={ACCRUED_BLUE}
+            value={accruedLabel}
+            valueColor={ACCRUED_BLUE}
             divider
           />
           <SummaryRow
             icon={<GiftIcon color={REDEEMED_RED} size={20} />}
             iconBg="#FBE7E5"
             label="Redeemed"
-            dollars={redeemedLabel}
-            dollarColor={REDEEMED_RED}
+            value={redeemedLabel}
+            valueColor={REDEEMED_RED}
             divider
           />
           <SummaryRow
             icon={<MedalIcon color="white" size={20} />}
             iconBg={TEAL}
             label="Balance"
-            dollars={balanceLabel}
-            dollarColor={TEAL}
+            value={balanceLabel}
+            valueColor={TEAL}
             highlighted
           />
         </View>
 
-        {/* ── Redeem points ── */}
-        <SectionHeader icon={<GiftIcon color={TEAL} size={18} />} title="REDEEM YOUR POINTS" />
-        <View style={[styles.card, styles.redeemCardOuter]}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.redeemRow}
-            style={styles.redeemScroll}
-          >
-            {REDEEM_ITEMS.map(item => (
-              <RedeemCard key={item.key} Icon={item.Icon} color={item.color} value={item.value} label={item.label} pts={item.pts} />
-            ))}
-          </ScrollView>
-          <View style={styles.redeemArrowBtn}>
-            <ArrowRightIcon color="white" size={18} />
-          </View>
-        </View>
+        {/* ── Redeem points (hidden for now, see SHOW_REDEEM_SECTION) ── */}
+        {SHOW_REDEEM_SECTION && (
+          <>
+            <SectionHeader icon={<GiftIcon color={TEAL} size={18} />} title="REDEEM YOUR POINTS" />
+            <View style={[styles.card, styles.redeemCardOuter]}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.redeemRow}
+                style={styles.redeemScroll}
+              >
+                {REDEEM_ITEMS.map(item => (
+                  <RedeemCard key={item.key} Icon={item.Icon} color={item.color} value={item.value} label={item.label} pts={item.pts} />
+                ))}
+              </ScrollView>
+              <View style={styles.redeemArrowBtn}>
+                <ArrowRightIcon color="white" size={18} />
+              </View>
+            </View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

@@ -19,6 +19,10 @@ export interface MonthlyRewardSummary {
   lifetimeEarnedCents: number;
   lifetimeRedeemedCents: number;
   balanceCents: number;
+  // Rewards Summary in points. Null from a backend that doesn't send them yet.
+  lifetimeEarnedPoints: number | null;
+  lifetimeRedeemedPoints: number | null;
+  balancePoints: number | null;
   thresholds: { bronze: number; silver: number; gold: number };
   progress: { nextStatus: RewardStatus | null; pointsToNext: number | null };
   phoneBlocksGold: boolean;

@@ -20,6 +20,9 @@ interface MonthlyRewardDto {
   lifetime_earned_cents: number;
   lifetime_redeemed_cents: number;
   balance_cents: number;
+  lifetime_earned_points?: number;
+  lifetime_redeemed_points?: number;
+  balance_points?: number;
   thresholds: { bronze: number; silver: number; gold: number };
   progress: { next_status: RewardStatus | null; points_to_next: number | null };
   phone_blocks_gold: boolean;
@@ -46,6 +49,9 @@ function fromDto(dto: MonthlyRewardDto): MonthlyRewardSummary {
     lifetimeEarnedCents: dto.lifetime_earned_cents,
     lifetimeRedeemedCents: dto.lifetime_redeemed_cents,
     balanceCents: dto.balance_cents,
+    lifetimeEarnedPoints: dto.lifetime_earned_points ?? null,
+    lifetimeRedeemedPoints: dto.lifetime_redeemed_points ?? null,
+    balancePoints: dto.balance_points ?? null,
     thresholds: dto.thresholds,
     progress: {
       nextStatus: dto.progress.next_status,
