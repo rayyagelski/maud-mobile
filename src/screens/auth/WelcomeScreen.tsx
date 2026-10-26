@@ -9,14 +9,13 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 import ShieldCheckIcon from '../../components/common/ShieldCheckIcon';
 import LockIcon from '../../components/common/LockIcon';
 import {
   LeafIcon,
-  GiftIcon,
   StarOutlineIcon,
   PersonIcon,
   ArrowRightIcon,
@@ -63,12 +62,23 @@ function PieChartIcon({ color = TEAL, size = 30 }: { color?: string; size?: numb
   );
 }
 
-function WalletIcon({ color = '#3B82F6', size = 26 }: { color?: string; size?: number }) {
+// Bar chart in a rounded frame — "Smarter" bubble.
+function ChartIcon({ color = '#3B82F6', size = 26 }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 7a2 2 0 012-2h13a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
-      <Path d="M16 12a1.5 1.5 0 000 3H20v-3h-4z" fill={color} />
-      <Path d="M3 8l12-3 3 3" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Rect x={3} y={3} width={18} height={18} rx={3} stroke={color} strokeWidth={1.8} />
+      <Path d="M8 17v-4M12 17V8M16 17v-6" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+// Trophy — "Achieve" bubble.
+function TrophyIcon({ color = '#3B82F6', size = 26 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M7 4h10v5a5 5 0 01-10 0V4z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      <Path d="M7 6H4.5v1.5A3.5 3.5 0 008 11M17 6h2.5v1.5A3.5 3.5 0 0116 11" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M12 14v3M8.5 20.5h7M9.5 20.5c0-1.9 1.1-3.5 2.5-3.5s2.5 1.6 2.5 3.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -76,8 +86,8 @@ function WalletIcon({ color = '#3B82F6', size = 26 }: { color?: string; size?: n
 const CORNER_LABELS = [
   { key: 'safer', label: 'Safer', icon: <ShieldCheckIcon color={TEAL} size={26} /> },
   { key: 'greener', label: 'Greener', icon: <LeafIcon color="#4CAF50" size={26} /> },
-  { key: 'save', label: 'Save', icon: <WalletIcon color="#3B82F6" size={24} /> },
-  { key: 'earn', label: 'Earn', icon: <GiftIcon color="#3B82F6" size={22} /> },
+  { key: 'smarter', label: 'Smarter', icon: <ChartIcon color="#3B82F6" size={24} /> },
+  { key: 'achieve', label: 'Achieve', icon: <TrophyIcon color="#3B82F6" size={24} /> },
 ];
 
 export default function WelcomeScreen() {
@@ -90,7 +100,7 @@ export default function WelcomeScreen() {
   const half = diagramSize / 2;
 
   const cornerRadius = diagramSize * 0.42;
-  const cornerAngles = [-135, -45, 135, 45]; // safer, greener, save, earn
+  const cornerAngles = [-135, -45, 135, 45]; // safer, greener, smarter, achieve
   const cornerPositions = cornerAngles.map(angle => {
     const rad = (angle * Math.PI) / 180;
     return {
@@ -190,24 +200,26 @@ export default function WelcomeScreen() {
         </View>
 
         {/* Feature cards */}
+        {/* Each icon sits in a slot of the same height, so the three titles
+            line up (the car icon is much flatter than the other two). */}
         <View style={styles.cardsRow}>
           <View style={styles.card}>
-            <CarOutlineIcon color={TEAL} size={26} />
+            <View style={styles.cardIconSlot}><CarOutlineIcon color={TEAL} size={30} /></View>
             <Text style={styles.cardTitle}>DRIVE</Text>
             <View style={styles.cardUnderline} />
-            <Text style={styles.cardText}>Smarter driving with real-time insights.</Text>
+            <Text style={styles.cardText}>Smarter driving with real-time AI insights.</Text>
           </View>
           <View style={styles.card}>
-            <PieChartIcon color={TEAL} size={26} />
+            <View style={styles.cardIconSlot}><PieChartIcon color={TEAL} size={26} /></View>
             <Text style={styles.cardTitle}>SAVE</Text>
             <View style={styles.cardUnderline} />
-            <Text style={styles.cardText}>Understand fuel, charging and mobility costs.</Text>
+            <Text style={styles.cardText}>Understand fuel, charging and vehicle cost.</Text>
           </View>
           <View style={styles.card}>
-            <StarOutlineIcon color={TEAL} size={24} />
-            <Text style={styles.cardTitle}>EARN</Text>
+            <View style={styles.cardIconSlot}><StarOutlineIcon color={TEAL} size={24} /></View>
+            <Text style={styles.cardTitle}>ACHIEVE</Text>
             <View style={styles.cardUnderline} />
-            <Text style={styles.cardText}>Get rewarded for safer and greener driving.</Text>
+            <Text style={styles.cardText}>Earn points and build your Bronze, Silver and Gold status.</Text>
           </View>
         </View>
 
@@ -217,7 +229,7 @@ export default function WelcomeScreen() {
           <View style={styles.privacyTextWrap}>
             <Text style={styles.privacyTitle}>Your mobility. Your data. Your choice.</Text>
             <Text style={styles.privacySubtitle}>
-              Privacy-first <Text style={styles.dot}>•</Text> Smartphone-powered <Text style={styles.dot}>•</Text> Works with any car
+              Privacy-first <Text style={styles.dot}>•</Text> Smartphone-powered <Text style={styles.dot}>•</Text> Works with almost any car
             </Text>
           </View>
         </View>
@@ -351,6 +363,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
   },
+  cardIconSlot: { height: 28, justifyContent: 'center', alignItems: 'center' },
   cardTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, marginTop: 10 },
   cardUnderline: { width: 20, height: 2, backgroundColor: TEAL, marginTop: 6, borderRadius: 1 },
   cardText: { color: '#9AA3B2', fontSize: 11.5, textAlign: 'center', marginTop: 8, lineHeight: 16 },
