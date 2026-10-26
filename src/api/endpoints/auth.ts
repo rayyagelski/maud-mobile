@@ -1,4 +1,4 @@
-import client from '../client';
+import client, { SKIP_TOKEN_REFRESH_HEADER } from '../client';
 import type { LoginRequest, LoginResponse } from '../../types/auth.types';
 
 export const authApi = {
@@ -7,7 +7,7 @@ export const authApi = {
 
   refresh: (expiredToken: string) =>
     client.post<LoginResponse>('/refresh', null, {
-      headers: { 'X-Token-Auth': `Bearer ${expiredToken}` },
+      headers: { 'X-Token-Auth': `Bearer ${expiredToken}`, [SKIP_TOKEN_REFRESH_HEADER]: '1' },
     }),
 
   register: (data: { email: string; password: string; firstName: string; lastName: string }) =>
