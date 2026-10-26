@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
@@ -14,13 +14,12 @@ import {
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
-import { vehiclesApi } from '../../api';
+import { useTripCost, formatTripCost } from '../../hooks/useTripCost';
 import {
   formatDistance, formatDuration, formatSpeed, tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh,
 } from '../../utils/helpers';
 import { MS2_PER_G } from '../../utils/constants';
 import type { MainStackNavigationProp, TripDetailRouteProp } from '../../types/navigation.types';
-import type { TripCostResponse } from '../../types/vehicle.types';
 import type { TelematicsEvent } from '../../types/trip.types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -306,25 +305,8 @@ export default function TripDetailScreen() {
     ?? (vgdEndPoint ? { latitude: vgdEndPoint.lat, longitude: vgdEndPoint.lon } : undefined);
 
   // Real Insurance/Tax/Leasing/Financing + Repair/Maintenance + Fuel/
-  // Electricity cost (TotalCostCalculator, server-side) — distinct from
-  // "Money Saved" below, which is a comparative trip_reward figure, not an
-  // absolute cost. Fail-soft like every other auxiliary lookup in this app.
-  const [tripCost, setTripCost] = useState<TripCostResponse | null>(null);
-  useEffect(() => {
-    if (!trip?.vehicleId || !trip?.endTime) {
-      setTripCost(null);
-      return;
-    }
-    let cancelled = false;
-    vehiclesApi.getTripCost(
-      trip.vehicleId,
-      Math.round(trip.startTime / 1000),
-      Math.round(trip.endTime / 1000),
-    )
-      .then((res) => { if (!cancelled) setTripCost(res.data); })
-      .catch(() => { if (!cancelled) setTripCost(null); });
-    return () => { cancelled = true; };
-  }, [trip?.vehicleId, trip?.startTime, trip?.endTime]);
+  // Electricity cost — distinct from "Money Saved" below (see useTripCost).
+  const tripCost = useTripCost(trip);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
@@ -437,11 +419,7 @@ export default function TripDetailScreen() {
               <EnergyCard
                 icon={<DollarIcon color="#888" size={15} />}
                 label="Trip Cost"
-                value={
-                  tripCost?.cost != null
-                    ? `${tripCost.cost.toFixed(2)} ${tripCost.currencyCode}`
-                    : '—'
-                }
+                value={formatTripCost(tripCost) ?? '—'}
               />
             </View>
           </>

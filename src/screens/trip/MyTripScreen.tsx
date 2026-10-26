@@ -7,8 +7,9 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import MapView, { Marker, Callout, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import {
-  MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, FuelIcon, CloudIcon, WarningTriangleIcon, PhoneIcon,
+  MountainIcon, HourglassIcon, GaugeIcon, LeafIcon, FuelIcon, CloudIcon, WarningTriangleIcon, PhoneIcon, DollarIcon,
 } from '../../components/icons';
+import { useTripCost, formatTripCost } from '../../hooks/useTripCost';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useIsImperialUnits } from '../../hooks/useIsImperialUnits';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
@@ -353,6 +354,9 @@ export default function MyTripScreen() {
       : reward?.kwhUsed != null
         ? `${reward.kwhUsed.toFixed(1)} kWh`
         : null;
+  // Real cost of the trip (fuel/electricity + insurance, tax, leasing/
+  // financing, repair/maintenance) — see useTripCost.
+  const tripCostLabel = formatTripCost(useTripCost(trip));
   const endWeather = vgdAnalytics?.endWeather;
   // skyInfo is a raw HERE sky-condition code (e.g. "7"), not human-readable
   // text — only temperatureDesc ("Hot") is fit to show to a driver.
@@ -647,8 +651,9 @@ export default function MyTripScreen() {
               </>
             )}
 
-            {/* Cost & Consumption — trip-level VGD figures */}
-            {vgdEnabled && (
+            {/* Cost & Consumption — trip-level VGD figures, plus the trip's
+                real cost (same box as the Eco Score trip details) */}
+            {(vgdEnabled || tripCostLabel != null) && (
               <>
                 <Text style={styles.sectionLabel}>COST & CONSUMPTION</Text>
                 <View style={styles.costRow}>
@@ -669,6 +674,16 @@ export default function MyTripScreen() {
                     <Text style={styles.costValue}>
                       {consumptionDisplay ?? '—'}
                     </Text>
+                  </View>
+                </View>
+                {/* Own row: "12.34 USD" doesn't fit a third of the width. */}
+                <View style={styles.costRow}>
+                  <View style={styles.costCard}>
+                    <View style={styles.costCardHeader}>
+                      <DollarIcon color="#999" size={16} />
+                      <Text style={styles.costCardLabel}> Trip Cost</Text>
+                    </View>
+                    <Text style={styles.costValue}>{tripCostLabel ?? '—'}</Text>
                   </View>
                 </View>
               </>
