@@ -15,20 +15,15 @@ import { useNavigation } from '@react-navigation/native';
 import type { AuthNavigationProp } from '../../types/navigation.types';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { countriesApi, type ActiveCountry } from '../../api';
+import {
+  allLegalDocumentsAccepted, legalDocuments, legalLanguage, type LegalDocument, type LegalDocumentKey,
+} from '../../utils/legalDocuments';
 
-// EU member-state ISO codes — anything else (including the US) gets the
-// English registration page. Not sourced from the backend: no EU-membership
-// flag exists there today (verified — Country entity/API has no such field).
-const EU_COUNTRY_CODES = new Set([
-  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
-  'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
-  'SI', 'ES', 'SE',
-]);
-
+// EU countries get the German registration page, everyone else (including
+// the US) the English one — same rule as the legal documents' language.
 function resolveRegistrationUrl(countryCode: string, vehicleUse: 'private' | 'business'): string {
   const host = vehicleUse === 'business' ? 'market.myautodata.com' : 'app.myautodata.com';
-  const suffix = EU_COUNTRY_CODES.has(countryCode) ? 'de/register' : 'en/register';
-  return `https://${host}/${suffix}`;
+  return `https://${host}/${legalLanguage(countryCode)}/register`;
 }
 
 export default function RegistrationScreen() {
@@ -36,7 +31,8 @@ export default function RegistrationScreen() {
   const [selectedCountry, setSelectedCountry] = useState<ActiveCountry | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [search, setSearch] = useState('');
-  const [agreed, setAgreed] = useState(false);
+  // Each document must be accepted separately (privacy, T&C, monetization).
+  const [accepted, setAccepted] = useState<Partial<Record<LegalDocumentKey, boolean>>>({});
   const [vehicleUse, setVehicleUse] = useState<'private' | 'business'>('private');
   const [countries, setCountries] = useState<ActiveCountry[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(true);
@@ -52,11 +48,14 @@ export default function RegistrationScreen() {
     ? countries.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
     : countries;
 
-  const canContinue = selectedCountry !== null && agreed;
+  const canContinue = selectedCountry !== null && allLegalDocumentsAccepted(accepted);
+
+  function openDocument(doc: LegalDocument) {
+    navigation.navigate('WebView', { url: doc.url, title: doc.title });
+  }
 
   function handleContinue() {
-    if (!selectedCountry) return;
-    console.log(resolveRegistrationUrl(selectedCountry.code, vehicleUse));
+    if (!selectedCountry || !allLegalDocumentsAccepted(accepted)) return;
     navigation.navigate('WebView', {
       url: resolveRegistrationUrl(selectedCountry.code, vehicleUse),
       title: 'Registration',
@@ -126,21 +125,34 @@ export default function RegistrationScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.checkRow}
-          onPress={() => setAgreed(v => !v)}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
-            {agreed && <Text style={styles.checkmark}>✓</Text>}
-          </View>
-          <Text style={styles.checkText}>
-            I have read and agree to the{' '}
-            <Text style={styles.link}>Privacy Policy</Text>
-            {' '}and{' '}
-            <Text style={styles.link}>Terms of Service</Text>
-          </Text>
-        </TouchableOpacity>
+        {/* One box per document; all three are required to continue. The
+            document name opens it (in the country's language); the rest of
+            the row ticks the box. */}
+        <View style={styles.checkList}>
+          {legalDocuments(selectedCountry?.code).map((doc) => {
+            const checked = accepted[doc.key] === true;
+            return (
+              <TouchableOpacity
+                key={doc.key}
+                style={styles.checkRow}
+                onPress={() => setAccepted(prev => ({ ...prev, [doc.key]: !checked }))}
+                activeOpacity={0.8}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked }}
+              >
+                <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+                  {checked && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <Text style={styles.checkText}>
+                  I have read and agree to the{' '}
+                  <Text style={styles.link} onPress={() => openDocument(doc)} suppressHighlighting>
+                    {doc.title}
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </ScrollView>
 
       <SafeAreaView edges={['bottom']} style={styles.footer}>
@@ -283,10 +295,10 @@ const styles = StyleSheet.create({
   toggleText: { color: 'rgba(255,255,255,0.5)', fontSize: 15, fontWeight: '600' },
   toggleTextActive: { color: '#0B0E1A' },
 
+  checkList: { marginTop: 28, gap: 16 },
   checkRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginTop: 28,
     gap: 12,
   },
   checkbox: {
