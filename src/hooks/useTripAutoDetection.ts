@@ -11,7 +11,7 @@ import { TRIP_AUTO_START_SPEED_KMH, HEADLESS_LOCATION_QUEUE_KEY, REPLAY_LOCATION
 import { haversineMeters } from '../utils/complianceAlertLogic';
 import { isBluetoothGateSatisfied } from '../utils/bluetoothGateLogic';
 import { evaluateActivityGate } from '../utils/activityGateLogic';
-import { evaluateStillness, SPEED_STOP_MS, STILL_MS } from '../utils/stillnessLogic';
+import { evaluateStillness, SPEED_STOP_MS, stillThresholdMs } from '../utils/stillnessLogic';
 import {
   isBluetoothVehicleDetectionAvailable, getConnectedBluetoothDeviceName,
   subscribeBluetoothDeviceConnected, subscribeBluetoothDeviceDisconnected,
@@ -396,6 +396,16 @@ export function useTripAutoDetection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The paired car's Bluetooth is connected right now (engine on) — a stop
+  // then gets the longer stillness limit, see STILL_WITH_CAR_CONNECTED_MS.
+  // Kept current while recording by the connect/disconnect events above; a
+  // disconnect ends the trip anyway.
+  function isPairedCarConnected(): boolean {
+    const connected = connectedBluetoothDeviceRef.current;
+    return connected != null
+      && isBluetoothGateSatisfied(isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connected);
+  }
+
   // Shared by the per-fix STILL_MS check inside handleLocation and the
   // wall-clock stillness watchdog below — both just need to know "stillness
   // has been sustained long enough, end the trip now."
@@ -485,16 +495,19 @@ export function useTripAutoDetection() {
         forceGpsOnForCar('heartbeat');
         return;
       }
+      const carConnected = isPairedCarConnected();
       const reason = evaluateStillness({
         isTracking: isTrackingRef.current,
         stillSince: stillSinceRef.current,
         lastFixAt: lastFixAtRef.current,
         lastFixSpeedMs: lastFixSpeedMsRef.current,
         now: Date.now(),
+        carConnected,
       });
       if (!reason) return;
       logDiagnostic('Auto-ending trip — vehicle has been stationary.', {
         reason,
+        carConnected,
         secondsSinceLastFix: lastFixAtRef.current === null
           ? null
           : Math.round((Date.now() - lastFixAtRef.current) / 1000),
@@ -1074,7 +1087,10 @@ export function useTripAutoDetection() {
             if (speedMs < SPEED_STOP_MS) {
               if (stillSinceRef.current === null) {
                 stillSinceRef.current = Date.now();
-              } else if (Date.now() - stillSinceRef.current >= STILL_MS) {
+              } else if (Date.now() - stillSinceRef.current >= stillThresholdMs(isPairedCarConnected())) {
+                logDiagnostic('Auto-ending trip — vehicle has been stationary.', {
+                  reason: 'sustained-low-speed', carConnected: isPairedCarConnected(),
+                });
                 endTripDueToStillness();
               }
             } else {

@@ -10,6 +10,18 @@ export const SPEED_STOP_MS = 0.5; // ~1.8 km/h
 // feedback (was 45s, undocumented to users and shorter than expected).
 export const STILL_MS = 2 * 60 * 1000;
 
+// While the paired car's Bluetooth is still connected the engine is on, so a
+// stop is a red light or a queue, not parking — parking shows up as the
+// Bluetooth disconnect, which ends the trip at once. Real drive 26 Oct 2026:
+// 2 min 1 s at a red light (FL 50 & Bloxam Ave) ended the trip there and a
+// new one started 22 s later. Still bounded, for a car whose Bluetooth stays
+// on after the engine is switched off.
+export const STILL_WITH_CAR_CONNECTED_MS = 10 * 60 * 1000;
+
+export function stillThresholdMs(carConnected: boolean): number {
+  return carConnected ? STILL_WITH_CAR_CONNECTED_MS : STILL_MS;
+}
+
 // Location updates simply stopping is the other way a parked car shows up,
 // and it used to be undetectable. BackgroundGeolocation deliberately stops
 // delivering fixes once its own motion detection decides the device is
@@ -42,6 +54,8 @@ export interface StillnessInputs {
   /** Speed reported by that most recent fix. */
   lastFixSpeedMs: number;
   now: number;
+  /** Whether the paired car's Bluetooth is connected — see STILL_WITH_CAR_CONNECTED_MS. */
+  carConnected?: boolean;
 }
 
 /**
@@ -53,16 +67,18 @@ export function evaluateStillness({
   lastFixAt,
   lastFixSpeedMs,
   now,
+  carConnected = false,
 }: StillnessInputs): StillnessEndReason | null {
   if (!isTracking) return null;
+  const threshold = stillThresholdMs(carConnected);
 
-  if (stillSince !== null && now - stillSince >= STILL_MS) {
+  if (stillSince !== null && now - stillSince >= threshold) {
     return 'sustained-low-speed';
   }
 
   if (
     lastFixAt !== null
-    && now - lastFixAt >= STILL_MS
+    && now - lastFixAt >= threshold
     && lastFixSpeedMs < SILENCE_END_MAX_LAST_SPEED_MS
   ) {
     return 'location-updates-stopped';

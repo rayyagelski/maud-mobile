@@ -1,4 +1,4 @@
-import { evaluateStillness, STILL_MS } from '../src/utils/stillnessLogic';
+import { evaluateStillness, STILL_MS, STILL_WITH_CAR_CONNECTED_MS } from '../src/utils/stillnessLogic';
 
 const NOW = 1_700_000_000_000;
 
@@ -72,5 +72,24 @@ describe('evaluateStillness', () => {
       lastFixAt: NOW - STILL_MS,
       lastFixSpeedMs: 0,
     }))).toBe('sustained-low-speed');
+  });
+});
+
+describe('evaluateStillness with the paired car connected (engine on)', () => {
+  it('does not end a trip at a 2-minute red light (real drive 26 Oct 2026)', () => {
+    const twoMinOneSec = STILL_MS + 1000;
+    expect(evaluateStillness(inputs({ stillSince: NOW - twoMinOneSec, carConnected: true }))).toBeNull();
+    expect(evaluateStillness(inputs({ lastFixAt: NOW - twoMinOneSec, carConnected: true }))).toBeNull();
+  });
+
+  it('still ends it after the longer limit', () => {
+    expect(evaluateStillness(inputs({ stillSince: NOW - STILL_WITH_CAR_CONNECTED_MS, carConnected: true })))
+      .toBe('sustained-low-speed');
+    expect(evaluateStillness(inputs({ lastFixAt: NOW - STILL_WITH_CAR_CONNECTED_MS, carConnected: true })))
+      .toBe('location-updates-stopped');
+  });
+
+  it('keeps the 2-minute limit without the car connected (unchanged)', () => {
+    expect(evaluateStillness(inputs({ stillSince: NOW - STILL_MS, carConnected: false }))).toBe('sustained-low-speed');
   });
 });
