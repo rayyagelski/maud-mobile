@@ -18,6 +18,15 @@ describe('speeding allowance (fair scoring)', () => {
     expect(allowedUpTo(100, rows)).toBe(110);
   });
 
+  it('allows 15 on a 5 sign (parking areas) while 10-20 keep +5', () => {
+    expect(allowedUpTo(5, rows)).toBe(15);
+    expect(allowedUpTo(10, rows)).toBe(15);
+    expect(allowedUpTo(20, rows)).toBe(25);
+    expect(countsForScore(15 * MPH, 5 * MPH, true, rows)).toBe(false);
+    expect(countsForScore(16 * MPH, 5 * MPH, true, rows)).toBe(true);
+    expect(allowanceRowsFor(undefined, false)[0]).toEqual({ sign: 5, allowed: 15 });
+  });
+
   it('counts only speeds above the allowance', () => {
     expect(countsForScore(30 * MPH, 25 * MPH, true, rows)).toBe(false);
     expect(countsForScore(31 * MPH, 25 * MPH, true, rows)).toBe(true);

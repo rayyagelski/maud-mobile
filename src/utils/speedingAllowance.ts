@@ -22,7 +22,13 @@ export interface SpeedingAllowanceTables {
   kmh: SpeedingAllowanceRow[];
 }
 
+// 5 -> 15 is for parking areas; 10-20 are listed so they keep their +5
+// instead of taking the 5 sign's +10.
 const DEFAULT_ROWS: SpeedingAllowanceRow[] = [
+  { sign: 5, allowed: 15 },
+  { sign: 10, allowed: 15 },
+  { sign: 15, allowed: 20 },
+  { sign: 20, allowed: 25 },
   { sign: 25, allowed: 30 },
   { sign: 30, allowed: 35 },
   { sign: 35, allowed: 40 },
