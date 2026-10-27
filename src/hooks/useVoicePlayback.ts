@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Tts from 'react-native-tts';
 import { logDiagnostic } from '../services/diagnosticsLog';
+import { isMediaAudioOnBluetooth } from '../services/bluetooth/bluetoothVehicleDetectionModule';
 
 // getInitStatus() only needs to resolve once per app session — cached across
 // hook instances so every screen using voice playback doesn't re-trigger it.
@@ -42,7 +43,9 @@ interface QueuedMessage { text: string; priority: VoicePriority; queuedAt: numbe
 
 // id: the engine's utterance id (resolved by Tts.speak), so finish/cancel
 // events of an utterance we interrupted can't be mistaken for this one's.
-let current: { priority: VoicePriority; text: string; id: string | null; startedAt: number; waitedMs: number } | null = null;
+let current: {
+  priority: VoicePriority; text: string; id: string | null; startedAt: number; waitedMs: number; route: string;
+} | null = null;
 
 // Every spoken message gets ONE log line when it ends (how, after how long,
 // how long it waited) so a drive's Diagnostics log shows whether an
@@ -60,16 +63,34 @@ function notifySpeaking(speaking: boolean) {
   speakingListeners.forEach(listener => listener(speaking));
 }
 
+// Where the voice goes. With the car's Bluetooth "Media audio" on, Android
+// sends normal (media) speech to the car, where it is heard only while the
+// car's source is Bluetooth audio — speed alerts and trip results were
+// missed (test 13 Oct 2026). The app can't switch the phone's Media audio
+// setting off (Android reserves that for system apps), so instead, while
+// media goes to Bluetooth, the voice is played on the alarm channel: Android
+// always plays that on the phone's own speaker (and on the car as well).
+// Without Bluetooth media nothing changes — media channel and volume as before.
+export function speechOptionsFor(mediaAudioOnBluetooth: boolean): { androidParams?: { KEY_PARAM_STREAM: 'STREAM_ALARM' } } {
+  return mediaAudioOnBluetooth ? { androidParams: { KEY_PARAM_STREAM: 'STREAM_ALARM' } } : {};
+}
+
 function play(message: QueuedMessage) {
   const playing = {
     priority: message.priority, text: message.text, id: null as string | null,
-    startedAt: Date.now(), waitedMs: Date.now() - message.queuedAt,
+    startedAt: Date.now(), waitedMs: Date.now() - message.queuedAt, route: 'phone' as 'phone' | 'phone speaker (alarm channel)',
   };
   current = playing;
   if (watchdog) clearTimeout(watchdog);
   watchdog = setTimeout(() => onUtteranceDone('no end reported by speech engine'), estimatedDurationMs(message.text));
-  Promise.resolve(Tts.speak(message.text) as unknown as Promise<string | number>)
-    .then((id) => { if (current === playing) playing.id = String(id); })
+  isMediaAudioOnBluetooth()
+    .then((onBluetooth) => {
+      // Interrupted by a more urgent message while the check ran.
+      if (current !== playing) return undefined;
+      if (onBluetooth) playing.route = 'phone speaker (alarm channel)';
+      return Tts.speak(message.text, speechOptionsFor(onBluetooth) as never) as unknown as Promise<string | number>;
+    })
+    .then((id) => { if (id != null && current === playing) playing.id = String(id); })
     .catch((err: unknown) => {
       if (current === playing) onUtteranceDone('speech engine refused: ' + ((err as Error)?.message ?? String(err)));
     });
@@ -95,7 +116,7 @@ function playNext() {
 function onUtteranceDone(how: string) {
   if (current) {
     logDiagnostic('Voice message.', {
-      text: logText(current.text), priority: current.priority, how,
+      text: logText(current.text), priority: current.priority, how, route: current.route,
       spokeMs: Date.now() - current.startedAt, waitedMs: current.waitedMs,
     });
   }

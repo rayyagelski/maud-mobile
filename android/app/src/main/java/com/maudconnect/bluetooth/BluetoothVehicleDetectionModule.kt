@@ -106,6 +106,28 @@ class BluetoothVehicleDetectionModule(reactContext: ReactApplicationContext) :
     promise.resolve(isScreenInteractiveNow())
   }
 
+  // Whether the phone's media sound currently goes to a Bluetooth device
+  // (the car's "Media audio" profile is on and connected). Android lists an
+  // A2DP / LE audio output only while that link is up, so this is false with
+  // Media audio switched off. Used to keep the app's voice on the phone
+  // speaker in that case — see useVoicePlayback.ts.
+  @ReactMethod
+  fun isMediaAudioOnBluetooth(promise: Promise) {
+    try {
+      val audioManager = reactApplicationContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+      val bluetoothTypes = mutableSetOf(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        bluetoothTypes.add(android.media.AudioDeviceInfo.TYPE_BLE_HEADSET)
+        bluetoothTypes.add(android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER)
+      }
+      promise.resolve(
+        audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any { it.type in bluetoothTypes },
+      )
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   // Android restrictions that cut a BACKGROUNDED app off from the network.
   // Real-drive evidence: every GPS point uploaded during two drives reached
   // the server only at the second the app was reopened — the OS was holding

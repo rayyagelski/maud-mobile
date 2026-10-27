@@ -13,6 +13,7 @@ interface BluetoothVehicleDetectionNativeModule {
   getBondedDevices(): Promise<string[]>;
   startScreenStateUpdates(): void;
   isScreenInteractive(): Promise<boolean>;
+  isMediaAudioOnBluetooth?(): Promise<boolean>;
   getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
   startNetworkStatusUpdates(): void;
   requestIgnoreBatteryOptimizations(): Promise<boolean>;
@@ -99,6 +100,18 @@ export async function isScreenInteractive(): Promise<boolean> {
     return await nativeModule.isScreenInteractive();
   } catch {
     return true;
+  }
+}
+
+// Whether media sound currently goes to a Bluetooth device (car "Media
+// audio" on and connected). False wherever it can't be told (iOS, module not
+// linked), so callers keep their normal behaviour.
+export async function isMediaAudioOnBluetooth(): Promise<boolean> {
+  if (!nativeModule?.isMediaAudioOnBluetooth) return false;
+  try {
+    return await nativeModule.isMediaAudioOnBluetooth();
+  } catch {
+    return false;
   }
 }
 
