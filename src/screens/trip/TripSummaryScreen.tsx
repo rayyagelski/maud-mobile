@@ -18,6 +18,7 @@ import { useVoicePlayback } from '../../hooks/useVoicePlayback';
 import { useVgdTripDetails } from '../../hooks/useVgdTripDetails';
 import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import { tripDriverSlot } from '../../utils/tripDriver';
+import { qualifyMessage } from '../../utils/rewardFormat';
 import { tripDistanceKm, tripDurationSeconds, tripAvgSpeedKmh, formatDistance, formatDuration, formatSpeed } from '../../utils/helpers';
 import type { MainStackNavigationProp, TripSummaryRouteProp } from '../../types/navigation.types';
 import { markSummarySpoken, wasSummarySpoken } from '../../services/tripSummaryVoice';
@@ -178,6 +179,10 @@ export default function TripSummaryScreen() {
     nextStatus && nextStatus !== 'none' ? monthlyReward?.thresholds[nextStatus] ?? null : null;
   const monthlyPoints = monthlyReward?.monthlyPoints ?? 0;
   const pointsToNext = monthlyReward?.progress.pointsToNext ?? null;
+  // Before the month's minimum miles/trips are reached no points are earned
+  // and no status is possible — say what's missing instead of "0 points
+  // away from Bronze" (see utils/rewardFormat.ts).
+  const qualifyText = monthlyReward ? qualifyMessage(monthlyReward, isImperial) : null;
   const statusProgressPct = nextStatusThreshold
     ? Math.min(100, (monthlyPoints / nextStatusThreshold) * 100)
     : 100;
@@ -314,9 +319,10 @@ export default function TripSummaryScreen() {
                     Nice Work! You earned {reward.tripPointsEarned} reward point{reward.tripPointsEarned === 1 ? '' : 's'}
                   </Text>
                   <Text style={styles.rewardsSub}>
-                    {nextStatusLabel && pointsToNext != null
+                    {qualifyText
+                      ?? (nextStatusLabel && pointsToNext != null
                       ? `You are ${pointsToNext} point${pointsToNext === 1 ? '' : 's'} away from ${nextStatusLabel} status.`
-                      : "You've reached the top reward status — great driving!"}
+                      : "You've reached the top reward status — great driving!")}
                   </Text>
                   <View style={styles.statusBarBg}>
                     <View style={[styles.statusBarFill, { width: `${statusProgressPct}%` as any }]} />

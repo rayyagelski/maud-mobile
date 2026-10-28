@@ -9,6 +9,7 @@ interface MonthlyRewardDto {
   trip_count: number;
   monthly_reward_score: number;
   monthly_points: number;
+  monthly_points_earned?: number;
   monthly_phone_subscore: number;
   meets_eligibility: boolean;
   eligibility_gap: { km_still_needed: number; trips_still_needed: number };
@@ -35,6 +36,7 @@ function fromDto(dto: MonthlyRewardDto): MonthlyRewardSummary {
     tripCount: dto.trip_count,
     monthlyRewardScore: dto.monthly_reward_score,
     monthlyPoints: dto.monthly_points,
+    monthlyPointsEarned: dto.monthly_points_earned ?? null,
     monthlyPhoneSubscore: dto.monthly_phone_subscore,
     meetsEligibility: dto.meets_eligibility,
     eligibilityGap: {

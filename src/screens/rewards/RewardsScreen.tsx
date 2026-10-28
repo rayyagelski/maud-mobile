@@ -20,7 +20,9 @@ import { fetchRewardOverview } from '../../store/slices/rewardSlice';
 import { useViewedDriverTrips } from '../../hooks/useViewedDriverTrips';
 import ViewedDriverBar from '../../components/drivers/ViewedDriverBar';
 import { kmToMiles } from '../../utils/helpers';
-import { formatRewardPoints } from '../../utils/rewardFormat';
+import {
+  earnedPointsThisMonth, formatRewardPoints, pendingPointsNote, qualifyMessage,
+} from '../../utils/rewardFormat';
 import type { MonthlyRewardSummary, RewardStatus } from '../../types/reward.types';
 
 const TEAL = '#3ABFBF';
@@ -54,14 +56,8 @@ const STATUS_META: Record<RewardStatus, { label: string; color: string }> = {
 function buildTips(m: MonthlyRewardSummary, isImperial: boolean): string[] {
   const tips: string[] = [];
   if (!m.meetsEligibility) {
-    if (m.eligibilityGap.kmStillNeeded > 0) {
-      const remaining = isImperial ? kmToMiles(m.eligibilityGap.kmStillNeeded) : m.eligibilityGap.kmStillNeeded;
-      const unit = isImperial ? 'miles' : 'km';
-      tips.push(`Drive ${remaining.toFixed(0)} more ${unit} this month to qualify for rewards.`);
-    }
-    if (m.eligibilityGap.tripsStillNeeded > 0) {
-      tips.push(`Complete ${m.eligibilityGap.tripsStillNeeded} more trip${m.eligibilityGap.tripsStillNeeded === 1 ? '' : 's'} this month to qualify.`);
-    }
+    const qualify = qualifyMessage(m, isImperial);
+    if (qualify) tips.push(qualify);
   } else if (m.progress.nextStatus && m.progress.pointsToNext != null) {
     tips.push(`${m.progress.pointsToNext} more points to reach ${m.progress.nextStatus} status.`);
   } else {
@@ -206,8 +202,8 @@ function ScoreItem({ Icon, score, label, iconBg }: {
 // ── Rewards summary row ────────────────────────────────────────────────────
 
 // Values are reward points (formatRewardPoints), not money.
-function SummaryRow({ icon, iconBg, label, value, valueColor, highlighted, divider }: {
-  icon: React.ReactNode; iconBg: string; label: string; value: string;
+function SummaryRow({ icon, iconBg, label, note, value, valueColor, highlighted, divider }: {
+  icon: React.ReactNode; iconBg: string; label: string; note?: string | null; value: string;
   valueColor: string; highlighted?: boolean; divider?: boolean;
 }) {
   return (
@@ -215,9 +211,12 @@ function SummaryRow({ icon, iconBg, label, value, valueColor, highlighted, divid
       <View style={[styles.summaryIconCircle, { backgroundColor: iconBg }]}>
         {icon}
       </View>
-      <Text style={[styles.summaryLabel, highlighted && { color: TEAL, fontWeight: '700' }]}>
-        {label}
-      </Text>
+      <View style={styles.summaryLabelWrap}>
+        <Text style={[styles.summaryLabel, highlighted && { color: TEAL, fontWeight: '700' }]}>
+          {label}
+        </Text>
+        {note ? <Text style={styles.summaryNote}>{note}</Text> : null}
+      </View>
       <Text style={[styles.summaryDollar, { color: valueColor }]}>{value}</Text>
     </View>
   );
@@ -294,7 +293,7 @@ export default function RewardsScreen() {
     if (!currentMonth) return;
     const tierLabel = STATUS_META[currentMonth.status].label;
     Share.share({
-      message: `I'm a ${tierLabel} on MAUD Connect this month — ${currentMonth.monthlyPoints} points earned! 🏆`,
+      message: `I'm a ${tierLabel} on MAUD Connect this month — ${earnedPointsThisMonth(currentMonth)} points earned! 🏆`,
     });
   }
 
@@ -321,7 +320,8 @@ export default function RewardsScreen() {
     ? Math.round(((currentMonth.monthlyRewardScore - previousMonth.monthlyRewardScore) / previousMonth.monthlyRewardScore) * 100)
     : null;
   const tips = buildTips(currentMonth, isImperial);
-  const earnedLabel = formatRewardPoints(currentMonth.monthlyPoints);
+  const earnedLabel = formatRewardPoints(earnedPointsThisMonth(currentMonth));
+  const pendingNote = pendingPointsNote(currentMonth);
   const accruedLabel = formatRewardPoints(currentMonth.lifetimeEarnedPoints);
   const redeemedLabel = formatRewardPoints(currentMonth.lifetimeRedeemedPoints);
   const balanceLabel = formatRewardPoints(currentMonth.balancePoints);
@@ -425,6 +425,7 @@ export default function RewardsScreen() {
             icon={<StarOutlineIcon color={EARNED_GREEN} size={20} />}
             iconBg="#E3F5E9"
             label="Earned This Month"
+            note={pendingNote}
             value={earnedLabel}
             valueColor={EARNED_GREEN}
             divider
@@ -631,7 +632,9 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, columnGap: 12 },
   summaryRowHighlighted: { backgroundColor: '#EFF9F9', borderRadius: 10, paddingHorizontal: 10, marginHorizontal: -4 },
   summaryIconCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  summaryLabel: { flex: 1, fontSize: 14, color: '#1A1A1A' },
+  summaryLabelWrap: { flex: 1 },
+  summaryLabel: { fontSize: 14, color: '#1A1A1A' },
+  summaryNote: { fontSize: 12, color: GREY, marginTop: 2, marginRight: 8 },
   summaryDollar: { fontSize: 15, fontWeight: '700' },
 
   // ── Redeem points

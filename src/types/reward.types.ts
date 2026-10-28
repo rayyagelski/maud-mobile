@@ -8,6 +8,9 @@ export interface MonthlyRewardSummary {
   tripCount: number;
   monthlyRewardScore: number;
   monthlyPoints: number;
+  // Points actually earned this month — 0 until the month qualifies (see
+  // utils/rewardFormat.ts). Null from a backend that doesn't send it yet.
+  monthlyPointsEarned: number | null;
   monthlyPhoneSubscore: number;
   meetsEligibility: boolean;
   eligibilityGap: { kmStillNeeded: number; tripsStillNeeded: number };

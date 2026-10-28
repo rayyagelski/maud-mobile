@@ -35,3 +35,40 @@ describe('Rewards Summary in points', () => {
     expect(formatRewardPoints(m.balancePoints)).toBe('—');
   });
 });
+
+import { earnedPointsThisMonth, pendingPointsNote, qualifyMessage } from '../src/utils/rewardFormat';
+
+describe('points are earned only once the month qualifies (min miles and trips)', () => {
+  // The screenshot case 28 Oct 2026: 602 points, 93 miles and 5 trips short.
+  const notQualified = {
+    monthlyPoints: 602, meetsEligibility: false,
+    eligibilityGap: { kmStillNeeded: 149.3, tripsStillNeeded: 5 },
+  };
+
+  it('shows 0 earned and the 602 as pending before qualifying', () => {
+    expect(earnedPointsThisMonth(notQualified)).toBe(0);
+    expect(earnedPointsThisMonth({ ...notQualified, monthlyPointsEarned: 0 })).toBe(0);
+    expect(pendingPointsNote(notQualified)).toBe('602 pts pending — earned once you qualify this month');
+  });
+
+  it('counts the points once qualified', () => {
+    const qualified = { ...notQualified, meetsEligibility: true, eligibilityGap: { kmStillNeeded: 0, tripsStillNeeded: 0 } };
+    expect(earnedPointsThisMonth(qualified)).toBe(602);
+    expect(earnedPointsThisMonth({ ...qualified, monthlyPointsEarned: 602 })).toBe(602);
+    expect(pendingPointsNote(qualified)).toBeNull();
+    expect(qualifyMessage(qualified, true)).toBeNull();
+  });
+
+  it('says what is missing, in the driver\'s units', () => {
+    expect(qualifyMessage(notQualified, true))
+      .toBe('Drive 93 more miles and complete 5 more trips this month to start earning points.');
+    expect(qualifyMessage(notQualified, false))
+      .toBe('Drive 150 more km and complete 5 more trips this month to start earning points.');
+    expect(qualifyMessage({ ...notQualified, eligibilityGap: { kmStillNeeded: 0, tripsStillNeeded: 1 } }, true))
+      .toBe('Complete 1 more trip this month to start earning points.');
+  });
+
+  it('shows no pending note for a month with no points yet', () => {
+    expect(pendingPointsNote({ monthlyPoints: 0, meetsEligibility: false })).toBeNull();
+  });
+});
