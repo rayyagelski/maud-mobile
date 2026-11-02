@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { request, check, PERMISSIONS, RESULTS } from 'react-native-permissions';
+import { request, check, openSettings, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import BackgroundGeolocation from 'react-native-background-geolocation';
 import LocationPinIcon from '../../components/common/LocationPinIcon';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
@@ -57,10 +57,38 @@ export default function LocationPermissionScreen() {
     });
 
     try {
-      await request(permission);
+      const result = await request(permission);
+      if (Platform.OS === 'ios' && result !== RESULTS.GRANTED) {
+        await offerAlwaysLocationSettings();
+      }
     } catch {
       // Denied/unavailable — fall back to foreground-only tracking, not fatal.
     }
+  }
+
+  // iOS shows the "Change to Always Allow" prompt only once per install —
+  // after "Keep Only While Using" (or on any later request, which returns
+  // BLOCKED with no dialog) onboarding used to just move on silently,
+  // leaving trips foreground-only. Settings is the only remaining way to
+  // grant "Always" at that point.
+  async function offerAlwaysLocationSettings() {
+    await waitForActivityFocus();
+    await new Promise<void>((resolve) => {
+      Alert.alert(
+        'Allow Location "Always"',
+        'To record trips while your phone is locked, open Settings → Location and choose "Always".',
+        [
+          { text: 'Not Now', style: 'cancel', onPress: () => resolve() },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              openSettings().catch(() => {});
+              resolve();
+            },
+          },
+        ],
+      );
+    });
   }
 
   // Android-only: OS-level background location permission alone isn't enough
