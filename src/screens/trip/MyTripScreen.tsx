@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -20,6 +20,7 @@ import {
   estimateFuelCo2Grams, litersToGallons,
 } from '../../utils/helpers';
 import { MS2_PER_G } from '../../utils/constants';
+import { buildCumulativeRouteDistances } from '../../utils/turnByTurnLogic';
 import type { MainStackNavigationProp, MyTripRouteProp } from '../../types/navigation.types';
 import type { TelematicsEvent } from '../../types/trip.types';
 
@@ -28,6 +29,23 @@ import type { TelematicsEvent } from '../../types/trip.types';
 const MAP_HEIGHT = Dimensions.get('window').height * 0.46;
 
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
+
+// Dash pattern for the estimated (dashed) route. Android's Google Maps takes
+// lengths in pixels, but react-native-maps' iOS Google provider turns them
+// into METRES along the route (GMSStyleSpans, kGMSLengthRhumb), so the
+// Android [1, 8] drew 1 m dots 8 m apart on iOS — invisible on a fitted
+// 10 km trip, which showed only the A/B pins. On iOS the dashes are a
+// fixed share of the route's own length instead; the map is always fitted
+// to that route, so they look the same on every trip.
+const ANDROID_ESTIMATED_DASH = [1, 8];
+const IOS_ESTIMATED_DASHES_PER_ROUTE = 80;
+
+function estimatedRouteDashPattern(route: LatLng[]): number[] {
+  if (Platform.OS !== 'ios') return ANDROID_ESTIMATED_DASH;
+  const distances = buildCumulativeRouteDistances(route);
+  const dash = Math.max(1, (distances[distances.length - 1] ?? 0) / (IOS_ESTIMATED_DASHES_PER_ROUTE * 2));
+  return [dash, dash];
+}
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 
@@ -439,6 +457,17 @@ export default function MyTripScreen() {
     });
   }, [mapReady, simulatedRoute]);
 
+  // Which children the MapView has — see the `key` comment on it below.
+  const mapChildrenKey = [
+    routeCoords.length > 1 ? 'route' : '',
+    routeCoords.length <= 1 && simulatedRoute && simulatedRoute.length > 1 ? 'estimated' : '',
+    start ? 'A' : '',
+    end && end !== start ? 'B' : '',
+    `s${speedingGroups.length}`,
+    `p${phoneUsageEvents.length}`,
+    `h${harshEventPins.length}`,
+  ].join('-');
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
 
@@ -457,14 +486,28 @@ export default function MyTripScreen() {
           </View>
         ) : (
         <MapView
+          // react-native-maps 1.14 is a legacy (Paper) component on the New
+          // Architecture, and its interop layer mishandles children added to
+          // an already-mounted map anywhere but the end: they wait until the
+          // MapView's own props next change (the estimated route never showed
+          // on iOS, only the A/B pins), and once flushed can land at an index
+          // past the map's own list (SIGABRT in -[AIRGoogleMap
+          // insertReactSubview:atIndex:]). The route and event dots arrive in
+          // stages (VGD events, then a HERE request), so remount the map
+          // whenever its set of children changes: children created together
+          // with the map are all attached in order. iOS only: Android adds
+          // late children correctly, and a remount there would just reload
+          // the map tiles each time VGD events or the route arrive.
+          key={Platform.OS === 'ios' ? mapChildrenKey : undefined}
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           provider={PROVIDER_GOOGLE}
           initialRegion={{ ...start, latitudeDelta: 0.2, longitudeDelta: 0.2 }}
           onMapReady={() => {
             setMapReady(true);
-            if (routeCoords.length > 1) {
-              mapRef.current?.fitToCoordinates(routeCoords, {
+            const fitRoute = routeCoords.length > 1 ? routeCoords : simulatedRoute;
+            if (fitRoute && fitRoute.length > 1) {
+              mapRef.current?.fitToCoordinates(fitRoute, {
                 edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
                 animated: false,
               });
@@ -494,7 +537,7 @@ export default function MyTripScreen() {
               strokeWidth={5}
               lineCap="round"
               lineJoin="round"
-              lineDashPattern={[1, 8]}
+              lineDashPattern={estimatedRouteDashPattern(simulatedRoute)}
             />
           )}
           {mapReady && start && (
