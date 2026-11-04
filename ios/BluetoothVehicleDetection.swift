@@ -1,5 +1,6 @@
 import AVFAudio
 import Foundation
+import UIKit
 
 /// Detects the phone's audio route switching to the car's Bluetooth
 /// hands-free/audio connection (HFP/A2DP) — used to auto-select the paired
@@ -11,10 +12,11 @@ import Foundation
 class BluetoothVehicleDetection: RCTEventEmitter {
   private var observing = false
   private var connectedDeviceName: String?
+  private var screenStateObserving = false
 
   override func supportedEvents() -> [String]! {
-    // The last two are Android-only and never emitted here, but must be
-    // declared: RCTEventEmitter throws if JS subscribes to an undeclared event.
+    // onNetworkStatusChanged is Android-only and never emitted here, but must
+    // be declared: RCTEventEmitter throws if JS subscribes to an undeclared event.
     return [
       "onBluetoothDeviceConnected",
       "onBluetoothDeviceDisconnected",
@@ -67,16 +69,53 @@ class BluetoothVehicleDetection: RCTEventEmitter {
     resolve([String]())
   }
 
-  // iOS exposes no public screen-on/unlocked state to apps; the phone-usage
-  // proxy on iOS therefore stays AppState-only (iOS also doesn't report a
-  // locked screen as 'background' the way Android does, so the Android
-  // problem this exists for doesn't arise there). Interface parity only.
+  // Locked vs unlocked, for the phone-usage proxy: iOS reports a locked
+  // screen as 'background' just like switching to another app, so a drive
+  // with the phone locked in the holder counted as minutes of "other app"
+  // usage. iOS has no public screen-on/lock event, but on a phone with a
+  // passcode (required for Face ID / Touch ID) the protected-data
+  // notifications are one: data becomes unavailable when it locks — up to
+  // ~10 s after the lock itself, see useHarshEventTracker.ts for how that
+  // lag is handled — and available again on unlock. Without a passcode
+  // they never fire and the state stays "interactive" (AppState-only, as
+  // before).
   @objc(startScreenStateUpdates)
-  func startScreenStateUpdates() {}
+  func startScreenStateUpdates() {
+    DispatchQueue.main.async {
+      if self.screenStateObserving { return }
+      self.screenStateObserving = true
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(self.handleProtectedDataUnavailable(_:)),
+        name: UIApplication.protectedDataWillBecomeUnavailableNotification,
+        object: nil
+      )
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(self.handleProtectedDataAvailable(_:)),
+        name: UIApplication.protectedDataDidBecomeAvailableNotification,
+        object: nil
+      )
+    }
+  }
 
   @objc(isScreenInteractive:rejecter:)
   func isScreenInteractive(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-    resolve(true)
+    DispatchQueue.main.async {
+      resolve(UIApplication.shared.isProtectedDataAvailable)
+    }
+  }
+
+  @objc private func handleProtectedDataUnavailable(_ notification: Notification) {
+    if observing {
+      sendEvent(withName: "onScreenInteractiveChanged", body: ["interactive": false])
+    }
+  }
+
+  @objc private func handleProtectedDataAvailable(_ notification: Notification) {
+    if observing {
+      sendEvent(withName: "onScreenInteractiveChanged", body: ["interactive": true])
+    }
   }
 
   // Android-only concept (Data Saver / restricted background) — iOS has no

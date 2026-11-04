@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import Tts from 'react-native-tts';
 import { logDiagnostic } from '../services/diagnosticsLog';
 import { isMediaAudioOnBluetooth } from '../services/bluetooth/bluetoothVehicleDetectionModule';
@@ -8,7 +9,19 @@ import { isMediaAudioOnBluetooth } from '../services/bluetooth/bluetoothVehicleD
 let ttsReady: Promise<void> | null = null;
 function ensureTtsReady(): Promise<void> {
   if (!ttsReady) {
-    ttsReady = Tts.getInitStatus().then(() => undefined).catch(() => undefined);
+    ttsReady = Tts.getInitStatus()
+      // iOS: without this react-native-tts leaves the app's audio session on
+      // its default category, which the ring/silent switch mutes and which
+      // can't play from the background — so on a drive (phone on silent,
+      // or locked in the holder) the engine "spoke" every announcement and
+      // nothing was heard. 'ignore' switches to the playback category in
+      // voice-prompt mode (plays with the switch on silent, goes to the car
+      // over Bluetooth, mixes with the driver's music); the "audio"
+      // background mode in Info.plist lets it play while the screen is
+      // locked. No-op on Android.
+      .then(() => (Platform.OS === 'ios' ? Tts.setIgnoreSilentSwitch('ignore') : undefined))
+      .then(() => undefined)
+      .catch(() => undefined);
   }
   return ttsReady;
 }

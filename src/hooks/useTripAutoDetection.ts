@@ -297,7 +297,18 @@ export function useTripAutoDetection() {
     previousActiveTripRef.current = activeTrip;
   }, [activeTrip, isTracking]);
   useEffect(() => { pendingStartRef.current = pendingStart; }, [pendingStart]);
-  useEffect(() => { pairingsRef.current = pairings; }, [pairings]);
+  // A first-time connect (fresh install or after logout, which clears
+  // pairings) auto-pairs in useBluetoothVehicleDetection — after the connect
+  // handler below has already run forceGpsOnForCar against the old pairings
+  // and given up, and no second connect event follows. Android's heartbeat
+  // recovered within 60 s, but on iOS onHeartbeat doesn't fire while
+  // stationary (the plugin only does that with preventSuspend), so GPS
+  // stayed off until the car left the plugin's stationary geofence (real
+  // drive 4 Nov 2026: connected 8:45:17, GPS on 8:47:18 already at 48 km/h).
+  useEffect(() => {
+    pairingsRef.current = pairings;
+    forceGpsOnForCar('paired');
+  }, [pairings]);
 
   // Tracks live BT connection state for the recording-gate check below —
   // separate effect so it doesn't need to be part of the main location-
@@ -330,7 +341,7 @@ export function useTripAutoDetection() {
   // car with the engine on but not yet moving — bounded by BT dropping when
   // the car is turned off, at which point the SDK is released back to its
   // own stationary detection (changePace(false) below).
-  function forceGpsOnForCar(trigger: 'bt-connected' | 'heartbeat' | 'mount' | 'ready' | 'sdk-stationary') {
+  function forceGpsOnForCar(trigger: 'bt-connected' | 'paired' | 'heartbeat' | 'mount' | 'ready' | 'sdk-stationary') {
     if (isTrackingRef.current) return;
     const connected = connectedBluetoothDeviceRef.current;
     if (!isBluetoothGateSatisfied(isBluetoothVehicleDetectionAvailable(), pairingsRef.current, connected)) return;
@@ -339,8 +350,9 @@ export function useTripAutoDetection() {
       // On the connect event itself, don't trust isMoving — real-drive log:
       // the connect event produced no forcing at all and it took the next
       // heartbeat, 49 seconds later, to actually turn GPS on. changePace is
-      // idempotent, so asserting it on connect costs nothing.
-      if (state.isMoving && trigger !== 'bt-connected') return;
+      // idempotent, so asserting it on connect costs nothing. A pairing
+      // saved by that same connect is the connect, just arriving later.
+      if (state.isMoving && trigger !== 'bt-connected' && trigger !== 'paired') return;
       forcedMovingRef.current = true;
       logDiagnostic('Forcing GPS on — paired car is connected but SDK was stationary.', {
         trigger, connectedDevice: connected,

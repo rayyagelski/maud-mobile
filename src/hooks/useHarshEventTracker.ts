@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { useAppDispatch } from './useAppDispatch';
 import { useAppSelector } from './useAppSelector';
 import { addTelematicsEvent } from '../store/slices/tripSlice';
@@ -151,9 +151,23 @@ export function useHarshEventTracker(): void {
     // pocket). Usage now means: app not in the foreground AND the screen is
     // on and unlocked — i.e. the driver is in some other app. The screen
     // signal comes from the native module (subscribeScreenInteractive);
-    // where it doesn't exist (iOS) it reads as always-interactive and this
+    // where it doesn't exist it reads as always-interactive and this
     // degrades to the previous AppState-only behaviour.
-    let appActive = AppState.currentState === 'active';
+    //
+    // iOS (real drive 2 Nov 2026: 121 s, 135 s and 180 s of "other app" with
+    // the phone locked in the holder) differs in two ways:
+    //  - 'inactive' is a system overlay over MAUD (notification banner,
+    //    Control Center, the first instant of a lock), not another app —
+    //    only 'background' counts, as Android only ever reports that.
+    //  - The lock is only reported up to ~10 s after it happens (see
+    //    BluetoothVehicleDetection.swift), by which time the lock's own
+    //    'background' has opened a usage window. A window the lock report
+    //    closes within IOS_LOCK_REPORT_LAG_MS of its start was the lock
+    //    itself and is dropped, not counted.
+    const IOS_LOCK_REPORT_LAG_MS = 20000;
+    const isAppActive = (state: AppStateStatus) =>
+      (Platform.OS === 'ios' ? state !== 'background' : state === 'active');
+    let appActive = isAppActive(AppState.currentState);
     let screenInteractive = true;
     let usageStartedAt: number | null = null;
     let usageStartPoint: GpsPoint | null = null;
@@ -198,7 +212,7 @@ export function useHarshEventTracker(): void {
     };
 
     const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      appActive = state === 'active';
+      appActive = isAppActive(state);
       evaluatePhoneUsage();
     });
     let screenSubCancelled = false;
@@ -210,6 +224,12 @@ export function useHarshEventTracker(): void {
     const unsubscribeScreen = subscribeScreenInteractive((interactive) => {
       const wasInteractive = screenInteractive;
       screenInteractive = interactive;
+      if (Platform.OS === 'ios' && !interactive && usageStartedAt != null
+        && Date.now() - usageStartedAt <= IOS_LOCK_REPORT_LAG_MS) {
+        usageStartedAt = null;
+        usageStartPoint = null;
+        usageWasViolationEligible = false;
+      }
       evaluatePhoneUsage();
       // Unlocking the phone straight back into MAUD is handling too, and
       // the other-app check above can't see it (MAUD is the app on screen).
