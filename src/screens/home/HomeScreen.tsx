@@ -20,7 +20,7 @@ import {
 import {
   CarIcon, ChevronIcon, CheckCircleIcon,
   MedalIcon, PinIcon, GaugeIcon, LeafIcon,
-  RouteIcon, DollarIcon, GearIcon, SpeedometerIcon, UsersIcon, RefreshIcon, GlobeIcon,
+  RouteIcon, DollarIcon, GearIcon, SpeedometerIcon, UsersIcon, RefreshIcon, // GlobeIcon,
 } from '../../components/icons';
 import type { MainStackNavigationProp } from '../../types/navigation.types';
 import type { Vehicle } from '../../types/vehicle.types';
@@ -252,9 +252,11 @@ export default function HomeScreen() {
   }
 
   const features: FeatureItem[] = [
+    // Hidden for now — the web dashboard has purchases, withdrawals and chat
+    // the stores would review. To restore, uncomment this and GlobeIcon above.
     // The MAUD web dashboard (non-mobility data), opened in-app and already
     // signed in — see WebDashboardScreen.
-    { label: 'MAUD Dashboard', iconBg: '#1E3A5F', icon: <GlobeIcon />, onPress: () => navigation.navigate('WebDashboard') },
+    // { label: 'MAUD Dashboard', iconBg: '#1E3A5F', icon: <GlobeIcon />, onPress: () => navigation.navigate('WebDashboard') },
     { label: 'Rewards', iconBg: '#F5A623', icon: <MedalIcon />, onPress: () => navigation.navigate('Rewards') },
     { label: 'Drivers', iconBg: '#8B5CF6', icon: <UsersIcon />, onPress: () => navigation.navigate('Drivers') },
     { label: 'Route Planner', iconBg: TEAL, icon: <PinIcon />, onPress: () => navigation.navigate('RoutePlanner') },
