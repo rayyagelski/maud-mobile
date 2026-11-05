@@ -9,6 +9,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
 import { webLoginApi } from '../../api/endpoints/webLogin';
 import { logDiagnostic } from '../../services/diagnosticsLog';
+import { HIDE_WEB_CHAT_SCRIPT, isWebChatUrl } from '../../utils/webChatPolicy';
 
 // Plain dashboard URL — used when a one-time sign-in link can't be had
 // (offline, or a backend without the endpoint yet). The user then signs in
@@ -67,7 +68,7 @@ export default function WebDashboardScreen() {
   );
 
   const onShouldStartLoad = useCallback((req: ShouldStartLoadRequest) => {
-    if (isMaudUrl(req.url) || req.url === 'about:blank') return true;
+    if ((isMaudUrl(req.url) && !isWebChatUrl(req.url)) || req.url === 'about:blank') return true;
     Linking.openURL(req.url).catch(() => {});
     return false;
   }, []);
@@ -96,6 +97,7 @@ export default function WebDashboardScreen() {
           style={styles.webview}
           originWhitelist={['https://*']}
           onShouldStartLoadWithRequest={onShouldStartLoad}
+          injectedJavaScript={HIDE_WEB_CHAT_SCRIPT}
           onNavigationStateChange={(nav: WebViewNavigation) => setCanGoBack(nav.canGoBack)}
           onLoadStart={() => setLoading(true)}
           onLoadEnd={() => setLoading(false)}

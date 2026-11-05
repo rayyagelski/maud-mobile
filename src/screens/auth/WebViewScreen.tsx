@@ -5,11 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import BackArrowIcon from '../../components/common/BackArrowIcon';
+import { HIDE_WEB_CHAT_SCRIPT, isWebChatUrl } from '../../utils/webChatPolicy';
 
 // Registered under both AuthStackParamList and MainStackParamList with the
 // same param shape, so this is typed against that shared shape rather than
@@ -45,6 +47,12 @@ export default function WebViewScreen() {
         source={{ uri: url }}
         style={styles.webview}
         originWhitelist={['*']}
+        onShouldStartLoadWithRequest={(req) => {
+          if (!isWebChatUrl(req.url)) return true;
+          Linking.openURL(req.url).catch(() => {});
+          return false;
+        }}
+        injectedJavaScript={HIDE_WEB_CHAT_SCRIPT}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
       />
