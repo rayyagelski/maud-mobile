@@ -28,7 +28,6 @@
     "@react-navigation/stack": "7.6.12",
     "@reduxjs/toolkit": "2.11.2",
     "axios": "1.13.2",
-    "openai": "4.104.0",
     "react": "19.2.3",
     "react-native": "0.85.3",
     "react-native-background-geolocation": "^5.3.0",
