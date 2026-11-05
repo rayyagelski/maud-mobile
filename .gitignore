@@ -11,6 +11,8 @@ desktop.ini
 
 # Real API keys — see src/config/env.example.ts for the template
 src/config/env.ts
+# Same for iOS — see ios/MAUDConnect/Secrets.example.swift
+ios/MAUDConnect/Secrets.swift
 
 # VS Code
 .vscode/
