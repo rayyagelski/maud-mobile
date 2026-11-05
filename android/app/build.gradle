@@ -117,15 +117,26 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // The upload key and its password live only on the build machine
+        // (gitignored keystore + android/local.properties).
+        if (localProps.containsKey("MAUD_UPLOAD_STORE_FILE")) {
+            release {
+                storeFile file(localProps.getProperty("MAUD_UPLOAD_STORE_FILE"))
+                storePassword localProps.getProperty("MAUD_UPLOAD_STORE_PASSWORD")
+                keyAlias localProps.getProperty("MAUD_UPLOAD_KEY_ALIAS")
+                keyPassword localProps.getProperty("MAUD_UPLOAD_STORE_PASSWORD")
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Without the upload key this stays debug-signed, which Play rejects.
+            signingConfig localProps.containsKey("MAUD_UPLOAD_STORE_FILE") ? signingConfigs.release : signingConfigs.debug
+            // Every server the app talks to is https; only debug needs http (Metro).
+            manifestPlaceholders += [usesCleartextTraffic: "false"]
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
