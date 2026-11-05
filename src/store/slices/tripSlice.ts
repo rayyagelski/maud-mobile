@@ -591,6 +591,10 @@ const tripSlice = createSlice({
     clearTripError(state) {
       state.error = null;
     },
+    // Account deletion only — a plain logout deliberately leaves trips alone.
+    clearAllTrips() {
+      return initialState;
+    },
     // Backfills the score into an already-saved local trip once a queued
     // trip_reward sync item succeeds in the background (see syncEngine.ts).
     applySyncedTripReward(
@@ -706,6 +710,7 @@ export const {
   clearPendingStart,
   setPlannedRouteOnActiveTrip,
   clearTripError,
+  clearAllTrips,
   applySyncedTripReward,
   markVgdTripCreated,
   advanceVgdFlushProgress,

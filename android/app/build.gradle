@@ -95,7 +95,7 @@ android {
 
     namespace "com.maudconnect"
     defaultConfig {
-        applicationId "com.maudconnect"
+        applicationId "com.maud.connect"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

@@ -17,7 +17,7 @@ The backend list comes from the code and `.env.dist`. The live values on the pro
 | OpenWeather | `OPENWEATHER_API_KEY` …bb35 | Second weather source, alongside HERE (`weatherClient.ts`) | `src/config/env.ts` (not in git) | Confirm which source is primary |
 | Google Maps (Android) | `GOOGLE_MAPS_API_KEY` …ueDo | Map display on Android | `android/local.properties` (not in git) | Restrict to the Android app before release |
 | Google Maps (iOS) | `googleMapsApiKey` …t17s | Map display on iOS | `ios/MAUDConnect/Secrets.swift` (not in git; template in `Secrets.example.swift`) | **Replace:** this key is still in git history |
-| Transistorsoft | `BACKGROUND_GEOLOCATION_LICENSE` | Background GPS library. Debug builds run without a licence; release builds don't | Would go in `android/local.properties`; iOS `Info.plist` needs `TSLocationManagerLicense` | **Not bought. Blocks both stores** |
+| Transistorsoft | `BACKGROUND_GEOLOCATION_LICENSE` …ZAg (Android), `TSLocationManagerLicense` …DAQ (iOS) | Background GPS library. Debug builds run without a licence; release builds need it. Each key works only for `com.maud.connect` | Android: `android/local.properties` (not in git). iOS: `ios/MAUDConnect/Info.plist` (in git; the plugin reads it from there) | Licensed. Covers library versions released up to 5 Dec 2027 |
 | OpenStreetMap Overpass | none | Speed cameras, traffic lights and stop signs | No key | Public servers overloaded; lookups fail. Own hosted copy planned |
 | MAUD backend | user login token | Accounts, vehicles, rewards, drivers | Issued at login, kept in encrypted phone storage | Our service (`app.myautodata.com`) |
 | MAUD VGD service | user login token | Upload and read of trips and GPS points | Same | Our service (`vgd.myautodata.com/v1`) |
@@ -51,8 +51,8 @@ These aren't outside providers, but they must stay protected: `APP_SECRET`, `JWT
 | Item | Current value | Status |
 |---|---|---|
 | Apple Team ID | `Y36G4D4J9W` | Set in the Xcode project |
-| iOS bundle ID | `com.maud.maudconnect` | Set |
-| Android application ID | `com.maudconnect` | Set |
+| iOS bundle ID | `com.maud.connect` | Set. Old app: `com.maud.maudconnect` |
+| Android application ID | `com.maud.connect` | Set. The Kotlin code package stays `com.maudconnect` |
 | Android release signing key | none | **Must be created.** Release builds currently use the debug key |
 
 ## Clean-up needed

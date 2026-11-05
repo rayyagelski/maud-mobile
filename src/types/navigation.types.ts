@@ -48,6 +48,7 @@ export type MainStackParamList = {
   DriverScore: undefined;
   EcoScore: undefined;
   Settings: undefined;
+  DeleteAccount: undefined;
   Diagnostics: undefined;
 };
 

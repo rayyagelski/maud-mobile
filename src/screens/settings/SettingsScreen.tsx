@@ -143,6 +143,21 @@ export default function SettingsScreen() {
             </View>
           </TouchableOpacity>
         </View>
+
+        <Text style={[styles.sectionTitle, { marginTop: 20 }]}>ACCOUNT</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('DeleteAccount')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowText}>
+              <Text style={[styles.rowTitle, styles.dangerText]}>Delete Account</Text>
+              <Text style={styles.rowSubtitle}>
+                Permanently delete your account and all of its data.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -170,6 +185,7 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   rowSubtitle: { fontSize: 12, color: '#888', marginTop: 3, lineHeight: 16 },
+  dangerText: { color: '#D32F2F' },
 
   purposeRow: { flexDirection: 'row', columnGap: 8, marginTop: 12 },
   purposePill: {

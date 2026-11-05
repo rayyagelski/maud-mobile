@@ -79,7 +79,8 @@ client.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
     const errStatus = error?.response?.data?.status;
-    return Promise.reject({ status, errStatus, message: error.message });
+    const errMessage = error?.response?.data?.message;
+    return Promise.reject({ status, errStatus, errMessage, message: error.message });
   },
 );
 
