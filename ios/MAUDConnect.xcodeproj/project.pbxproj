@@ -10,9 +10,9 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		5B40F3A6308430C100FE5C66 /* BluetoothVehicleDetection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B40F3A5308430C100FE5C66 /* BluetoothVehicleDetection.swift */; };
 		5B40F3A7308430C100FE5C66 /* BluetoothVehicleDetection.m in Sources */ = {isa = PBXBuildFile; fileRef = 5B40F3A4308430C100FE5C66 /* BluetoothVehicleDetection.m */; };
+		5B40F3A9308430D000FE5C66 /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B40F3AA308430D000FE5C66 /* Secrets.swift */; };
 		5FA7C11D4266FCCBFC4E1FE4 /* libPods-MAUDConnect.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7DC14AB1143AFCA5E78AA2FA /* libPods-MAUDConnect.a */; };
 		685EF1C3D17B96676392D3BF /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
-		5B40F3A9308430D000FE5C66 /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B40F3AA308430D000FE5C66 /* Secrets.swift */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 /* End PBXBuildFile section */
@@ -203,13 +203,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-MAUDConnect/Pods-MAUDConnect-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-MAUDConnect/Pods-MAUDConnect-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -224,13 +220,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-MAUDConnect/Pods-MAUDConnect-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-MAUDConnect/Pods-MAUDConnect-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
