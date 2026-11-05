@@ -377,8 +377,8 @@ export function useTripAutoDetection() {
       logDiagnostic('Bluetooth device connected.', { name });
       forceGpsOnForCar('bt-connected');
     });
-    const unsubDisconnect = subscribeBluetoothDeviceDisconnected(() => {
-      logDiagnostic('Bluetooth device disconnected.', { wasTracking: isTrackingRef.current });
+    const unsubDisconnect = subscribeBluetoothDeviceDisconnected((_name, route) => {
+      logDiagnostic('Bluetooth device disconnected.', { wasTracking: isTrackingRef.current, route });
       connectedBluetoothDeviceRef.current = null;
       if (forcedMovingRef.current && !isTrackingRef.current) {
         // Car's off — hand the SDK back to its own stationary detection

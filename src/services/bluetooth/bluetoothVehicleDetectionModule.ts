@@ -14,6 +14,8 @@ interface BluetoothVehicleDetectionNativeModule {
   startScreenStateUpdates(): void;
   isScreenInteractive(): Promise<boolean>;
   isMediaAudioOnBluetooth?(): Promise<boolean>;
+  beginSpeechAudio?(): Promise<boolean>;
+  endSpeechAudio?(): void;
   getBackgroundRestrictions(): Promise<BackgroundRestrictions>;
   startNetworkStatusUpdates(): void;
   requestIgnoreBatteryOptimizations(): Promise<boolean>;
@@ -115,6 +117,23 @@ export async function isMediaAudioOnBluetooth(): Promise<boolean> {
   }
 }
 
+// iOS only: moves audio to the phone's speaker for spoken announcements, and
+// back when the queue is empty — see beginSpeechAudio in
+// BluetoothVehicleDetection.swift. Resolves false if the speaker couldn't be
+// forced; true where there's nothing to do (Android, module not linked).
+export async function beginSpeechAudio(): Promise<boolean> {
+  if (!nativeModule?.beginSpeechAudio) return true;
+  try {
+    return await nativeModule.beginSpeechAudio();
+  } catch {
+    return false;
+  }
+}
+
+export function endSpeechAudio(): void {
+  nativeModule?.endSpeechAudio?.();
+}
+
 // Android restrictions that block the app's network while it's in the
 // background — see BluetoothVehicleDetectionModule.kt. 'enabled' dataSaver
 // means THIS app is restricted on mobile data in the background (Data Saver
@@ -183,10 +202,13 @@ export function subscribeScreenInteractive(listener: (interactive: boolean) => v
   return () => subscription.remove();
 }
 
-export function subscribeBluetoothDeviceDisconnected(listener: DeviceNameListener): () => void {
+// route: what the phone's audio went to instead of the car (iOS only).
+export function subscribeBluetoothDeviceDisconnected(
+  listener: (deviceName: string | null, route?: string) => void,
+): () => void {
   if (!emitter) return () => {};
-  const subscription = emitter.addListener('onBluetoothDeviceDisconnected', (event: { deviceName: string | null }) =>
-    listener(event.deviceName),
+  const subscription = emitter.addListener('onBluetoothDeviceDisconnected', (event: { deviceName: string | null; route?: string }) =>
+    listener(event.deviceName, event.route),
   );
   return () => subscription.remove();
 }

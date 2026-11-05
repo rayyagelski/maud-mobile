@@ -1,27 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
 import Tts from 'react-native-tts';
 import { logDiagnostic } from '../services/diagnosticsLog';
-import { isMediaAudioOnBluetooth } from '../services/bluetooth/bluetoothVehicleDetectionModule';
+import { beginSpeechAudio, endSpeechAudio, isMediaAudioOnBluetooth } from '../services/bluetooth/bluetoothVehicleDetectionModule';
 
 // getInitStatus() only needs to resolve once per app session — cached across
 // hook instances so every screen using voice playback doesn't re-trigger it.
 let ttsReady: Promise<void> | null = null;
 function ensureTtsReady(): Promise<void> {
   if (!ttsReady) {
-    ttsReady = Tts.getInitStatus()
-      // iOS: without this react-native-tts leaves the app's audio session on
-      // its default category, which the ring/silent switch mutes and which
-      // can't play from the background — so on a drive (phone on silent,
-      // or locked in the holder) the engine "spoke" every announcement and
-      // nothing was heard. 'ignore' switches to the playback category in
-      // voice-prompt mode (plays with the switch on silent, goes to the car
-      // over Bluetooth, mixes with the driver's music); the "audio"
-      // background mode in Info.plist lets it play while the screen is
-      // locked. No-op on Android.
-      .then(() => (Platform.OS === 'ios' ? Tts.setIgnoreSilentSwitch('ignore') : undefined))
-      .then(() => undefined)
-      .catch(() => undefined);
+    ttsReady = Tts.getInitStatus().then(() => undefined).catch(() => undefined);
   }
   return ttsReady;
 }
@@ -63,7 +50,7 @@ let current: {
 // Every spoken message gets ONE log line when it ends (how, after how long,
 // how long it waited) so a drive's Diagnostics log shows whether an
 // announcement was actually spoken and finished, not just triggered —
-// without crowding other entries out of the 100-entry log.
+// without crowding other entries out of the log.
 function logText(text: string): string {
   return text.length > 70 ? `${text.slice(0, 70)}…` : text;
 }
@@ -84,6 +71,12 @@ function notifySpeaking(speaking: boolean) {
 // media goes to Bluetooth, the voice is played on the alarm channel: Android
 // always plays that on the phone's own speaker (and on the car as well).
 // Without Bluetooth media nothing changes — media channel and volume as before.
+//
+// iOS: the same preference — always the phone, never the car — but it has no
+// alarm channel, so each run of messages switches the audio to the phone's
+// speaker (beginSpeechAudio) and back (endSpeechAudio). That also makes the
+// voice play with the silent switch on; the "audio" background mode in
+// Info.plist lets it play while the screen is locked.
 export function speechOptionsFor(mediaAudioOnBluetooth: boolean): { androidParams?: { KEY_PARAM_STREAM: 'STREAM_ALARM' } } {
   return mediaAudioOnBluetooth ? { androidParams: { KEY_PARAM_STREAM: 'STREAM_ALARM' } } : {};
 }
@@ -91,16 +84,17 @@ export function speechOptionsFor(mediaAudioOnBluetooth: boolean): { androidParam
 function play(message: QueuedMessage) {
   const playing = {
     priority: message.priority, text: message.text, id: null as string | null,
-    startedAt: Date.now(), waitedMs: Date.now() - message.queuedAt, route: 'phone' as 'phone' | 'phone speaker (alarm channel)',
+    startedAt: Date.now(), waitedMs: Date.now() - message.queuedAt, route: 'phone' as 'phone' | 'phone speaker (alarm channel)' | 'speaker not forced',
   };
   current = playing;
   if (watchdog) clearTimeout(watchdog);
   watchdog = setTimeout(() => onUtteranceDone('no end reported by speech engine'), estimatedDurationMs(message.text));
-  isMediaAudioOnBluetooth()
-    .then((onBluetooth) => {
+  Promise.all([isMediaAudioOnBluetooth(), beginSpeechAudio()])
+    .then(([onBluetooth, onPhoneSpeaker]) => {
       // Interrupted by a more urgent message while the check ran.
       if (current !== playing) return undefined;
       if (onBluetooth) playing.route = 'phone speaker (alarm channel)';
+      if (!onPhoneSpeaker) playing.route = 'speaker not forced';
       return Tts.speak(message.text, speechOptionsFor(onBluetooth) as never) as unknown as Promise<string | number>;
     })
     .then((id) => { if (id != null && current === playing) playing.id = String(id); })
@@ -123,6 +117,7 @@ function playNext() {
       text: logText(next.text), priority: next.priority, how: 'dropped, waited too long', waitedMs: now - next.queuedAt,
     });
   }
+  endSpeechAudio();
   notifySpeaking(false);
 }
 

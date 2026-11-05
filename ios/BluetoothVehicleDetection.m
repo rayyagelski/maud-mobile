@@ -11,5 +11,7 @@ RCT_EXTERN_METHOD(startScreenStateUpdates)
 RCT_EXTERN_METHOD(isScreenInteractive:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(getBackgroundRestrictions:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(startNetworkStatusUpdates)
+RCT_EXTERN_METHOD(beginSpeechAudio:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(endSpeechAudio)
 
 @end

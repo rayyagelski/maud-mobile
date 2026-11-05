@@ -9,8 +9,9 @@ export interface DiagnosticLogEntry {
 
 const STORAGE_KEY = 'diagnosticsLog';
 // Capped so a long drive with a persistently-blocked gate (logging on every
-// qualifying fix) can't grow this unbounded in AsyncStorage.
-const MAX_ENTRIES = 100;
+// qualifying fix) can't grow this unbounded in AsyncStorage. Sized for a few
+// drives: at 100 a later drive had already pushed out the one reported.
+const MAX_ENTRIES = 300;
 
 let entries: DiagnosticLogEntry[] = [];
 const listeners = new Set<(entries: DiagnosticLogEntry[]) => void>();
