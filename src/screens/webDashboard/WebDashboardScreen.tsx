@@ -28,7 +28,7 @@ function isMaudUrl(url: string): boolean {
 /**
  * The MAUD web dashboard (non-mobility data: documents, invoices, profile,
  * marketplace…) inside the app, already signed in via a one-time login link.
- * Returning to MAUD Connect is the header's back arrow; Android's back
+ * Returning to MAUD Mobility is the header's back arrow; Android's back
  * button steps back through web pages first.
  */
 export default function WebDashboardScreen() {
@@ -83,7 +83,7 @@ export default function WebDashboardScreen() {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <BackArrowIcon size={22} color={TEAL} />
-            <Text style={styles.backLabel}>MAUD Connect</Text>
+            <Text style={styles.backLabel}>MAUD Mobility</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>MAUD Dashboard</Text>
           <View style={styles.headerSpacer} />

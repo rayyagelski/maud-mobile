@@ -1,8 +1,8 @@
-# MAUD Connect: APIs and Keys
+# MAUD Mobility: APIs and Keys
 
 Last reviewed: 5 November 2026
 
-This lists every outside service used by the MAUD Connect app and the MAUD backend. Key values are masked to their last 4 characters. The "Where the full value is" column shows where to find each one. Don't paste full keys into this file.
+This lists every outside service used by the MAUD Mobility app and the MAUD backend. Key values are masked to their last 4 characters. The "Where the full value is" column shows where to find each one. Don't paste full keys into this file.
 
 The backend list comes from the code and `.env.dist`. The live values on the production server weren't opened, so a listed key may be unset or unused on production.
 

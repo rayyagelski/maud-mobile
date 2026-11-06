@@ -193,7 +193,7 @@ export default function HomeScreen() {
   function handleAvatarPress() {
     const pending = store.getState().syncQueue.items.length;
     if (pending === 0) {
-      Alert.alert('Log out', 'Log out of MAUD Connect?', [
+      Alert.alert('Log out', 'Log out of MAUD Mobility?', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Log Out', style: 'destructive', onPress: () => dispatch(logout()) },
       ]);

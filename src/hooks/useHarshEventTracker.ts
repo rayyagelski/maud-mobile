@@ -138,7 +138,7 @@ export function useHarshEventTracker(): void {
       // of the span being driven (speedingSecondsForFix).
     });
 
-    // Phone-usage proxy: time spent with MAUD Connect backgrounded during an
+    // Phone-usage proxy: time spent with MAUD Mobility backgrounded during an
     // active trip (not "app active" — the app itself is likely foregrounded
     // for turn-by-turn use, so that would never fire). Approximates a driver
     // switching away to another app; won't catch in-app-foreground distraction.

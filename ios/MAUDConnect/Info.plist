@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>MAUD Connect</string>
+	<string>MAUD Mobility</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,13 +34,13 @@
 		<true/>
 	</dict>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>MAUD Connect needs background location access to log trips automatically.</string>
+	<string>MAUD Mobility needs background location access to log trips automatically.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>MAUD Connect needs your location to track trips and show your position on the map.</string>
+	<string>MAUD Mobility needs your location to track trips and show your position on the map.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MAUD Connect does not record audio. iOS requires this entry so voice announcements can play on the phone speaker while connected to your car.</string>
+	<string>MAUD Mobility does not record audio. iOS requires this entry so voice announcements can play on the phone speaker while connected to your car.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>MAUD Connect uses motion sensors to detect driving behaviour and score your trips.</string>
+	<string>MAUD Mobility uses motion sensors to detect driving behaviour and score your trips.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>TSLocationManagerLicense</key>

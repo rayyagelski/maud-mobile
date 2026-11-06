@@ -153,7 +153,7 @@ function askToResetLocalData(failedLaunches: number): Promise<boolean> {
       // returns can't hold startup either.
       timeout = setTimeout(() => answer(false), RECOVERY_PROMPT_TIMEOUT_MS);
       Alert.alert(
-        'MAUD Connect didn\'t start correctly',
+        'MAUD Mobility didn\'t start correctly',
         `The app got stuck while starting the last ${failedLaunches} times. Resetting its local data usually fixes this `
           + 'without reinstalling.\n\nYour recorded trips are kept on the server and come back automatically. '
           + 'You\'ll stay logged in, but you may need to pair your car again.\n\n'

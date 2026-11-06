@@ -48,13 +48,19 @@ export default function LocationPermissionScreen() {
 
     await waitForActivityFocus();
 
-    await new Promise<void>((resolve) => {
+    // Google Play's prominent disclosure: says what is collected and that it
+    // happens with the app closed, and has to be accepted before the OS prompt.
+    const accepted = await new Promise<boolean>((resolve) => {
       Alert.alert(
         'Track Trips in the Background',
-        'To keep recording your trip while your phone is locked or in your pocket, MAUD Connect needs "Allow all the time" location access. Without this, trips will only be tracked while the app is open on screen.',
-        [{ text: 'Continue', onPress: () => resolve() }],
+        'MAUD Mobility collects location data to record your trips automatically, even when the app is closed or not in use. This needs "Allow all the time" location access. Without it, trips are only tracked while the app is open on screen.',
+        [
+          { text: 'Not Now', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Continue', onPress: () => resolve(true) },
+        ],
       );
     });
+    if (!accepted) return;
 
     try {
       const result = await request(permission);
@@ -111,7 +117,7 @@ export default function LocationPermissionScreen() {
       await new Promise<void>((resolve) => {
         Alert.alert(
           'Keep Trip Tracking Running',
-          'Some phones stop apps running in the background to save battery, which can cut a trip recording short. Allow MAUD Connect to run without battery restrictions to keep tracking reliable for your whole drive.',
+          'Some phones stop apps running in the background to save battery, which can cut a trip recording short. Allow MAUD Mobility to run without battery restrictions to keep tracking reliable for your whole drive.',
           [{ text: 'Continue', onPress: () => resolve() }],
         );
       });
@@ -147,7 +153,7 @@ export default function LocationPermissionScreen() {
       await new Promise<void>((resolve) => {
         Alert.alert(
           'Connect to Your Car Automatically',
-          "MAUD Connect uses Bluetooth to detect the moment your phone connects to your car's audio system, so trip recording can start automatically when you drive — you won't need to open the app or tap anything.",
+          "MAUD Mobility uses Bluetooth to detect the moment your phone connects to your car's audio system, so trip recording can start automatically when you drive — you won't need to open the app or tap anything.",
           [{ text: 'Continue', onPress: () => resolve() }],
         );
       });
@@ -175,7 +181,7 @@ export default function LocationPermissionScreen() {
     await new Promise<void>((resolve) => {
       Alert.alert(
         'Telling Driving Apart from Walking',
-        "Android will also ask to let MAUD Connect check your phone's activity type. This isn't fitness tracking — it's what lets automatic trip detection tell a real drive apart from walking or cycling, so it doesn't start or stop recording at the wrong time.",
+        "Android will also ask to let MAUD Mobility check your phone's activity type. This isn't fitness tracking — it's what lets automatic trip detection tell a real drive apart from walking or cycling, so it doesn't start or stop recording at the wrong time.",
         [{ text: 'Continue', onPress: () => resolve() }],
       );
     });

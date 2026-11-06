@@ -1204,7 +1204,7 @@ export function useTripAutoDetection() {
         // it's checked.
         heartbeatInterval: 60,
         notification: {
-          title: 'MAUD Connect',
+          title: 'MAUD Mobility',
           text: 'Tracking your trip',
         },
       },

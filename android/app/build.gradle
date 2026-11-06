@@ -98,7 +98,7 @@ android {
         applicationId "com.maud.connect"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 4
         versionName "1.0"
         manifestPlaceholders = [
             googleMapsApiKey: localProps.getProperty("GOOGLE_MAPS_API_KEY", ""),

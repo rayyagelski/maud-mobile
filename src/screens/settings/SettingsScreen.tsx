@@ -120,7 +120,7 @@ export default function SettingsScreen() {
                   <Text style={styles.rowTitle}>Improve background tracking</Text>
                   <Text style={styles.rowSubtitle}>
                     If trips stop recording or the app closes on its own while driving, open your
-                    phone's power-saving settings and allow MAUD Connect to run unrestricted.
+                    phone's power-saving settings and allow MAUD Mobility to run unrestricted.
                   </Text>
                 </View>
               </TouchableOpacity>

@@ -238,7 +238,7 @@ export default function WelcomeScreen() {
         <View style={styles.descRow}>
           <PersonIcon color={TEAL} size={24} />
           <Text style={styles.descText}>
-            MAUD Connect is an integral part of the privacy-first MAUD platform. Registration and
+            MAUD Mobility is an integral part of the privacy-first MAUD platform. Registration and
             some initial profile and vehicle information are required to personalize your AI
             co-pilot and deliver the best experience.
           </Text>

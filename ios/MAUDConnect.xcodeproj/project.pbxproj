@@ -280,7 +280,7 @@
 				DEVELOPMENT_TEAM = Y36G4D4J9W;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = MAUDConnect/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = DAUD;
+				INFOPLIST_KEY_CFBundleDisplayName = "MAUD Mobility";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -315,7 +315,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Y36G4D4J9W;
 				INFOPLIST_FILE = MAUDConnect/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = DAUD;
+				INFOPLIST_KEY_CFBundleDisplayName = "MAUD Mobility";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

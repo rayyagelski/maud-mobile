@@ -173,14 +173,16 @@ export default function VehicleListScreen() {
             </TouchableOpacity>
           );
         }}
-        ListFooterComponent={
-          <Button
-            title="Add New Vehicle"
-            onPress={() => navigation.navigate('AddVehicle')}
-            variant="secondary"
-            style={{ marginTop: 8 }}
-          />
-        }
+        // Hidden for now — it opens the live website, whose menu leads to
+        // purchases the stores would review. Uncomment to restore.
+        // ListFooterComponent={
+        //   <Button
+        //     title="Add New Vehicle"
+        //     onPress={() => navigation.navigate('AddVehicle')}
+        //     variant="secondary"
+        //     style={{ marginTop: 8 }}
+        //   />
+        // }
       />
 
       <Modal

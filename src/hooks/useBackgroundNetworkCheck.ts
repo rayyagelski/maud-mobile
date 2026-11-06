@@ -79,7 +79,7 @@ export function useBackgroundNetworkCheck(): void {
       if (tracking && status === 'blocked' && !tripLoggedBlocked) {
         tripLoggedBlocked = true;
         logDiagnostic('Network blocked by Android during a trip.', {
-          meaning: 'Android is blocking MAUD Connect\'s internet access (speed zones and live upload stop)',
+          meaning: 'Android is blocking MAUD Mobility\'s internet access (speed zones and live upload stop)',
         });
         return;
       }
@@ -92,8 +92,8 @@ export function useBackgroundNetworkCheck(): void {
         logged += 1;
         logDiagnostic('Network status (Android).', {
           status,
-          meaning: status === 'blocked' ? 'Android is blocking MAUD Connect\'s internet access'
-            : status === 'allowed' ? 'Android allows MAUD Connect\'s internet access again'
+          meaning: status === 'blocked' ? 'Android is blocking MAUD Mobility\'s internet access'
+            : status === 'allowed' ? 'Android allows MAUD Mobility\'s internet access again'
               : status === 'lost' ? 'phone has no connection' : 'phone connected',
         });
         return;
@@ -153,8 +153,8 @@ export function useBackgroundNetworkCheck(): void {
       const useBatteryPrompt = batteryOptimized && !dataBlocked && !batteryRestricted;
 
       Alert.alert(
-        'Allow MAUD Connect to use data in the background',
-        'Your phone is blocking MAUD Connect\'s internet access while the screen is off. '
+        'Allow MAUD Mobility to use data in the background',
+        'Your phone is blocking MAUD Mobility\'s internet access while the screen is off. '
           + 'Trips still record, but speed zone alerts can\'t work and trip data only uploads once you open the app.\n\n'
           + (useBatteryPrompt ? 'Please allow it to run without battery restrictions.' : `In the next screen:\n${steps.join('\n')}`),
         [

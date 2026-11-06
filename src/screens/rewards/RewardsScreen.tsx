@@ -293,7 +293,7 @@ export default function RewardsScreen() {
     if (!currentMonth) return;
     const tierLabel = STATUS_META[currentMonth.status].label;
     Share.share({
-      message: `I'm a ${tierLabel} on MAUD Connect this month — ${earnedPointsThisMonth(currentMonth)} points earned! 🏆`,
+      message: `I'm a ${tierLabel} on MAUD Mobility this month — ${earnedPointsThisMonth(currentMonth)} points earned! 🏆`,
     });
   }
 
